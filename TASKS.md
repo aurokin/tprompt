@@ -15,8 +15,12 @@ Tasks:
   - tmux adapter
   - daemon/queue
   - config
+  - clipboard reader
+  - sanitizer
+  - TUI
+  - keybind resolver
 - add formatter/linter/test scaffolding
-- add fixture prompt files for tests
+- add fixture prompt files for tests (including ones with `key:` frontmatter and sanitize-relevant content)
 
 Read first:
 
@@ -27,7 +31,7 @@ Read first:
 
 ## Phase 1 — prompt discovery and resolution
 
-Goal: make prompt IDs resolvable from markdown files.
+Goal: make prompt IDs resolvable from markdown files, with keybind validation.
 
 Tasks:
 
@@ -35,11 +39,13 @@ Tasks:
 - accept `.md` files only for MVP
 - derive ID from filename stem
 - detect duplicate stems
-- parse optional frontmatter
+- parse optional frontmatter (`title`, `description`, `tags`, `mode`, `enter`, `key`)
+- validate `key:` values (duplicate / reserved / malformed → hard error)
 - expose APIs:
   - list prompts
   - resolve prompt by ID
   - return body + metadata + source path
+  - resolve final keybind assignment (frontmatter + auto-assign from pool)
 
 Read first:
 
@@ -56,8 +62,8 @@ Tasks:
 - `tprompt list`
 - `tprompt show <id>`
 - `tprompt send <id>`
-- `tprompt doctor`
-- basic output formatting and exit codes
+- `tprompt doctor` (including duplicate-keybind checks)
+- basic output formatting and exit codes (including cancel = 0)
 
 Read first:
 
@@ -76,14 +82,34 @@ Tasks:
 - implement pane existence checks
 - implement selected-pane checks
 - implement capture-pane helper
-- implement paste delivery
-- implement type delivery
+- implement paste delivery: `load-buffer` + `paste-buffer -d -p` with separate `send-keys Enter` when `--enter`
+- implement type delivery: `send-keys -l` with rune-boundary chunking
+- implement `display-message` error surfacing with `-c <client-tty>` scoping
 
 Read first:
 
 - `docs/tmux/integration.md`
+- `docs/tmux/delivery.md`
 - `docs/tmux/verification.md`
 - `docs/implementation/interfaces.md`
+
+## Phase 3.5 — clipboard reader and sanitizer
+
+Goal: add the two content-source/transformation modules needed for paste and strict-mode workflows.
+
+Tasks:
+
+- implement `ClipboardReader` with auto-detect (pbpaste, wl-paste, xclip, xsel) and command override
+- implement `doctor` reporting for clipboard reader resolution
+- implement `Sanitizer` with `off`/`safe`/`strict` modes
+- test sanitizer against fixture corpus covering each escape-sequence class
+- wire both into `tprompt send` and the future `tprompt paste`
+
+Read first:
+
+- `docs/storage/clipboard.md`
+- `docs/implementation/sanitization.md`
+- `docs/implementation/error-handling.md`
 
 ## Phase 4 — daemon and job queue
 
@@ -93,10 +119,13 @@ Tasks:
 
 - create a per-user daemon
 - define local socket path
-- define job payload
+- define job payload (including `source`, `sanitize_mode`, and captured clipboard bytes when applicable)
 - enqueue send jobs
+- implement replace-same-target semantics
 - validate target pane before execution
+- run sanitizer immediately before adapter delivery
 - return structured success/failure to the CLI
+- surface failures via `tmux display-message` + append-only log
 
 Read first:
 
@@ -105,25 +134,55 @@ Read first:
 - `docs/architecture/data-model.md`
 - `docs/implementation/error-handling.md`
 
-## Phase 5 — popup flow
+## Phase 5 — popup flow and built-in TUI
 
 Goal: make popup usage the best experience.
 
-Tasks:
+### Phase 5a — popup shell
 
-- implement `tprompt popup`
+- implement `tprompt popup` command
 - capture original pane/client/session context
-- launch picker
-- submit job to daemon
-- exit popup process cleanly
-- daemon waits for verification condition
-- daemon injects after popup closes and target is valid
+- wire to the built-in TUI
+- submit job to daemon based on TUI result
+- exit popup process cleanly (cancel = exit 0)
+
+### Phase 5b — built-in TUI
+
+- render three-column row layout (`[key]  id  description`)
+- soft-truncate description with ellipsis
+- fall back `description → title → blank`
+- render reserved-key hints in footer
+- handle single-key prompt selection
+- handle `P` for clipboard (read-on-keypress, validate, submit)
+- handle `/`-search with fuzzy matching over id + title + description + tags
+- handle `Esc` cancel and `Esc` exit-search
+- handle overflow (search-only, not on board)
+- inline error display on clipboard validation failure
 
 Read first:
 
 - `docs/commands/popup-flow.md`
+- `docs/commands/popup-ui.md`
 - `docs/tmux/verification.md`
 - `examples/tmux-bindings.md`
+
+## Phase 5.5 — `tprompt paste`
+
+Goal: dedicated clipboard-delivery command, synchronous, no daemon.
+
+Tasks:
+
+- implement `tprompt paste` command with `--target-pane`, `--mode`, `--enter`, `--sanitize` flags
+- read clipboard via the configured reader
+- validate (empty / UTF-8 / size cap)
+- run sanitizer
+- deliver via tmux adapter
+
+Read first:
+
+- `docs/commands/paste.md`
+- `docs/storage/clipboard.md`
+- `docs/tmux/delivery.md`
 
 ## Phase 6 — tests and hardening
 
@@ -132,11 +191,15 @@ Goal: make failures explicit and predictable.
 Tasks:
 
 - complete unit tests for store/config/daemon payload validation
-- add tests for duplicate prompt IDs
-- add tests for body/frontmatter behavior
-- add tests for CLI exit codes
-- add fake/mock tmux adapter tests
-- document known limitations clearly
+- add tests for duplicate prompt IDs and duplicate/reserved/malformed keybinds
+- add tests for body/frontmatter behavior including `key:` field
+- add tests for fuzzy search ranking
+- add tests for sanitizer corpus across all three modes
+- add tests for clipboard reader detection and override
+- add tests for CLI exit codes (including cancel = 0)
+- add fake/mock tmux adapter tests for paste + type command construction
+- add TUI rendering tests
+- document known limitations clearly (same-host clipboard, no modifier keybinds, no live clipboard preview)
 
 Read first:
 
@@ -152,8 +215,8 @@ Tasks:
 
 - improve `doctor`
 - improve help text
-- improve prompt list/show formatting
-- support configurable picker command if desired
+- improve prompt list/show formatting (show resolved keybind)
+- support configurable picker command if desired (for `tprompt pick` only)
 - refine logs and daemon status output
 
 Read first:
@@ -171,6 +234,9 @@ Do not implement during MVP unless explicitly requested:
 - richer verification strategies
 - remote sending
 - GUI or web layer
+- modifier-key combos for popup keybinds
+- live clipboard preview in popup
+- cross-host clipboard
 
 See:
 

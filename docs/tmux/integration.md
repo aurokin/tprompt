@@ -1,6 +1,6 @@
 # Tmux Integration
 
-This file describes the tmux-facing responsibilities of `tprompt`.
+Conceptual responsibilities of the tmux adapter. Concrete command construction (flag choices, chunking, Enter placement) lives in `docs/tmux/delivery.md`.
 
 ## Tmux assumptions for MVP
 
@@ -10,7 +10,7 @@ This file describes the tmux-facing responsibilities of `tprompt`.
 
 ## Required tmux operations
 
-The tmux adapter should centralize operations like:
+The tmux adapter centralizes operations like:
 
 - determine current pane ID
 - determine current session/window when helpful
@@ -20,6 +20,7 @@ The tmux adapter should centralize operations like:
 - load buffer for paste
 - paste buffer into pane
 - send literal keys to pane
+- post `display-message` errors to the originating client
 
 ## Why centralization matters
 
@@ -27,26 +28,13 @@ Tmux command invocation is a major source of fragility. One adapter reduces dupl
 
 ## Delivery modes
 
-### Paste mode
+See `docs/tmux/delivery.md` for the full mechanics. Short version:
 
-Recommended default.
+- **`paste` (default)** — bracketed paste via `load-buffer` + `paste-buffer -p`. Enter (if requested) fires as a separate `send-keys` call **outside** the wrapper.
+- **`type` (fallback)** — literal keystrokes via `send-keys -l`, with chunking for large payloads.
 
-Expected behavior:
+Neither mode guarantees semantic success in the target application. See `docs/tmux/verification.md` for the boundary between "delivery happened" and "the app interpreted it correctly."
 
-- create/load tmux buffer
-- paste buffer into target pane
-- optionally send Enter
+## Error surfacing
 
-### Type mode
-
-Fallback behavior.
-
-Expected behavior:
-
-- send literal text in a safe way
-- chunk if necessary
-- optionally send Enter
-
-## Notes on post-delivery behavior
-
-`tprompt` should not assume that a successful tmux send means the target application interpreted the prompt meaningfully. That is outside MVP scope.
+The adapter is responsible for running `tmux display-message` when the daemon asks it to surface a failure. Message text is provided by the caller; the adapter handles the `-c <client-tty>` scoping when available.

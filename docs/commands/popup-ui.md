@@ -1,0 +1,100 @@
+# Popup TUI
+
+The popup is a **built-in** interactive terminal UI. It is not a thin wrapper around an external picker. `picker_command` in config is a separate mechanism used only by `tprompt pick` (see `cli.md`).
+
+This file describes what the TUI renders and how keybinds behave. For the end-to-end popup delivery flow (daemon handoff, verification, injection) see `docs/commands/popup-flow.md`.
+
+## Layout
+
+The TUI renders a compact board inside the tmux popup. Each prompt shown on the board is a single row:
+
+```
+[key]  id                description
+```
+
+- **key** — single printable character; always present on the board
+- **id** — filename stem
+- **description** — soft-truncated with ellipsis to fit the current terminal width; fallback order `description → title → blank`
+
+Example:
+
+```
+[P]  clipboard            (read on select)
+[1]  code-review          Review for correctness, risk, and missing tests
+[2]  commit               Generate a conventional commit message
+[3]  deploy-checklist     Preflight checks before prod push
+[q]  quick-hack           Short quick prompt
+[c]  code-merge           Merge review prompt
+```
+
+The clipboard row is **always first** and is pinned. It has no description content; it may render a short hint such as `(read on select)`.
+
+## Reserved keys
+
+| Key | Behavior | Default | Reconfigurable |
+|---|---|---|---|
+| `P` | Read clipboard and deliver | yes | yes |
+| `/` | Enter search mode | yes | yes |
+| `Esc` | Cancel and close popup (exit 0) | yes | yes |
+| `Enter` | Deliver the currently highlighted row | yes | yes |
+
+Reserved keys are overridable via `[reserved_keys]` in `config.toml`.
+
+## Keybind assignment
+
+Keys are assigned to prompts in two stages:
+
+1. **Frontmatter-declared.** A prompt with `key: c` in YAML frontmatter gets exactly that character.
+2. **Auto-assigned from the pool** `1 2 3 4 5 q e r f g t z x c` (in that order) for prompts that did not declare `key:`. Assignment scan order is **alphabetical by prompt `id`**.
+
+Matching is **case-insensitive** — `c` and `C` are the same key.
+
+Overflow: once the auto-assign pool is exhausted and frontmatter keys are satisfied, remaining prompts are **not shown on the board**. They are reachable only via `/`-search.
+
+### Collisions (hard errors at load time)
+
+- two prompts declaring the same `key:`
+- a prompt declaring a reserved key (e.g., `key: P` when `P` is reserved for clipboard)
+- a malformed `key:` value (empty string, multi-character, non-printable, modifier combo)
+
+These surface in `tprompt doctor` and cause `tprompt list|show|send|popup` to fail.
+
+## Search mode
+
+Triggered by `/`. All prompts (including overflow) are searchable — search is the complete-catalog view.
+
+- **Matching:** fuzzy (fzf-style). Typing `cmv` matches `code-merge-verification`.
+- **Scope:** `id + title + description + tags`. Body content is **not** indexed.
+- **Ranking:** `id` match beats `title` match beats `description` match beats `tags` match. Within the same field, tighter/earlier matches rank higher.
+- **Exit search:** `Esc` to leave search and return to the board.
+- **Select in search:** `Enter` delivers the highlighted match.
+
+## Clipboard row behavior
+
+- Clipboard is **not** read when the popup opens. No preview text, no size count.
+- When the user presses `P` (or whatever the reserved clipboard key is):
+  1. Popup invokes the clipboard reader.
+  2. Popup validates content (empty / non-UTF-8 / size cap).
+  3. On validation failure, the popup shows an **inline error** in the footer and stays open so the user can choose something else.
+  4. On success, the popup submits a `DeliveryRequest` with `source = clipboard` to the daemon and exits.
+
+## Footer / status line
+
+The popup renders a single-line footer showing context-sensitive hints:
+
+- board view: `[/ search]  [Esc cancel]`
+- search view: `/query    [Esc exit search]  [Enter select]`
+- error view: `clipboard is empty — choose another option  [Esc cancel]`
+
+## Scrolling
+
+If the board (frontmatter-declared + auto-assigned rows + clipboard) exceeds the popup height, vertical scrolling is permitted with `↑`/`↓` but single-key selection continues to work regardless of scroll position.
+
+Overflow rows (those past the auto-assign pool) are not visible in the board even with scrolling.
+
+## Non-goals
+
+- modifier-key combos for keybinds (MVP is single printable char only)
+- live preview of clipboard content (read-on-select only)
+- inline prompt editing
+- re-ordering the board at runtime

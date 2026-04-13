@@ -18,7 +18,7 @@ deep-review
 
 Optional later enhancement:
 
-- include path or title in verbose mode
+- include path, title, or resolved keybind in verbose mode
 
 ### `tprompt show <id>`
 
@@ -28,7 +28,7 @@ Recommended default output:
 
 - prompt ID
 - source file path
-- metadata summary if present
+- metadata summary (title, description, tags, resolved keybind) if present
 - body
 
 ### `tprompt send <id>`
@@ -40,27 +40,42 @@ Flags for MVP:
 - `--mode paste|type`
 - `--enter`
 - `--target-pane <pane-id>`
+- `--sanitize strict|safe|off`
 
 Behavior:
 
 - if `--target-pane` is omitted, use current pane context when available
 - if not inside tmux and no target pane supplied, fail clearly
+- always a direct send; never touches the daemon queue
+
+### `tprompt paste`
+
+Delivers the host system clipboard into a tmux pane.
+
+Flags (mirror `send`):
+
+- `--mode paste|type`
+- `--enter`
+- `--target-pane <pane-id>`
+- `--sanitize strict|safe|off`
+
+See `docs/commands/paste.md` for full behavior, exit codes, and failure modes.
 
 ### `tprompt pick`
 
-Interactive prompt selection in the current process.
+Interactive prompt selection in the current process using the configured external picker (`picker_command`, default `fzf`).
 
 Recommended behavior:
 
 - list prompts
-- let user choose one
-- either print the selected ID or immediately send it, depending on implementation choice
+- let user choose one via the external picker
+- print the selected ID on stdout (caller pipes into `tprompt send -` or similar)
 
-For MVP, keep semantics simple and document them clearly.
+This is distinct from the popup TUI, which is built-in and not configurable. `pick` is a scripting hook, not an end-user UX.
 
 ### `tprompt popup`
 
-Interactive popup-oriented flow. See `popup-flow.md` for exact behavior.
+Interactive popup-oriented flow. See `docs/commands/popup-flow.md` for the end-to-end flow and `docs/commands/popup-ui.md` for the TUI details.
 
 ### `tprompt doctor`
 
@@ -71,9 +86,11 @@ Suggested checks:
 - prompt directory exists
 - prompt files discoverable
 - duplicate IDs absent
+- duplicate or reserved keybinds absent
 - inside tmux or not
 - daemon socket reachable or daemon status known
-- picker availability if an external picker is configured
+- clipboard reader resolved and installed
+- picker command availability if an external picker is configured
 
 ### `tprompt daemon start`
 ### `tprompt daemon stop`
@@ -83,17 +100,17 @@ Used for local daemon lifecycle.
 
 For MVP, `start` and `status` are the most important. `stop` is optional if lifecycle management is intentionally minimal.
 
+## Cancel semantics
+
+When the user cancels an interactive flow (popup `Esc`, `pick` external cancel), the command exits with **status 0**. Cancellation is a valid outcome, not an error. Scripts should not treat it as a failure.
+
 ## Exit code guidance
 
-- `0` success
-- non-zero for all operational failures
-
-Recommended distinctions if convenient:
-
+- `0` success **or** user cancellation
 - `2` usage/config error
-- `3` prompt resolution error
+- `3` prompt resolution error / clipboard validation error
 - `4` tmux environment error
 - `5` daemon/IPC error
-- `6` delivery verification error
+- `6` delivery or verification error
 
 These do not need to be externally guaranteed forever, but should be consistent within MVP.

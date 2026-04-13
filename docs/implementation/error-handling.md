@@ -10,6 +10,9 @@ MVP should prefer explicit operational errors over silent fallback behavior.
 - duplicate prompt IDs found
 - unreadable prompt file
 - invalid frontmatter if parsing is strict enough to reject it
+- **duplicate frontmatter `key:` across prompts** (case-insensitive)
+- **frontmatter `key:` collides with a reserved key**
+- **malformed frontmatter `key:`** (multi-char, empty, non-printable, symbolic like `ctrl+x`)
 
 ### Environment errors
 
@@ -17,6 +20,18 @@ MVP should prefer explicit operational errors over silent fallback behavior.
 - invalid target pane supplied
 - configured picker command missing
 - daemon socket unavailable
+- **no clipboard reader available** (no auto-detected candidate, no override)
+- **clipboard reader command fails** (non-zero exit; stderr surfaced)
+
+### Clipboard content errors
+
+- **clipboard is empty**
+- **clipboard content is not valid UTF-8 text**
+- **clipboard content exceeds `max_paste_bytes`** (include byte count)
+
+### Sanitization errors
+
+- **content rejected by sanitizer** in `strict` mode (include class + byte offset; never include raw content)
 
 ### Delivery errors
 
@@ -24,18 +39,26 @@ MVP should prefer explicit operational errors over silent fallback behavior.
 - verification timed out
 - tmux command failed
 - delivery mode invalid
+- **job replaced by newer job targeting the same pane** (informational; logged and surfaced via `display-message`)
 
 ## Behavioral guidance
 
 - do not silently pick one duplicate ID
+- do not silently remap a colliding keybind
 - do not silently fall back to a random pane
 - do not silently sleep and hope popup state fixed itself
-- do not hide daemon failures behind generic “send failed” messages
+- do not hide daemon failures behind generic "send failed" messages
+- do not log raw clipboard or prompt content on sanitizer rejection
 
-## Example good error
+## Example good errors
 
 ```text
 Unable to deliver prompt 'code-review': target pane %12 no longer exists
+Duplicate keybind 'c' declared by: /prompts/agents/code-review.md, /prompts/review/commit.md
+Invalid frontmatter key 'ctrl+x' in /prompts/review/commit.md: must be a single printable character
+No clipboard reader available; install pbpaste, wl-paste, xclip, or xsel, or set `clipboard_read_command`
+Clipboard content exceeds max_paste_bytes (4823104 > 1048576)
+Content rejected by sanitizer (mode=strict): escape sequence detected at byte 142 (OSC)
 ```
 
 ## Example bad error
@@ -43,3 +66,9 @@ Unable to deliver prompt 'code-review': target pane %12 no longer exists
 ```text
 Something went wrong
 ```
+
+## Surfacing strategy
+
+- **CLI commands** print errors to stderr and exit non-zero (see exit-code table in `docs/commands/cli.md`).
+- **Daemon** writes to `~/.local/state/tprompt/daemon.log` and runs `tmux display-message` on the originating client for user-visible failures.
+- **Popup TUI** shows inline errors in its footer for interactive recovery (e.g., empty clipboard), and exits non-zero for unrecoverable errors.

@@ -11,6 +11,7 @@ Prompt {
   title: string?        // optional frontmatter
   description: string?  // optional frontmatter
   tags: []string        // optional frontmatter
+  key: char?            // optional frontmatter; single printable char; case-insensitive
   body: string          // markdown body only
   defaults: {
     mode: "paste" | "type" | null
@@ -18,6 +19,12 @@ Prompt {
   }
 }
 ```
+
+`key` is validated at load time:
+
+- duplicate across prompts → hard error
+- collision with a reserved key → hard error
+- malformed (multi-char, empty, non-printable) → hard error
 
 ## Duplicate prompt record
 
@@ -27,6 +34,23 @@ Used for diagnostics.
 DuplicatePromptID {
   id: string
   paths: []string
+}
+
+DuplicateKeybind {
+  key: char
+  prompt_ids: []string
+}
+```
+
+## Keybind assignment result
+
+Produced by the keybind resolver; consumed by the TUI.
+
+```text
+KeybindAssignment {
+  bindings: map<char, prompt_id>       // key -> prompt
+  overflow: []prompt_id                // prompts with no board slot (search-only)
+  reserved: map<char, reserved_action> // clipboard, search, cancel, select
 }
 ```
 
@@ -45,14 +69,22 @@ TargetContext {
 
 ```text
 DeliveryRequest {
-  prompt_id: string
-  source_path: string
-  body: string
+  source: "prompt" | "clipboard"
+  prompt_id: string?            // set when source = "prompt"
+  source_path: string?          // set when source = "prompt"
+  body: string                  // resolved content; already captured by popup when source = "clipboard"
   mode: "paste" | "type"
   press_enter: bool
+  sanitize_mode: "off" | "safe" | "strict"
   target: TargetContext
 }
 ```
+
+Notes:
+
+- `source = "clipboard"` means the popup already captured the bytes before exiting; the daemon does not re-read the clipboard.
+- `sanitize_mode` is resolved at request construction (flag > config > default) so the daemon does not need to re-resolve config.
+- `body` is the post-resolution content but **pre-sanitization**. The sanitizer runs in the delivery path immediately before the tmux adapter.
 
 ## Deferred job
 
@@ -77,8 +109,13 @@ VerificationPolicy {
 }
 ```
 
+## Replacement semantics
+
+When a new `DeferredJob` arrives with the same `request.target.pane_id` as a pending job, the pending job is **discarded**. Only the newer job is executed once verification passes.
+
 ## Notes
 
 - MVP should keep the in-memory model straightforward.
 - Persisted job queues are not required for MVP.
 - If the daemon restarts, in-flight popup jobs may be lost. That is acceptable for MVP if documented clearly.
+- Clipboard bytes embedded in a `DeliveryRequest.body` are transient — they live only for the lifetime of the job and must not be written to logs.

@@ -33,11 +33,15 @@ This avoids fragile sleep-based behavior.
 - **prompt ID is the file name stem**
 - directories are organizational only, not part of the ID
 - duplicate filename stems are invalid
-- popup workflow is first-class
-- daemon-backed deferred delivery is required
+- popup workflow is first-class, with a **built-in TUI** (not an external picker)
+- popup TUI features a keybind board (from frontmatter + auto-assign pool) plus a pinned clipboard row
+- daemon-backed deferred delivery is required for the popup flow
 - verification should be based on tmux state, not timers
-- paste mode is the default delivery mode
-- type mode is supported as a fallback
+- **bracketed paste** is the default delivery mode (`load-buffer` + `paste-buffer -p`)
+- `type` mode is supported as a fallback
+- no trailing Enter by default; `--enter` is opt-in
+- **clipboard is first-class** via `tprompt paste` and the pinned popup row; same-host only
+- sanitization is opt-in (`off` default, `safe` and `strict` available)
 
 ## Reading map
 
@@ -49,15 +53,18 @@ This avoids fragile sleep-based behavior.
 - `docs/architecture/overview.md`
 - `docs/commands/cli.md`
 - `docs/commands/popup-flow.md`
+- `docs/commands/popup-ui.md`
+- `docs/commands/paste.md`
 - `docs/tmux/verification.md`
+- `docs/tmux/delivery.md`
 
 ### Deeper implementation references
 
 - Architecture: `docs/architecture/*`
-- Command behavior: `docs/commands/*`
-- Tmux mechanics: `docs/tmux/*`
-- Filesystem/config: `docs/storage/*`
-- Internal interfaces and failure handling: `docs/implementation/*`
+- Command behavior: `docs/commands/*` (including `paste.md` and `popup-ui.md`)
+- Tmux mechanics: `docs/tmux/*` (including `delivery.md`)
+- Filesystem/config: `docs/storage/*` (including `clipboard.md`)
+- Internal interfaces, failure handling, sanitization: `docs/implementation/*` (including `sanitization.md`)
 - Tests: `docs/testing/test-plan.md`
 - Post-MVP ideas: `docs/roadmap/future-phases.md`
 
@@ -65,11 +72,14 @@ This avoids fragile sleep-based behavior.
 
 The coding agent should produce a working CLI application with:
 
-- an interactive picker
-- a non-interactive send path
-- a small daemon for deferred popup delivery
+- a built-in interactive popup TUI (keybind board + search + clipboard row)
+- a non-interactive send path (`tprompt send`)
+- a clipboard delivery command (`tprompt paste`)
+- a small daemon for deferred popup delivery with same-target replacement
+- a clipboard reader with auto-detect + override
+- an opt-in sanitizer with tested `safe` and `strict` modes
 - robust tmux target verification
-- tests around ID resolution, queueing, and delivery behavior
+- tests around ID resolution, keybind validation, queueing, sanitization, and delivery behavior
 
 ## Recommended implementation language
 
@@ -91,19 +101,29 @@ Rust is acceptable if the implementation team strongly prefers it.
 tprompt send code-review
 ```
 
+### Clipboard
+
+```bash
+tprompt paste
+```
+
 ### Popup flow
 
 1. User is in a tmux pane running some terminal application.
 2. User presses a tmux binding that opens `tprompt popup`.
-3. User selects `code-review`.
-4. Popup closes.
-5. Daemon confirms the original pane is active again.
-6. Prompt body is injected into that pane.
+3. Built-in TUI renders a keybind board with the pinned clipboard row on top.
+4. User presses a single key (a prompt's keybind, `P` for clipboard, or `/` to search).
+5. Popup closes. For the clipboard row, the TUI reads and captures the clipboard before exit.
+6. Daemon confirms the original pane is active again.
+7. Content is sanitized (if configured) and injected into that pane.
 
 ## Out of scope for MVP
 
 - prompt templating variables
 - cloud sync
+- cross-host clipboard sync (laptop → remote)
+- modifier-key combos for popup keybinds
+- live clipboard preview in the popup TUI
 - GUI/web UI
 - application-specific adapters
 - semantic confirmation that the target app interpreted the prompt correctly
