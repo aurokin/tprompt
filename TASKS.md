@@ -55,7 +55,7 @@ Read first:
 
 ## Phase 2 — basic CLI commands
 
-Goal: implement the user-facing commands that do not depend on popup deferral yet.
+Goal: implement the user-facing commands that do not depend on TUI-flow deferral yet.
 
 Tasks:
 
@@ -113,7 +113,7 @@ Read first:
 
 ## Phase 4 — daemon and job queue
 
-Goal: implement deferred popup delivery with local IPC.
+Goal: implement deferred TUI-flow delivery with local IPC.
 
 Tasks:
 
@@ -134,17 +134,18 @@ Read first:
 - `docs/architecture/data-model.md`
 - `docs/implementation/error-handling.md`
 
-## Phase 5 — popup flow and built-in TUI
+## Phase 5 — TUI flow and built-in TUI
 
-Goal: make popup usage the best experience.
+Goal: make the TUI flow (typically launched from a tmux popup) the best experience.
 
-### Phase 5a — popup shell
+### Phase 5a — TUI shell
 
-- implement `tprompt popup` command
-- capture original pane/client/session context
+- implement `tprompt tui` command
+- implement bare-`tprompt` default dispatch (runs `tui` when stdin is a tty and `$TMUX` is set; otherwise prints help), per `cli.md` and DECISIONS.md §29
+- capture target pane/client/session context
 - wire to the built-in TUI
 - submit job to daemon based on TUI result
-- exit popup process cleanly (cancel = exit 0)
+- exit TUI process cleanly (cancel = exit 0)
 
 ### Phase 5b — built-in TUI
 
@@ -161,8 +162,8 @@ Goal: make popup usage the best experience.
 
 Read first:
 
-- `docs/commands/popup-flow.md`
-- `docs/commands/popup-ui.md`
+- `docs/commands/tui-flow.md`
+- `docs/commands/tui.md`
 - `docs/tmux/verification.md`
 - `examples/tmux-bindings.md`
 
@@ -234,8 +235,8 @@ Do not implement during MVP unless explicitly requested:
 - richer verification strategies
 - remote sending
 - GUI or web layer
-- modifier-key combos for popup keybinds
-- live clipboard preview in popup
+- modifier-key combos for TUI keybinds
+- live clipboard preview in the TUI
 - cross-host clipboard
 
 See:

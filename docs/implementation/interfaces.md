@@ -54,9 +54,9 @@ Picker
 - Select(prompts []PromptSummary) -> selectedID string, cancelled bool, error
 ```
 
-Drives the optional `tprompt pick` command. Does not participate in the popup flow.
+Drives the optional `tprompt pick` command. Does not participate in the TUI flow.
 
-## Popup TUI
+## TUI
 
 ```text
 TUIRenderer

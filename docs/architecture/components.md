@@ -29,10 +29,10 @@ Clipboard reader: auto-detect, override, error wrapping. See `docs/storage/clipb
 Content sanitizer with `off` / `safe` / `strict` modes. See `docs/implementation/sanitization.md`.
 
 ### `internal/tui`
-Built-in popup TUI: keybind board, clipboard row, `/`-search, selection → job submission. Distinct from `internal/picker` below.
+Built-in TUI: keybind board, clipboard row, `/`-search, selection → job submission. Distinct from `internal/picker` below.
 
 ### `internal/picker`
-External-picker wrapper used only by `tprompt pick` (honors `picker_command` config). Not used by the popup flow.
+External-picker wrapper used only by `tprompt pick` (honors `picker_command` config). Not used by the TUI flow.
 
 ### `internal/keybind`
 Keybind resolver: combines frontmatter-declared keys with auto-assignment from the pool, surfaces collisions. Exposed to `internal/tui` and to `doctor`.
@@ -89,7 +89,7 @@ Recommended default:
 The daemon should emit logs that help diagnose:
 
 - target pane vanished
-- popup did not return to expected pane
+- TUI process did not exit / focus did not return to expected pane
 - tmux command failed
 - duplicate ID or duplicate keybind prevented resolution
 - sanitizer rejected content (class + offset, not content)

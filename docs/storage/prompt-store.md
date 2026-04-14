@@ -34,11 +34,11 @@ Optional YAML frontmatter may define metadata.
 Supported keys for MVP:
 
 - `title` — short human-readable name
-- `description` — one-line explanation, shown in the popup row (soft-truncated with ellipsis)
+- `description` — one-line explanation, shown in the TUI row (soft-truncated with ellipsis)
 - `tags` — list of strings, searchable
 - `mode` — delivery default (`paste` | `type`)
 - `enter` — delivery default (bool)
-- `key` — single printable character for the popup keybind board
+- `key` — single printable character for the TUI keybind board
 
 Unsupported keys should be ignored for MVP.
 
@@ -46,7 +46,7 @@ Unsupported keys should be ignored for MVP.
 
 `key` accepts **a single printable character**. The following are hard errors at load time:
 
-- **Duplicate across prompts.** Two prompts declaring the same `key:` value (case-insensitive). Surfaced as `DuplicateKeybind`. `tprompt doctor`, `list`, `send`, and `popup` all fail.
+- **Duplicate across prompts.** Two prompts declaring the same `key:` value (case-insensitive). Surfaced as `DuplicateKeybind`. `tprompt doctor`, `list`, `send`, and `tui` all fail.
 - **Reserved key collision.** A prompt declaring a key that is currently reserved (defaults: `P`, `/`, `Esc`, `Enter`; configurable).
 - **Malformed value.** Empty string, multi-character string, non-printable character, or symbolic forms like `ctrl+x` / `alt-p`.
 
@@ -60,7 +60,7 @@ Two-stage process, deterministic given the same prompt set:
 
 1. **Frontmatter-declared keys** take their declared character.
 2. **Auto-assigned** prompts (no `key:` in frontmatter) scan alphabetically by `id` and receive the next available character from the pool `1 2 3 4 5 q e r f g t z x c`, skipping any character already taken by a frontmatter declaration.
-3. Prompts that cannot receive a pool character (pool exhausted) are **overflow** and are reachable only via `/`-search in the popup.
+3. Prompts that cannot receive a pool character (pool exhausted) are **overflow** and are reachable only via `/`-search in the TUI.
 
 ## Injected content
 

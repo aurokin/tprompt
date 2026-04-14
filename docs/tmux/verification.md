@@ -4,23 +4,23 @@ This file defines what “verified delivery” means for MVP.
 
 ## Goal
 
-Avoid timer-based popup delivery.
+Avoid timer-based delivery for TUI-flow jobs.
 
 ## Pre-injection checks
 
-Before injecting a deferred popup job, the daemon should verify as much of the following as practical:
+Before injecting a deferred TUI-flow job, the daemon should verify as much of the following as practical:
 
 ### 1. Target pane still exists
 
-If the original pane disappeared, fail the job.
+If the target pane disappeared, fail the job.
 
-### 2. Popup process has exited
+### 2. TUI process has exited
 
-The daemon should only deliver after the popup command is gone.
+The daemon should only deliver after the TUI command is gone.
 
-This can be approximated indirectly if popup lifecycle is tied to the client returning to the original pane.
+When the TUI is launched inside a tmux popup, this can be approximated indirectly via the client returning to the target pane (tmux only returns focus after the popup command exits).
 
-### 3. The original pane is again the selected or intended target
+### 3. The target pane is again the selected or intended target
 
 Preferred check:
 

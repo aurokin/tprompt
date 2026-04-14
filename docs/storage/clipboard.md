@@ -1,6 +1,6 @@
 # Clipboard Reader
 
-Clipboard content is a first-class delivery source via `tprompt paste` and the popup clipboard row. This file describes how `tprompt` acquires clipboard content at runtime.
+Clipboard content is a first-class delivery source via `tprompt paste` and the TUI's pinned clipboard row. This file describes how `tprompt` acquires clipboard content at runtime.
 
 ## Scope rule
 
@@ -58,7 +58,7 @@ Implementations:
 
 ## Validation
 
-The reader returns raw bytes. Validation runs in the CLI / popup code path, not in the reader:
+The reader returns raw bytes. Validation runs in the CLI / TUI code path, not in the reader:
 
 - empty content → `clipboard is empty`
 - not valid UTF-8 → `clipboard content is not valid UTF-8 text`
@@ -90,5 +90,5 @@ Clipboard reader: wl-paste (auto-detected, Wayland)
 ## Non-goals
 
 - OSC-52 read (cross-host clipboard) — deferred
-- automatic clipboard polling / preview — deferred (see `docs/commands/popup-ui.md`)
+- automatic clipboard polling / preview — deferred (see `docs/commands/tui.md`)
 - writing back to the clipboard — out of scope for MVP

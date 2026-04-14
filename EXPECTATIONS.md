@@ -12,7 +12,7 @@ A correct MVP implementation should satisfy all of the following.
 - derives ID from filename stem only
 - rejects duplicate filename-stem IDs with a clear error
 - can list prompts and show which file each ID maps to
-- parses optional frontmatter including a `key:` field for popup keybinds
+- parses optional frontmatter including a `key:` field for TUI keybinds
 - rejects duplicate, reserved, or malformed `key:` values with a clear error
 
 ### CLI behavior
@@ -20,22 +20,23 @@ A correct MVP implementation should satisfy all of the following.
 - supports non-interactive send by ID (`tprompt send <id>`)
 - supports clipboard delivery as a separate top-level command (`tprompt paste`)
 - supports interactive selection (`tprompt pick`) with optional external picker
-- supports a tmux-popup-oriented command path (`tprompt popup`)
+- supports the built-in TUI command (`tprompt tui`), typically launched from a tmux popup
+- bare `tprompt` (no subcommand) dispatches to `tprompt tui` when stdin is a tty and `$TMUX` is set; otherwise prints help
 - returns non-zero exit codes on operational failure
-- returns **zero** when the user cancels an interactive picker or popup
+- returns **zero** when the user cancels an interactive picker or TUI
 - emits human-readable errors
 
-### Popup delivery behavior
+### TUI delivery behavior
 
-- popup runs a built-in interactive TUI (not an external picker)
+- the TUI is built-in and interactive (not an external picker)
 - TUI presents a keybind "board" for pinned prompts and a pinned clipboard row
 - TUI supports `/`-search over id, title, description, tags
-- popup flow hands work to a daemon
-- popup process exits before delivery occurs
-- when the clipboard is selected, the popup reads the clipboard at keypress and submits content as part of the job
+- the TUI flow hands work to a daemon
+- the TUI process exits before delivery occurs
+- when the clipboard is selected, the TUI reads the clipboard at keypress and submits content as part of the job
 - daemon verifies target pane readiness using tmux state
 - daemon injects only after verification passes
-- daemon fails cleanly if the original pane vanished or became invalid
+- daemon fails cleanly if the target pane vanished or became invalid
 - when a new deferred job targets the same pane as a pending one, the pending job is replaced
 
 ### Delivery behavior
@@ -67,7 +68,7 @@ A correct MVP implementation should satisfy all of the following.
 
 ### Reliability
 
-- does not depend on fixed sleeps for popup correctness
+- does not depend on fixed sleeps for TUI-flow correctness
 - can detect tmux pane disappearance
 - can detect duplicate prompt IDs and duplicate keybinds
 - can surface daemon connectivity problems clearly
@@ -99,7 +100,7 @@ Do not expand scope into these features during MVP:
 - analytics dashboard
 - multi-user support
 - modifier-key combos (`ctrl+x`, `alt+p`, etc.) for prompt keybinds
-- live clipboard preview inside the popup TUI
+- live clipboard preview inside the TUI
 
 ## Behavioral contract
 
@@ -126,12 +127,12 @@ tprompt send code-review
 tprompt paste
 ```
 
-### Popup use
+### TUI use (typical: launched from a tmux popup)
 
-- user opens popup via tmux key binding
+- user opens a tmux popup running `tprompt` via a tmux key binding
 - built-in TUI renders the keybind board plus the clipboard row
 - user presses a single key (prompt keybind, `P` for clipboard, or `/` to search)
-- popup closes
+- TUI closes (tmux tears down the popup)
 - daemon verifies the target pane and injects
 
 ## Packaging expectation

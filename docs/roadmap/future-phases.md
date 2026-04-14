@@ -16,10 +16,10 @@ These ideas are intentionally deferred.
 - prompt templating variables
 - prompt composition/snippets
 - shell completions
-- **modifier-key combos for popup keybinds** (`ctrl+x`, `alt+p`, etc.) — MVP is single printable char only
-- **live clipboard preview inside popup TUI** (read on popup open, show size/first-line) — MVP is read-on-select with no preview
+- **modifier-key combos for TUI keybinds** (`ctrl+x`, `alt+p`, etc.) — MVP is single printable char only
+- **live clipboard preview inside the TUI** (read on TUI open, show size/first-line) — MVP is read-on-select with no preview
 - per-prompt sanitize override via frontmatter
-- popup singleton enforcement (reject a second popup if one is already open)
+- tmux-popup singleton enforcement (reject a second tmux popup running `tprompt` if one is already open)
 
 ## Advanced
 

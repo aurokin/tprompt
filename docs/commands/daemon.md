@@ -1,6 +1,6 @@
 # Daemon
 
-The daemon exists to support deferred and verified delivery after popup exit.
+The daemon exists to support deferred and verified delivery after the TUI process exits.
 
 ## Role
 
@@ -51,13 +51,13 @@ Rationale: this matches user intent ("I changed my mind and picked something els
 
 Different-pane targets are independent and proceed in parallel (or serialized — implementation choice) without replacement.
 
-## Multiple popups
+## Multiple TUI instances
 
-The daemon does **not** enforce a popup singleton. Any popup may submit a job. If two popups submit nearly simultaneously for the same pane, the last-arriving job wins via the replacement rule above.
+The daemon does **not** enforce a TUI singleton. Any TUI instance (including multiple tmux popups running `tprompt`) may submit a job. If two instances submit nearly simultaneously for the same pane, the last-arriving job wins via the replacement rule above.
 
 ## Direct sends
 
-Direct sends (`tprompt send <id>` and `tprompt paste` without popup) do **not** use the daemon. They go straight through the tmux adapter in the CLI process. The daemon cannot block or interfere with them.
+Direct sends (`tprompt send <id>` and `tprompt paste` invoked outside the TUI flow) do **not** use the daemon. They go straight through the tmux adapter in the CLI process. The daemon cannot block or interfere with them.
 
 ## Timeout behavior
 

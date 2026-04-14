@@ -2,6 +2,12 @@
 
 These decisions are already made and should be treated as constraints unless the user explicitly reopens them.
 
+## Terminology
+
+- **tmux popup** — a floating window created by `tmux display-popup`. Tmux's feature.
+- **TUI** — tprompt's built-in interactive terminal UI (the `tprompt tui` subcommand). Runs inside any terminal context; typically a tmux popup.
+- **TUI flow** — the end-to-end path from TUI selection through daemon-verified injection into the target pane.
+
 ## Product
 
 ### 1. `tprompt` is both interactive and non-interactive
@@ -10,7 +16,7 @@ It must support:
 
 - direct send by ID
 - interactive prompt selection
-- popup-first workflows in tmux
+- tmux-popup-first workflows (TUI launched from a tmux popup)
 
 ### 2. The source of truth is markdown files on disk
 
@@ -39,13 +45,13 @@ Both produce the same ID: `code-review`
 
 The tool must detect this and fail clearly.
 
-### 5. Popup workflow is first-class
+### 5. Tmux-popup workflow is first-class
 
-The tool should be designed around reliable use from tmux popups, not treat popup usage as a bolt-on extra.
+The tool should be designed around reliable use when the TUI is launched from a tmux popup, not treat that launch path as a bolt-on extra.
 
 ### 6. Deferred send must be daemon-backed
 
-The popup process should not sleep and then try to inject directly. It should hand off a job to a daemon, then exit.
+The TUI process should not sleep and then try to inject directly. It should hand off a job to a daemon, then exit.
 
 ### 7. Verification must use tmux state, not timers
 
@@ -74,7 +80,7 @@ Benefits:
 
 - short IDs
 - easy shell usage
-- easy popup selection
+- easy TUI selection
 - easier to remember than path-based IDs
 
 Tradeoff:
@@ -124,9 +130,9 @@ Default behavior is **no** automatic Enter. Users finish and submit themselves. 
 
 Clipboard reader, daemon, and tmux pane all run on the same host. Cross-host clipboard (laptop → remote via OSC-52 read or similar) is an explicit non-goal for MVP.
 
-### 15. Popup TUI is built-in and first-class
+### 15. TUI is built-in and first-class
 
-The popup presents a built-in interactive TUI, not an external picker. It features:
+`tprompt tui` launches a built-in interactive TUI, not an external picker. It features:
 
 - a keybind "board" of single-keypress shortcuts for pinned prompts
 - a pinned clipboard row (default keybind `P`)
@@ -161,7 +167,7 @@ Prompts are scanned **alphabetically by `id`** to assign from this pool. Once th
 
 Default reserved keys are `P` (clipboard), `/` (search), `Esc` (cancel), `Enter` (select). All are overridable via `config.toml`.
 
-### 19. Popup row layout
+### 19. TUI row layout
 
 Rows are rendered as three columns: `[key]  id  description`.
 
@@ -171,13 +177,13 @@ Rows are rendered as three columns: `[key]  id  description`.
 
 ### 20. Clipboard read on keypress, no preview
 
-When the popup opens, the clipboard is **not** read. It is read only when the user presses the clipboard key (`P` by default).
+When the TUI opens, the clipboard is **not** read. It is read only when the user presses the clipboard key (`P` by default).
 
-The popup process reads the clipboard, captures the content, and submits it as part of the daemon job payload before exiting. The daemon never reads the clipboard itself.
+The TUI process reads the clipboard, captures the content, and submits it as part of the daemon job payload before exiting. The daemon never reads the clipboard itself.
 
 ### 21. Clipboard edge cases fail loudly
 
-- **Empty clipboard** → inline error in popup; popup stays open.
+- **Empty clipboard** → inline error in TUI; TUI stays open.
 - **Non-UTF-8 / binary clipboard** → reject with clear error.
 - **Oversized clipboard** → hard cap via `max_paste_bytes` config; reject when over.
 
@@ -212,10 +218,14 @@ No success banner by default.
 
 When a new deferred job arrives for the **same target pane** as one already pending, the new job **replaces** the old one. Matches "I changed my mind" intent. Different targets are independent.
 
-### 27. Popup singletons are not enforced
+### 27. TUI singletons are not enforced
 
-Multiple popups can be open simultaneously (across clients or even on the same client). This may be revisited post-MVP; for now, the simpler "any popup may submit a job" rule applies.
+Multiple TUI instances (including multiple tmux popups) can be open simultaneously — across clients or even on the same client. This may be revisited post-MVP; for now, the simpler "any TUI may submit a job" rule applies.
 
 ### 28. Direct sends bypass the daemon queue entirely
 
-`tprompt send <id>` and `tprompt paste` (invoked from a non-popup context) always deliver synchronously through the tmux adapter. They do not touch the daemon queue and cannot be affected by pending popup jobs.
+`tprompt send <id>` and `tprompt paste` (invoked outside the TUI flow) always deliver synchronously through the tmux adapter. They do not touch the daemon queue and cannot be affected by pending TUI jobs.
+
+### 29. Bare `tprompt` defaults to `tprompt tui` in tmux + tty
+
+When invoked with no subcommand and no args, `tprompt` dispatches to `tprompt tui` if stdin is a tty **and** `$TMUX` is set. Otherwise it prints help. This keeps the tmux binding short (`display-popup -E tprompt`) while preserving the convention that no-args → usage in a regular shell. The TUI is the signature workflow, so this default matches user intent when the environment supports it.

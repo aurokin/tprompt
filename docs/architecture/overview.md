@@ -10,7 +10,7 @@ Responsibilities:
 - load config
 - talk to prompt store
 - invoke tmux adapter directly for `send` and standalone `paste`
-- talk to daemon for deferred popup sends
+- talk to daemon for deferred TUI-flow sends
 
 ## 2. Prompt store
 
@@ -67,7 +67,7 @@ Responsibilities:
 
 See `docs/implementation/sanitization.md`.
 
-## 7. TUI (built-in popup UI)
+## 7. TUI (built-in interactive UI)
 
 Responsibilities:
 
@@ -77,7 +77,7 @@ Responsibilities:
 - read the clipboard on keypress when the user selects the clipboard row
 - submit a `DeliveryRequest` to the daemon and exit
 
-This is distinct from `internal/picker`, which only wraps the optional external `picker_command` used by `tprompt pick`. See `docs/commands/popup-ui.md`.
+This is distinct from `internal/picker`, which only wraps the optional external `picker_command` used by `tprompt pick`. See `docs/commands/tui.md`.
 
 ## Data flow summary
 
@@ -88,14 +88,14 @@ This is distinct from `internal/picker`, which only wraps the optional external 
 3. CLI resolves the target tmux pane
 4. Adapter delivers immediately
 
-### Popup send
+### TUI flow (typical: launched from a tmux popup)
 
-1. `tprompt popup` launches inside a tmux popup with target context passed in
+1. `tprompt tui` (or bare `tprompt` when in tmux + tty) launches — typically inside a tmux popup — with target context passed in
 2. Built-in TUI renders the board + clipboard row
 3. User selects a prompt, the clipboard row, or searches
 4. If clipboard: TUI reads and validates the clipboard; on success, submits a job with `source = clipboard`
 5. If prompt: TUI submits a job with `source = prompt` and the resolved body
-6. Popup process exits
+6. TUI process exits
 7. Daemon verifies the target pane has returned to selection
 8. Sanitizer processes the content in the daemon's context
 9. Adapter delivers

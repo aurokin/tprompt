@@ -5,7 +5,7 @@ Conceptual responsibilities of the tmux adapter. Concrete command construction (
 ## Tmux assumptions for MVP
 
 - target workflow is inside tmux
-- popup workflow uses tmux popups
+- the TUI flow typically runs inside a tmux popup (but the TUI itself is not popup-specific)
 - pane IDs are stable enough to identify the intended target during a short verification window
 
 ## Required tmux operations

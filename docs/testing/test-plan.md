@@ -125,7 +125,7 @@ Test:
 - `doctor` reports missing prompt directory
 - `doctor` reports clipboard reader status (installed/missing)
 - `doctor` reports duplicate keybinds
-- popup/`pick` cancel exits with status 0
+- TUI / `pick` cancel exits with status 0
 
 ## Daemon tests
 
@@ -143,7 +143,7 @@ Potential cases:
 
 - create pane
 - submit deferred job
-- switch into popup-like intermediate process
+- switch into TUI / popup-like intermediate process
 - verify prompt lands in target pane after return
 - bracketed paste arrives intact (multi-line content does not submit mid-paste)
 - `--enter` fires exactly one Enter keypress after paste completes
@@ -154,11 +154,11 @@ These tests are valuable but should not block MVP if they are disproportionately
 ## Manual test checklist
 
 - open tmux pane with shell prompt
-- run popup flow, select a prompt
-- confirm prompt lands after popup closes
+- run TUI flow (via tmux popup binding), select a prompt
+- confirm prompt lands after the TUI closes
 - repeat with `tprompt paste` after copying known text
 - repeat with paste mode and type mode
 - repeat after intentionally closing target pane to confirm failure path
 - confirm `tmux display-message` banner shows on failure
 - confirm no success banner (silence = success)
-- confirm Esc from popup exits 0 (no error banner)
+- confirm Esc from the TUI exits 0 (no error banner)

@@ -4,6 +4,10 @@ This file describes the command surface for MVP.
 
 ## Commands
 
+### `tprompt` (no subcommand)
+
+Default dispatch: runs `tprompt tui` when stdin is a tty **and** `$TMUX` is set; otherwise prints help. This keeps the tmux binding short (`display-popup -E tprompt`) while preserving the convention that no-args → usage in a regular shell.
+
 ### `tprompt list`
 
 Lists all available prompt IDs.
@@ -71,11 +75,11 @@ Recommended behavior:
 - let user choose one via the external picker
 - print the selected ID on stdout (caller pipes into `tprompt send -` or similar)
 
-This is distinct from the popup TUI, which is built-in and not configurable. `pick` is a scripting hook, not an end-user UX.
+This is distinct from the built-in TUI, which is not configurable. `pick` is a scripting hook, not an end-user UX.
 
-### `tprompt popup`
+### `tprompt tui`
 
-Interactive popup-oriented flow. See `docs/commands/popup-flow.md` for the end-to-end flow and `docs/commands/popup-ui.md` for the TUI details.
+Launches the built-in interactive TUI, which submits a delivery job to the daemon for deferred injection into the target pane. Typically invoked from a tmux popup, but works in any terminal context. See `docs/commands/tui-flow.md` for the end-to-end flow and `docs/commands/tui.md` for the TUI details.
 
 ### `tprompt doctor`
 
@@ -102,7 +106,7 @@ For MVP, `start` and `status` are the most important. `stop` is optional if life
 
 ## Cancel semantics
 
-When the user cancels an interactive flow (popup `Esc`, `pick` external cancel), the command exits with **status 0**. Cancellation is a valid outcome, not an error. Scripts should not treat it as a failure.
+When the user cancels an interactive flow (TUI `Esc`, `pick` external cancel), the command exits with **status 0**. Cancellation is a valid outcome, not an error. Scripts should not treat it as a failure.
 
 ## Exit code guidance
 

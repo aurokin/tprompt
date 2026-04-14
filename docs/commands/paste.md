@@ -39,9 +39,9 @@ See `docs/tmux/delivery.md` for the exact tmux command construction.
 | Invocation context | Path |
 |---|---|
 | `tprompt paste` from shell or a tmux `run-shell` binding | direct (synchronous) |
-| Clipboard row selected from inside `tprompt popup` | daemon — the popup path captures the clipboard content and submits it as a `DeliveryRequest` with `source = clipboard` |
+| Clipboard row selected from inside `tprompt tui` | daemon — the TUI flow captures the clipboard content and submits it as a `DeliveryRequest` with `source = clipboard` |
 
-The popup code path is in `docs/commands/popup-flow.md`; this file describes the standalone command.
+The TUI code path is in `docs/commands/tui-flow.md`; this file describes the standalone command.
 
 ## Exit codes
 

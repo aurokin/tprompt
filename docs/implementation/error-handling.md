@@ -46,7 +46,7 @@ MVP should prefer explicit operational errors over silent fallback behavior.
 - do not silently pick one duplicate ID
 - do not silently remap a colliding keybind
 - do not silently fall back to a random pane
-- do not silently sleep and hope popup state fixed itself
+- do not silently sleep and hope TUI/focus state fixed itself
 - do not hide daemon failures behind generic "send failed" messages
 - do not log raw clipboard or prompt content on sanitizer rejection
 
@@ -71,4 +71,4 @@ Something went wrong
 
 - **CLI commands** print errors to stderr and exit non-zero (see exit-code table in `docs/commands/cli.md`).
 - **Daemon** writes to `~/.local/state/tprompt/daemon.log` and runs `tmux display-message` on the originating client for user-visible failures.
-- **Popup TUI** shows inline errors in its footer for interactive recovery (e.g., empty clipboard), and exits non-zero for unrecoverable errors.
+- **TUI** shows inline errors in its footer for interactive recovery (e.g., empty clipboard), and exits non-zero for unrecoverable errors.

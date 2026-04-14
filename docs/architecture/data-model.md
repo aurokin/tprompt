@@ -72,7 +72,7 @@ DeliveryRequest {
   source: "prompt" | "clipboard"
   prompt_id: string?            // set when source = "prompt"
   source_path: string?          // set when source = "prompt"
-  body: string                  // resolved content; already captured by popup when source = "clipboard"
+  body: string                  // resolved content; already captured by the TUI when source = "clipboard"
   mode: "paste" | "type"
   press_enter: bool
   sanitize_mode: "off" | "safe" | "strict"
@@ -82,7 +82,7 @@ DeliveryRequest {
 
 Notes:
 
-- `source = "clipboard"` means the popup already captured the bytes before exiting; the daemon does not re-read the clipboard.
+- `source = "clipboard"` means the TUI already captured the bytes before exiting; the daemon does not re-read the clipboard.
 - `sanitize_mode` is resolved at request construction (flag > config > default) so the daemon does not need to re-resolve config.
 - `body` is the post-resolution content but **pre-sanitization**. The sanitizer runs in the delivery path immediately before the tmux adapter.
 
@@ -102,7 +102,7 @@ DeferredJob {
 ```text
 VerificationPolicy {
   require_target_pane_exists: true
-  require_popup_process_exit: true
+  require_tui_process_exit: true
   require_selected_pane_match: bool
   require_post_injection_change_check: bool
   timeout_ms: integer
@@ -117,5 +117,5 @@ When a new `DeferredJob` arrives with the same `request.target.pane_id` as a pen
 
 - MVP should keep the in-memory model straightforward.
 - Persisted job queues are not required for MVP.
-- If the daemon restarts, in-flight popup jobs may be lost. That is acceptable for MVP if documented clearly.
+- If the daemon restarts, in-flight TUI-submitted jobs may be lost. That is acceptable for MVP if documented clearly.
 - Clipboard bytes embedded in a `DeliveryRequest.body` are transient — they live only for the lifetime of the job and must not be written to logs.

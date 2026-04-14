@@ -29,7 +29,7 @@ max_paste_bytes = 1048576              # 1 MiB cap on paste size
 # Sanitization
 sanitize = "off"                       # "off" | "safe" | "strict"
 
-# Popup keybinds
+# TUI keybinds
 keybind_pool = "12345qerfgtzxc"        # auto-assign pool order
 
 [reserved_keys]
@@ -48,7 +48,7 @@ select    = "Enter"
 
 ## Optional config fields for MVP
 
-- picker command (affects `tprompt pick`; does not affect popup TUI)
+- picker command (affects `tprompt pick`; does not affect the built-in TUI)
 - verification timeout
 - poll interval
 - clipboard reader override
