@@ -1,12 +1,12 @@
-# Popup TUI
+# TUI
 
-The popup is a **built-in** interactive terminal UI. It is not a thin wrapper around an external picker. `picker_command` in config is a separate mechanism used only by `tprompt pick` (see `cli.md`).
+The TUI is a **built-in** interactive terminal UI. It is not a thin wrapper around an external picker. `picker_command` in config is a separate mechanism used only by `tprompt pick` (see `cli.md`).
 
-This file describes what the TUI renders and how keybinds behave. For the end-to-end popup delivery flow (daemon handoff, verification, injection) see `docs/commands/popup-flow.md`.
+This file describes what the TUI renders and how keybinds behave. For the end-to-end delivery flow (daemon handoff, verification, injection) see `docs/commands/tui-flow.md`.
 
 ## Layout
 
-The TUI renders a compact board inside the tmux popup. Each prompt shown on the board is a single row:
+The TUI renders a compact board in whatever terminal context it's launched in (typically a tmux popup). Each prompt shown on the board is a single row:
 
 ```
 [key]  id                description
@@ -35,7 +35,7 @@ The clipboard row is **always first** and is pinned. It has no description conte
 |---|---|---|---|
 | `P` | Read clipboard and deliver | yes | yes |
 | `/` | Enter search mode | yes | yes |
-| `Esc` | Cancel and close popup (exit 0) | yes | yes |
+| `Esc` | Cancel and exit 0 | yes | yes |
 | `Enter` | Deliver the currently highlighted row | yes | yes |
 
 Reserved keys are overridable via `[reserved_keys]` in `config.toml`.
@@ -57,7 +57,7 @@ Overflow: once the auto-assign pool is exhausted and frontmatter keys are satisf
 - a prompt declaring a reserved key (e.g., `key: P` when `P` is reserved for clipboard)
 - a malformed `key:` value (empty string, multi-character, non-printable, modifier combo)
 
-These surface in `tprompt doctor` and cause `tprompt list|show|send|popup` to fail.
+These surface in `tprompt doctor` and cause `tprompt list|show|send|tui` to fail.
 
 ## Search mode
 
@@ -71,16 +71,16 @@ Triggered by `/`. All prompts (including overflow) are searchable — search is 
 
 ## Clipboard row behavior
 
-- Clipboard is **not** read when the popup opens. No preview text, no size count.
+- Clipboard is **not** read when the TUI opens. No preview text, no size count.
 - When the user presses `P` (or whatever the reserved clipboard key is):
-  1. Popup invokes the clipboard reader.
-  2. Popup validates content (empty / non-UTF-8 / size cap).
-  3. On validation failure, the popup shows an **inline error** in the footer and stays open so the user can choose something else.
-  4. On success, the popup submits a `DeliveryRequest` with `source = clipboard` to the daemon and exits.
+  1. TUI invokes the clipboard reader.
+  2. TUI validates content (empty / non-UTF-8 / size cap).
+  3. On validation failure, the TUI shows an **inline error** in the footer and stays open so the user can choose something else.
+  4. On success, the TUI submits a `DeliveryRequest` with `source = clipboard` to the daemon and exits.
 
 ## Footer / status line
 
-The popup renders a single-line footer showing context-sensitive hints:
+The TUI renders a single-line footer showing context-sensitive hints:
 
 - board view: `[/ search]  [Esc cancel]`
 - search view: `/query    [Esc exit search]  [Enter select]`
@@ -88,7 +88,7 @@ The popup renders a single-line footer showing context-sensitive hints:
 
 ## Scrolling
 
-If the board (frontmatter-declared + auto-assigned rows + clipboard) exceeds the popup height, vertical scrolling is permitted with `↑`/`↓` but single-key selection continues to work regardless of scroll position.
+If the board (frontmatter-declared + auto-assigned rows + clipboard) exceeds the available height, vertical scrolling is permitted with `↑`/`↓` but single-key selection continues to work regardless of scroll position.
 
 Overflow rows (those past the auto-assign pool) are not visible in the board even with scrolling.
 
