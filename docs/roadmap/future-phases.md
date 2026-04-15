@@ -16,6 +16,7 @@ These ideas are intentionally deferred.
 - prompt templating variables
 - prompt composition/snippets
 - shell completions
+- **project-specific prompt folders** — when invoked inside a project, also load prompts from a per-project directory (e.g. `.tprompt/` in CWD or nearest ancestor) merged with the global store. Needs rules for precedence on stem/`key:` collisions.
 - **modifier-key combos for TUI keybinds** (`ctrl+x`, `alt+p`, etc.) — MVP is single printable char only
 - **live clipboard preview inside the TUI** (read on TUI open, show size/first-line) — MVP is read-on-select with no preview
 - per-prompt sanitize override via frontmatter
