@@ -1,0 +1,47 @@
+version: "2"
+
+run:
+  timeout: 3m
+  modules-download-mode: readonly
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - funlen
+    - gocognit
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nolintlint
+    - revive
+    - staticcheck
+    - unused
+  settings:
+    funlen:
+      lines: 80
+      statements: 40
+    gocognit:
+      min-complexity: 15
+    revive:
+      rules:
+        - name: var-naming
+        - name: unused-parameter
+          disabled: true
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - funlen
+          - gocognit
+          - gosec
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

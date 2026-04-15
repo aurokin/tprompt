@@ -28,6 +28,7 @@ Read first:
 - `EXPECTATIONS.md`
 - `docs/architecture/overview.md`
 - `docs/architecture/components.md`
+- `docs/implementation/tech-stack.md`
 
 ## Phase 1 — prompt discovery and resolution
 
@@ -47,6 +48,10 @@ Tasks:
   - return body + metadata + source path
   - resolve final keybind assignment (frontmatter + auto-assign from pool)
 
+Libraries introduced this phase:
+
+- `gopkg.in/yaml.v3` (frontmatter parsing)
+
 Read first:
 
 - `docs/storage/prompt-store.md`
@@ -64,6 +69,11 @@ Tasks:
 - `tprompt send <id>`
 - `tprompt doctor` (including duplicate-keybind checks)
 - basic output formatting and exit codes (including cancel = 0)
+
+Libraries introduced this phase:
+
+- `github.com/BurntSushi/toml` (config loading)
+- `github.com/rogpeppe/go-internal/testscript` (CLI black-box tests)
 
 Read first:
 
@@ -141,11 +151,17 @@ Goal: make the TUI flow (typically launched from a tmux popup) the best experien
 ### Phase 5a — TUI shell
 
 - implement `tprompt tui` command
-- implement bare-`tprompt` default dispatch (runs `tui` when stdin is a tty and `$TMUX` is set; otherwise prints help), per `cli.md` and DECISIONS.md §29
 - capture target pane/client/session context
 - wire to the built-in TUI
 - submit job to daemon based on TUI result
 - exit TUI process cleanly (cancel = exit 0)
+
+(Bare-`tprompt` dispatch per DECISIONS.md §29 was wired in Phase 0; Phase 5a only replaces the `tui` stub with the real command.)
+
+Libraries introduced this phase:
+
+- `github.com/charmbracelet/bubbletea` (TUI runtime)
+- `github.com/charmbracelet/lipgloss` (TUI styling, used by Phase 5b)
 
 ### Phase 5b — built-in TUI
 

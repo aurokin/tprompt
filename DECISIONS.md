@@ -229,3 +229,18 @@ Multiple TUI instances (including multiple tmux popups) can be open simultaneous
 ### 29. Bare `tprompt` defaults to `tprompt tui` in tmux + tty
 
 When invoked with no subcommand and no args, `tprompt` dispatches to `tprompt tui` if stdin is a tty **and** `$TMUX` is set. Otherwise it prints help. This keeps the tmux binding short (`display-popup -E tprompt`) while preserving the convention that no-args → usage in a regular shell. The TUI is the signature workflow, so this default matches user intent when the environment supports it.
+
+### 30. Implementation tech stack
+
+The implementation language and toolchain are locked for v1:
+
+- **Language:** Go 1.26 — single static binary, low startup latency (matters for popup-launched TUI), idiomatic subprocess handling, mature TUI ecosystem.
+- **CLI framework:** `github.com/spf13/cobra`.
+- **TUI framework:** `github.com/charmbracelet/bubbletea` + `github.com/charmbracelet/lipgloss`.
+- **Config parsing:** `github.com/BurntSushi/toml`. Frontmatter parsing: `gopkg.in/yaml.v3`.
+- **Format:** `gofumpt` + `goimports`, run via `golangci-lint v2 fmt`.
+- **Lint:** `golangci-lint v2` with `govet`, `staticcheck`, `errcheck`, `revive`, `ineffassign`, `unused`, `gosec`, `misspell`, `nolintlint`.
+- **Complexity:** `gocognit` + `funlen`, configured through `golangci-lint`.
+- **Testing:** stdlib `testing` + `github.com/google/go-cmp` for diffs + `github.com/rogpeppe/go-internal/testscript` for CLI black-box tests. Coverage via `go test -covermode=atomic`.
+
+Rationale and library choices are detailed in `docs/implementation/tech-stack.md`.
