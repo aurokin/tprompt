@@ -57,6 +57,16 @@ func (e *DuplicatePromptIDError) Error() string {
 	return fmt.Sprintf("duplicate prompt ID detected: %s: %s", e.ID, strings.Join(e.Paths, ", "))
 }
 
+// InvalidPromptModeError reports an unsupported frontmatter mode default.
+type InvalidPromptModeError struct {
+	Path  string
+	Value string
+}
+
+func (e *InvalidPromptModeError) Error() string {
+	return fmt.Sprintf("invalid delivery mode %q in %s: must be one of paste, type", e.Value, e.Path)
+}
+
 // NotFoundError reports a prompt lookup miss.
 type NotFoundError struct {
 	ID string
@@ -220,6 +230,9 @@ func discoverPromptFiles(root string) ([]discoveredPrompt, error) {
 	}
 
 	sort.Slice(entries, func(i, j int) bool { return entries[i].prompt.ID < entries[j].prompt.ID })
+	if err := validatePromptDefaults(entries); err != nil {
+		return nil, err
+	}
 	return entries, nil
 }
 
@@ -256,6 +269,20 @@ func promptInputs(entries []discoveredPrompt) []keybind.Input {
 		})
 	}
 	return inputs
+}
+
+func validatePromptDefaults(entries []discoveredPrompt) error {
+	for _, entry := range entries {
+		switch entry.prompt.Defaults.Mode {
+		case "", "paste", "type":
+		default:
+			return &InvalidPromptModeError{
+				Path:  entry.prompt.Path,
+				Value: entry.prompt.Defaults.Mode,
+			}
+		}
+	}
+	return nil
 }
 
 func clonePrompt(prompt Prompt) Prompt {

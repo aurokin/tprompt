@@ -41,6 +41,7 @@ Supported keys for MVP:
 - `key` — single printable character for the TUI keybind board
 
 Unsupported keys should be ignored for MVP.
+Invalid `mode` values are a hard error at load time.
 
 ## `key:` validation
 

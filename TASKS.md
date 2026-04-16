@@ -34,6 +34,8 @@ Read first:
 
 Goal: make prompt IDs resolvable from markdown files, with keybind validation.
 
+Status: complete
+
 Tasks:
 
 - walk prompt directory recursively

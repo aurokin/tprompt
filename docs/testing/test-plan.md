@@ -14,6 +14,7 @@ The MVP should be testable without requiring a full live tmux session for most l
 - extracts body correctly with and without frontmatter
 - ignores unsupported file extensions
 - parses `key:` frontmatter field
+- rejects invalid prompt `mode` defaults
 - rejects duplicate `key:` (case-insensitive)
 - rejects reserved-key collisions
 - rejects malformed `key:` values (multi-char, empty, non-printable, `ctrl+x`)

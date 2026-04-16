@@ -136,6 +136,25 @@ func TestFSStoreSurfacesKeybindValidationErrors(t *testing.T) {
 	}
 }
 
+func TestFSStoreRejectsInvalidPromptMode(t *testing.T) {
+	dir := t.TempDir()
+	writePrompt(t, dir, "alpha.md", "---\nmode: turbo\n---\na\n")
+
+	store := NewFS(dir, nil, []rune("123"))
+	err := store.Discover()
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+
+	var modeErr *InvalidPromptModeError
+	if !errors.As(err, &modeErr) {
+		t.Fatalf("want InvalidPromptModeError, got %T", err)
+	}
+	if modeErr.Value != "turbo" {
+		t.Fatalf("Value = %q, want %q", modeErr.Value, "turbo")
+	}
+}
+
 func TestFSStoreRejectsExplicitEmptyOrNullKeys(t *testing.T) {
 	tests := map[string]string{
 		"implicit-null": "---\nkey:\n---\na\n",
@@ -278,6 +297,26 @@ body
 
 	if diff := cmp.Diff([]string{"one", "two"}, again[0].Tags); diff != "" {
 		t.Fatalf("List() tags mutated (-want +got):\n%s", diff)
+	}
+}
+
+func TestFSStoreIncludesOverflowPromptsWithoutAssignedKeys(t *testing.T) {
+	dir := t.TempDir()
+	writePrompt(t, dir, "alpha.md", "alpha\n")
+	writePrompt(t, dir, "bravo.md", "bravo\n")
+
+	store := NewFS(dir, nil, []rune("1"))
+	summaries, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	want := []Summary{
+		{ID: "alpha", Key: "1", Path: filepath.Join(dir, "alpha.md")},
+		{ID: "bravo", Key: "", Path: filepath.Join(dir, "bravo.md")},
+	}
+	if diff := cmp.Diff(want, summaries); diff != "" {
+		t.Fatalf("List() mismatch (-want +got):\n%s", diff)
 	}
 }
 
