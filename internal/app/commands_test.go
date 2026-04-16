@@ -23,7 +23,7 @@ func TestZeroArgCommandsRejectExtraOperands(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, stderr, err := executeRoot(t, tt.args...)
+			_, _, err := executeRoot(t, tt.args...)
 			if err == nil {
 				t.Fatal("want usage error, got nil")
 			}
@@ -32,9 +32,6 @@ func TestZeroArgCommandsRejectExtraOperands(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "unknown command") {
 				t.Fatalf("want cobra usage error, got %v", err)
-			}
-			if !strings.Contains(stderr, "Error: unknown command") {
-				t.Fatalf("want cobra error output, got %q", stderr)
 			}
 		})
 	}
@@ -67,7 +64,7 @@ func TestZeroArgCommandsAcceptBareInvocation(t *testing.T) {
 func executeRoot(t *testing.T, args ...string) (stdout string, stderr string, err error) {
 	t.Helper()
 
-	root := NewRootCmd()
+	root := NewRootCmd(fakeDeps(t))
 	var outBuf bytes.Buffer
 	var errBuf bytes.Buffer
 	root.SetOut(&outBuf)

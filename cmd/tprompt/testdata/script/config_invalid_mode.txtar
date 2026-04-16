@@ -1,0 +1,10 @@
+# Invalid default_mode should fail with exit 2.
+
+mkdir prompts
+! tprompt list --config config.toml
+stderr 'default_mode'
+stderr 'tprompt - error:'
+
+-- config.toml --
+prompts_dir = "prompts"
+default_mode = "yolo"

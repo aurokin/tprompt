@@ -1,0 +1,11 @@
+# Unknown config key should fail with exit 2.
+
+mkdir prompts
+! tprompt list --config config.toml
+stderr 'bogus_key'
+stderr 'tprompt - error:'
+
+-- config.toml --
+prompts_dir = "prompts"
+default_mode = "paste"
+bogus_key = "oops"

@@ -1,0 +1,11 @@
+# Unparseable clipboard_read_command should fail with exit 2.
+
+mkdir prompts
+! tprompt list --config config.toml
+stderr 'clipboard_read_command'
+stderr 'tprompt - error:'
+
+-- config.toml --
+prompts_dir = "prompts"
+default_mode = "paste"
+clipboard_read_command = '"unterminated'

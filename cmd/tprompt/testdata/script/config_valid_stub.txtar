@@ -1,0 +1,9 @@
+# Valid config but handler not yet implemented — exits non-zero with "not implemented".
+
+mkdir prompts
+! tprompt list --config config.toml
+stderr 'not implemented'
+
+-- config.toml --
+prompts_dir = "prompts"
+default_mode = "paste"

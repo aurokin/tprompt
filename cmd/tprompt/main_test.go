@@ -4,25 +4,26 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/hsadler/tprompt/internal/app"
 )
 
-func TestRunPrintsCommandErrorOnce(t *testing.T) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
+func TestRunCLIConfigErrorFormat(t *testing.T) {
+	var stdout, stderr bytes.Buffer
 
-	code := run([]string{"list"}, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1", code)
+	code := app.RunCLI([]string{"list"}, &stdout, &stderr, strings.NewReader(""))
+	if code != app.ExitUsage {
+		t.Fatalf("exit code = %d, want %d", code, app.ExitUsage)
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
 
-	lines := strings.Split(strings.TrimSpace(stderr.String()), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("stderr lines = %d, want 1: %q", len(lines), stderr.String())
+	got := strings.TrimSpace(stderr.String())
+	if !strings.HasPrefix(got, "tprompt - error:") {
+		t.Fatalf("stderr = %q, want tprompt - error: prefix", got)
 	}
-	if lines[0] != "Error: not implemented" {
-		t.Fatalf("stderr = %q, want %q", lines[0], "Error: not implemented")
+	if !strings.Contains(got, "prompts_dir") {
+		t.Fatalf("stderr should mention prompts_dir: %q", got)
 	}
 }

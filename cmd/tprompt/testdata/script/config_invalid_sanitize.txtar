@@ -1,0 +1,11 @@
+# Invalid sanitize value should fail with exit 2.
+
+mkdir prompts
+! tprompt list --config config.toml
+stderr 'sanitize'
+stderr 'tprompt - error:'
+
+-- config.toml --
+prompts_dir = "prompts"
+default_mode = "paste"
+sanitize = "maybe"

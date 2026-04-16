@@ -1,0 +1,4 @@
+# Unknown flag should fail.
+
+! tprompt --bogus
+stderr 'unknown flag'
