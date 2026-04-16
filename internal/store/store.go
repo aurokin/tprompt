@@ -76,6 +76,16 @@ func (e *NotFoundError) Error() string {
 	return fmt.Sprintf("prompt %q not found", e.ID)
 }
 
+// PromptsDirMissingError reports that the configured prompts directory does not
+// exist or is not a directory at discovery time.
+type PromptsDirMissingError struct {
+	Path string
+}
+
+func (e *PromptsDirMissingError) Error() string {
+	return fmt.Sprintf("prompts directory missing: %s", e.Path)
+}
+
 // FSStore is the filesystem-backed Phase 1 store implementation.
 type FSStore struct {
 	root     string
@@ -106,6 +116,12 @@ func (s *FSStore) Discover() error {
 	if err != nil {
 		s.clearCache()
 		return fmt.Errorf("resolve prompts directory: %w", err)
+	}
+
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		s.clearCache()
+		return &PromptsDirMissingError{Path: root}
 	}
 
 	entries, err := discoverPromptFiles(root)

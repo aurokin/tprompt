@@ -1,0 +1,25 @@
+# doctor with duplicate frontmatter keybinds reports FAIL and exits non-zero.
+
+mkdir prompts
+! tprompt doctor --config config.toml
+stdout 'ok   config loaded'
+stdout 'ok   prompts directory exists'
+stdout 'FAIL'
+stdout 'duplicate keybind'
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- prompts/alpha.md --
+---
+key: c
+---
+
+Alpha body.
+
+-- prompts/beta.md --
+---
+key: c
+---
+
+Beta body.

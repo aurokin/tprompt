@@ -1,0 +1,18 @@
+# doctor with valid config and prompts reports all ok (except tmux).
+
+mkdir prompts
+tprompt doctor --config config.toml
+stdout 'ok   config loaded'
+stdout 'ok   prompts directory exists'
+stdout 'ok   2 prompts discovered'
+stdout 'warn not inside tmux'
+! stderr .
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- prompts/alpha.md --
+Alpha body.
+
+-- prompts/beta.md --
+Beta body.

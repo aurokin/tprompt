@@ -1,0 +1,10 @@
+# doctor with nonexistent prompts_dir reports FAIL from the dir check
+# (not from config validation) and exits non-zero.
+
+! tprompt doctor --config config.toml
+stdout 'ok   config loaded'
+stdout 'FAIL prompts directory missing'
+stdout 'warn not inside tmux'
+
+-- config.toml --
+prompts_dir = "nonexistent"

@@ -1,0 +1,9 @@
+# list with a nonexistent prompts_dir surfaces the shared
+# PromptsDirMissingError with a clear stderr message and non-zero exit.
+
+! tprompt list --config config.toml
+stderr 'prompts directory missing'
+! stdout .
+
+-- config.toml --
+prompts_dir = "nonexistent"

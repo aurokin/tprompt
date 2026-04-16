@@ -216,6 +216,31 @@ func TestFSStoreResolveMissingPrompt(t *testing.T) {
 	}
 }
 
+func TestFSStoreDiscoverReportsMissingRoot(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	store := NewFS(missing, nil, []rune("123"))
+
+	err := store.Discover()
+	var missingErr *PromptsDirMissingError
+	if !errors.As(err, &missingErr) {
+		t.Fatalf("want PromptsDirMissingError, got %T: %v", err, err)
+	}
+}
+
+func TestFSStoreDiscoverReportsRootIsFile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := NewFS(file, nil, []rune("123"))
+
+	err := store.Discover()
+	var missingErr *PromptsDirMissingError
+	if !errors.As(err, &missingErr) {
+		t.Fatalf("want PromptsDirMissingError, got %T: %v", err, err)
+	}
+}
+
 func TestFSStoreTreatsNonMappingFenceAsBody(t *testing.T) {
 	dir := t.TempDir()
 	content := "---\nHeading\n---\nbody\n"

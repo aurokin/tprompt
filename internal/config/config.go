@@ -218,19 +218,6 @@ func Validate(r Resolved) error {
 	if r.PromptsDir == "" {
 		return &ValidationError{Field: "prompts_dir", Message: "must be set"}
 	}
-	info, err := os.Stat(r.PromptsDir)
-	if err != nil {
-		return &ValidationError{
-			Field:   "prompts_dir",
-			Message: fmt.Sprintf("directory does not exist: %s", r.PromptsDir),
-		}
-	}
-	if !info.IsDir() {
-		return &ValidationError{
-			Field:   "prompts_dir",
-			Message: fmt.Sprintf("not a directory: %s", r.PromptsDir),
-		}
-	}
 
 	switch r.DefaultMode {
 	case "paste", "type":

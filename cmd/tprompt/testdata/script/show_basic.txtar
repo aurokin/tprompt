@@ -1,0 +1,25 @@
+# show displays full metadata and body.
+
+mkdir prompts
+tprompt show code-review --config config.toml
+stdout 'ID: code-review'
+stdout 'Source: .*/prompts/code-review\.md'
+stdout 'Title: Code Review'
+stdout 'Description: Deep review prompt'
+stdout 'Tags: review, code'
+stdout 'Key: c'
+stdout 'Review this code\.'
+! stderr .
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- prompts/code-review.md --
+---
+title: Code Review
+description: Deep review prompt
+tags: [review, code]
+key: c
+---
+
+Review this code.

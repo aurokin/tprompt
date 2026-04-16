@@ -1,6 +1,11 @@
 package app
 
-import "github.com/spf13/cobra"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/spf13/cobra"
+)
 
 func newListCmd(deps Deps) *cobra.Command {
 	return &cobra.Command{
@@ -8,10 +13,22 @@ func newListCmd(deps Deps) *cobra.Command {
 		Short: "List available prompts",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			if _, err := deps.LoadConfig(*deps.ConfigPath); err != nil {
+			cfg, err := deps.LoadConfig(*deps.ConfigPath)
+			if err != nil {
 				return err
 			}
-			return ErrNotImplemented
+			s, err := deps.NewStore(cfg)
+			if err != nil {
+				return err
+			}
+			summaries, err := s.List()
+			if err != nil {
+				return err
+			}
+			for _, summary := range summaries {
+				_, _ = fmt.Fprintln(deps.Stdout, summary.ID)
+			}
+			return nil
 		},
 	}
 }
@@ -21,11 +38,37 @@ func newShowCmd(deps Deps) *cobra.Command {
 		Use:   "show <id>",
 		Short: "Print the body of a prompt",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if _, err := deps.LoadConfig(*deps.ConfigPath); err != nil {
+		RunE: func(_ *cobra.Command, args []string) error {
+			cfg, err := deps.LoadConfig(*deps.ConfigPath)
+			if err != nil {
 				return err
 			}
-			return ErrNotImplemented
+			s, err := deps.NewStore(cfg)
+			if err != nil {
+				return err
+			}
+			p, err := s.Resolve(args[0])
+			if err != nil {
+				return err
+			}
+			w := deps.Stdout
+			_, _ = fmt.Fprintf(w, "ID: %s\n", p.ID)
+			_, _ = fmt.Fprintf(w, "Source: %s\n", p.Path)
+			if p.Title != "" {
+				_, _ = fmt.Fprintf(w, "Title: %s\n", p.Title)
+			}
+			if p.Description != "" {
+				_, _ = fmt.Fprintf(w, "Description: %s\n", p.Description)
+			}
+			if len(p.Tags) > 0 {
+				_, _ = fmt.Fprintf(w, "Tags: %s\n", strings.Join(p.Tags, ", "))
+			}
+			if p.Key != "" {
+				_, _ = fmt.Fprintf(w, "Key: %s\n", p.Key)
+			}
+			_, _ = fmt.Fprintln(w)
+			_, _ = fmt.Fprint(w, p.Body)
+			return nil
 		},
 	}
 }
@@ -64,10 +107,7 @@ func newDoctorCmd(deps Deps) *cobra.Command {
 		Short: "Diagnose configuration, prompt store, and environment issues",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			if _, err := deps.LoadConfig(*deps.ConfigPath); err != nil {
-				return err
-			}
-			return ErrNotImplemented
+			return runDoctor(deps)
 		},
 	}
 }

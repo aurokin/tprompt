@@ -1,0 +1,19 @@
+# show with no frontmatter omits Title/Description/Tags lines.
+# Key is still present because the store auto-assigns from the pool.
+
+mkdir prompts
+tprompt show bare --config config.toml
+stdout 'ID: bare'
+stdout 'Source: .*/prompts/bare\.md'
+! stdout 'Title:'
+! stdout 'Description:'
+! stdout 'Tags:'
+stdout 'Key:'
+stdout 'Just a body\.'
+! stderr .
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- prompts/bare.md --
+Just a body.

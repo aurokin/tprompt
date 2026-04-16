@@ -5,6 +5,11 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/hsadler/tprompt/internal/clipboard"
+	"github.com/hsadler/tprompt/internal/config"
+	"github.com/hsadler/tprompt/internal/store"
+	"github.com/hsadler/tprompt/internal/tmux"
 )
 
 func TestZeroArgCommandsRejectExtraOperands(t *testing.T) {
@@ -73,4 +78,264 @@ func executeRoot(t *testing.T, args ...string) (stdout string, stderr string, er
 
 	err = root.Execute()
 	return outBuf.String(), errBuf.String(), err
+}
+
+func executeRootWith(t *testing.T, deps Deps, args ...string) (stdout string, stderr string, err error) {
+	t.Helper()
+
+	var outBuf, errBuf bytes.Buffer
+	deps.Stdout = &outBuf
+	deps.Stderr = &errBuf
+
+	root := NewRootCmd(deps)
+	root.SetOut(&outBuf)
+	root.SetErr(&errBuf)
+	root.SetArgs(args)
+
+	err = root.Execute()
+	return outBuf.String(), errBuf.String(), err
+}
+
+type fakeStore struct {
+	summaries   []store.Summary
+	prompts     map[string]store.Prompt
+	discoverErr error
+}
+
+func (f *fakeStore) Discover() error { return f.discoverErr }
+
+func (f *fakeStore) List() ([]store.Summary, error) {
+	if f.discoverErr != nil {
+		return nil, f.discoverErr
+	}
+	return f.summaries, nil
+}
+
+func (f *fakeStore) Resolve(id string) (store.Prompt, error) {
+	if f.discoverErr != nil {
+		return store.Prompt{}, f.discoverErr
+	}
+	p, ok := f.prompts[id]
+	if !ok {
+		return store.Prompt{}, &store.NotFoundError{ID: id}
+	}
+	return p, nil
+}
+
+func workingDeps(t *testing.T, fs *fakeStore) Deps {
+	t.Helper()
+	configPath := ""
+	return Deps{
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+		Stdin:      &bytes.Buffer{},
+		Env:        func(string) string { return "" },
+		ConfigPath: &configPath,
+		LoadConfig: func(string) (config.Resolved, error) {
+			return config.Resolved{
+				PromptsDir: "/test/prompts",
+			}, nil
+		},
+		NewStore: func(config.Resolved) (store.Store, error) {
+			return fs, nil
+		},
+		NewTmux: func() (tmux.Adapter, error) {
+			return nil, ErrNotImplemented
+		},
+		NewClip: func(config.Resolved) (clipboard.Reader, error) {
+			return nil, ErrNotImplemented
+		},
+	}
+}
+
+func TestListPrintsIDsAlphabetically(t *testing.T) {
+	fs := &fakeStore{
+		summaries: []store.Summary{
+			{ID: "alpha"},
+			{ID: "beta"},
+			{ID: "gamma"},
+		},
+	}
+	stdout, _, err := executeRootWith(t, workingDeps(t, fs), "list")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "alpha\nbeta\ngamma\n"
+	if stdout != want {
+		t.Fatalf("stdout mismatch\ngot:  %q\nwant: %q", stdout, want)
+	}
+}
+
+func TestListEmptyStore(t *testing.T) {
+	fs := &fakeStore{summaries: []store.Summary{}}
+	stdout, _, err := executeRootWith(t, workingDeps(t, fs), "list")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout != "" {
+		t.Fatalf("want empty stdout, got %q", stdout)
+	}
+}
+
+func TestShowFullMetadata(t *testing.T) {
+	enter := false
+	fs := &fakeStore{
+		prompts: map[string]store.Prompt{
+			"code-review": {
+				Summary: store.Summary{
+					ID:          "code-review",
+					Title:       "Code Review",
+					Description: "Deep review prompt",
+					Tags:        []string{"review", "code"},
+					Key:         "c",
+					Path:        "/prompts/code-review.md",
+				},
+				Body: "Review this code.\n",
+				Defaults: store.DeliveryDefaults{
+					Mode:  "paste",
+					Enter: &enter,
+				},
+			},
+		},
+	}
+	stdout, _, err := executeRootWith(t, workingDeps(t, fs), "show", "code-review")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := strings.Join([]string{
+		"ID: code-review",
+		"Source: /prompts/code-review.md",
+		"Title: Code Review",
+		"Description: Deep review prompt",
+		"Tags: review, code",
+		"Key: c",
+		"",
+		"Review this code.",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout mismatch\ngot:\n%s\nwant:\n%s", stdout, want)
+	}
+}
+
+func TestShowMinimalMetadata(t *testing.T) {
+	fs := &fakeStore{
+		prompts: map[string]store.Prompt{
+			"bare": {
+				Summary: store.Summary{
+					ID:   "bare",
+					Path: "/prompts/bare.md",
+				},
+				Body: "Just a body.\n",
+			},
+		},
+	}
+	stdout, _, err := executeRootWith(t, workingDeps(t, fs), "show", "bare")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := "ID: bare\nSource: /prompts/bare.md\n\nJust a body.\n"
+	if stdout != want {
+		t.Fatalf("stdout mismatch\ngot:\n%s\nwant:\n%s", stdout, want)
+	}
+}
+
+func TestShowMinimalWithKey(t *testing.T) {
+	fs := &fakeStore{
+		prompts: map[string]store.Prompt{
+			"bare": {
+				Summary: store.Summary{
+					ID:   "bare",
+					Path: "/prompts/bare.md",
+					Key:  "b",
+				},
+				Body: "Just a body.\n",
+			},
+		},
+	}
+	stdout, _, err := executeRootWith(t, workingDeps(t, fs), "show", "bare")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "ID: bare\nSource: /prompts/bare.md\nKey: b\n\nJust a body.\n"
+	if stdout != want {
+		t.Fatalf("stdout mismatch\ngot:\n%s\nwant:\n%s", stdout, want)
+	}
+}
+
+func TestShowNotFound(t *testing.T) {
+	fs := &fakeStore{prompts: map[string]store.Prompt{}}
+	_, _, err := executeRootWith(t, workingDeps(t, fs), "show", "nope")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	var nf *store.NotFoundError
+	if !errors.As(err, &nf) {
+		t.Fatalf("want NotFoundError, got %T: %v", err, err)
+	}
+}
+
+func TestShowLoadConfigError(t *testing.T) {
+	configErr := &config.ValidationError{Field: "prompts_dir", Message: "must be set"}
+	deps := workingDeps(t, &fakeStore{})
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{}, configErr
+	}
+	_, _, err := executeRootWith(t, deps, "show", "anything")
+	var ve *config.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want ValidationError, got %T: %v", err, err)
+	}
+}
+
+func TestShowNewStoreError(t *testing.T) {
+	storeErr := errors.New("store init failed")
+	deps := workingDeps(t, &fakeStore{})
+	deps.NewStore = func(config.Resolved) (store.Store, error) {
+		return nil, storeErr
+	}
+	_, _, err := executeRootWith(t, deps, "show", "anything")
+	if !errors.Is(err, storeErr) {
+		t.Fatalf("want storeErr, got %v", err)
+	}
+}
+
+func TestListLoadConfigError(t *testing.T) {
+	configErr := &config.ValidationError{Field: "prompts_dir", Message: "must be set"}
+	deps := workingDeps(t, &fakeStore{})
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{}, configErr
+	}
+	_, _, err := executeRootWith(t, deps, "list")
+	var ve *config.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want ValidationError, got %T: %v", err, err)
+	}
+}
+
+func TestListNewStoreError(t *testing.T) {
+	storeErr := errors.New("store init failed")
+	deps := workingDeps(t, &fakeStore{})
+	deps.NewStore = func(config.Resolved) (store.Store, error) {
+		return nil, storeErr
+	}
+	_, _, err := executeRootWith(t, deps, "list")
+	if !errors.Is(err, storeErr) {
+		t.Fatalf("want storeErr, got %v", err)
+	}
+}
+
+func TestListDiscoverError(t *testing.T) {
+	dupErr := &store.DuplicatePromptIDError{
+		ID:    "x",
+		Paths: []string{"/a/x.md", "/b/x.md"},
+	}
+	fs := &fakeStore{discoverErr: dupErr}
+	_, _, err := executeRootWith(t, workingDeps(t, fs), "list")
+	var de *store.DuplicatePromptIDError
+	if !errors.As(err, &de) {
+		t.Fatalf("want DuplicatePromptIDError, got %T: %v", err, err)
+	}
 }

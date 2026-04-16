@@ -100,6 +100,8 @@ Read first:
 
 Goal: ship the user-facing commands that do not require tmux delivery.
 
+Status: complete
+
 Tasks:
 
 - implement `tprompt list`

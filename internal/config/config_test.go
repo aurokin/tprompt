@@ -436,22 +436,6 @@ func TestValidateRejectsEmptyPromptsDir(t *testing.T) {
 	assertValidationField(t, Validate(r), "prompts_dir")
 }
 
-func TestValidateRejectsMissingPromptsDir(t *testing.T) {
-	r := validResolved(t)
-	r.PromptsDir = "/nonexistent/prompts/dir"
-	assertValidationField(t, Validate(r), "prompts_dir")
-}
-
-func TestValidateRejectsFileAsPromptsDir(t *testing.T) {
-	f := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(f, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	r := validResolved(t)
-	r.PromptsDir = f
-	assertValidationField(t, Validate(r), "prompts_dir")
-}
-
 func TestValidateRejectsInvalidMode(t *testing.T) {
 	r := validResolved(t)
 	r.DefaultMode = "yolo"

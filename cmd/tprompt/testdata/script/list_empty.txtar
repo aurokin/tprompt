@@ -1,9 +1,9 @@
-# Valid config with empty prompts directory — list succeeds with no output.
+# list with no prompt files produces empty stdout, exit 0.
 
 mkdir prompts
 tprompt list --config config.toml
 ! stdout .
+! stderr .
 
 -- config.toml --
 prompts_dir = "prompts"
-default_mode = "paste"

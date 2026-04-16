@@ -1,0 +1,28 @@
+# list prints prompt IDs alphabetically, one per line.
+
+mkdir prompts
+tprompt list --config config.toml
+stdout '^bug-hunt\ncode-review\nno-frontmatter\n$'
+! stderr .
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- prompts/code-review.md --
+---
+title: Code Review
+key: c
+---
+
+Review this code.
+
+-- prompts/bug-hunt.md --
+---
+title: Bug Hunt
+key: b
+---
+
+Find bugs.
+
+-- prompts/no-frontmatter.md --
+Just a body.

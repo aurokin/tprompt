@@ -1,0 +1,19 @@
+# doctor with duplicate prompt IDs reports FAIL and exits non-zero.
+
+mkdir prompts/a
+mkdir prompts/b
+! tprompt doctor --config config.toml
+stdout 'ok   config loaded'
+stdout 'ok   prompts directory exists'
+stdout 'FAIL'
+stdout 'duplicate prompt ID'
+stdout 'same'
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- prompts/a/same.md --
+Body A.
+
+-- prompts/b/same.md --
+Body B.

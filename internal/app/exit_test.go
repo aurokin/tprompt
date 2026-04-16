@@ -51,6 +51,13 @@ func TestExitCodePromptErrors(t *testing.T) {
 	}
 }
 
+func TestExitCodePromptsDirMissing(t *testing.T) {
+	err := &store.PromptsDirMissingError{Path: "/nope"}
+	if got := ExitCode(err); got != ExitUsage {
+		t.Fatalf("ExitCode(PromptsDirMissingError) = %d, want %d", got, ExitUsage)
+	}
+}
+
 func TestExitCodeUnknownError(t *testing.T) {
 	if got := ExitCode(errors.New("something unexpected")); got != ExitGeneral {
 		t.Fatalf("ExitCode(generic) = %d, want %d", got, ExitGeneral)

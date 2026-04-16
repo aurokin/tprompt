@@ -1,0 +1,8 @@
+# show with unknown ID exits non-zero and prints error to stderr.
+
+mkdir prompts
+! tprompt show nonexistent --config config.toml
+stderr 'not found'
+
+-- config.toml --
+prompts_dir = "prompts"

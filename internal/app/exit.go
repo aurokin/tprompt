@@ -30,6 +30,11 @@ func ExitCode(err error) int {
 		return ExitUsage
 	}
 
+	var missingDir *store.PromptsDirMissingError
+	if errors.As(err, &missingDir) {
+		return ExitUsage
+	}
+
 	var dupID *store.DuplicatePromptIDError
 	if errors.As(err, &dupID) {
 		return ExitPrompt
