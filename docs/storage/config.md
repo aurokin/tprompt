@@ -59,9 +59,17 @@ select    = "Enter"
 
 ## Resolution order
 
-Recommended order:
+Recommended order for resolved delivery settings (`mode`, `enter`, `sanitize`, target-independent behavior):
 
 1. CLI flags
+2. prompt frontmatter defaults
+3. config file
+4. built-in defaults
+
+`prompts_dir`, socket/log paths, picker configuration, reserved keys, and the
+keybind pool are config-only settings, so they resolve as:
+
+1. CLI flags where supported
 2. config file
 3. built-in defaults
 

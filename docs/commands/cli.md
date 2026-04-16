@@ -50,6 +50,11 @@ Behavior:
 
 - if `--target-pane` is omitted, use current pane context when available
 - if not inside tmux and no target pane supplied, fail clearly
+- delivery settings resolve in this order:
+  - CLI flags
+  - prompt frontmatter defaults
+  - config file
+  - built-in defaults
 - always a direct send; never touches the daemon queue
 
 ### `tprompt paste`
@@ -87,14 +92,17 @@ Checks environment and configuration.
 
 Suggested checks:
 
-- prompt directory exists
-- prompt files discoverable
-- duplicate IDs absent
-- duplicate or reserved keybinds absent
-- inside tmux or not
-- daemon socket reachable or daemon status known
-- clipboard reader resolved and installed
-- picker command availability if an external picker is configured
+- baseline checks for the first implementation pass:
+  - config loads and validates
+  - prompt directory exists
+  - prompt files discoverable
+  - duplicate IDs absent
+  - duplicate or reserved keybinds absent
+  - inside tmux or not
+- later checks once those subsystems exist:
+  - daemon socket reachable or daemon status known
+  - clipboard reader resolved and installed
+  - picker command availability if an external picker is configured
 
 ### `tprompt daemon start`
 ### `tprompt daemon stop`

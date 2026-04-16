@@ -60,17 +60,30 @@ Read first:
 - `docs/architecture/data-model.md`
 - `docs/implementation/interfaces.md`
 
-## Phase 2 — basic CLI commands
+## Phase 2a — CLI foundation
 
-Goal: implement the user-facing commands that do not depend on TUI-flow deferral yet.
+Goal: define the execution model for all non-interactive commands before wiring
+individual handlers.
 
 Tasks:
 
-- `tprompt list`
-- `tprompt show <id>`
-- `tprompt send <id>`
-- `tprompt doctor` (including duplicate-keybind checks)
-- basic output formatting and exit codes (including cancel = 0)
+- load config from TOML with defaults + validation
+- normalize and validate:
+  - `prompts_dir`
+  - delivery mode
+  - sanitize mode
+  - keybind pool
+  - reserved keys
+  - command-style fields such as `clipboard_read_command`
+- define precedence rules:
+  - CLI flags
+  - prompt frontmatter defaults
+  - config file
+  - built-in defaults
+- introduce typed command/application dependencies so CLI handlers can be tested
+  against fake store/tmux/clipboard implementations
+- map internal errors to stable MVP exit codes
+- add `testscript` black-box coverage for config resolution and exit-code behavior
 
 Libraries introduced this phase:
 
@@ -83,20 +96,53 @@ Read first:
 - `docs/storage/config.md`
 - `docs/implementation/error-handling.md`
 
-## Phase 3 — tmux adapter
+## Phase 2b — read-only CLI commands
 
-Goal: centralize tmux command generation and target inspection.
+Goal: ship the user-facing commands that do not require tmux delivery.
+
+Tasks:
+
+- implement `tprompt list`
+- implement `tprompt show <id>`
+- implement a baseline `tprompt doctor` covering:
+  - config load/validation
+  - prompt directory existence
+  - prompt discovery
+  - duplicate ID detection
+  - duplicate/reserved/malformed keybind detection
+  - tmux presence/context detection
+- lock exact output formatting for `list`, `show`, and `doctor`
+- expand `testscript` coverage for stdout/stderr contracts and command-specific
+  exit codes
+
+Read first:
+
+- `docs/commands/cli.md`
+- `docs/storage/config.md`
+- `docs/implementation/error-handling.md`
+
+## Phase 3 — tmux adapter and synchronous delivery
+
+Goal: centralize tmux command generation/inspection and wire direct delivery for
+`tprompt send`.
 
 Tasks:
 
 - detect whether the process is inside tmux
 - identify current pane/session/client when possible
+- resolve `tprompt send` target pane:
+  - explicit `--target-pane`
+  - current pane context when available
+  - clear failure when neither is available
 - implement pane existence checks
 - implement selected-pane checks
 - implement capture-pane helper
 - implement paste delivery: `load-buffer` + `paste-buffer -d -p` with separate `send-keys Enter` when `--enter`
 - implement type delivery: `send-keys -l` with rune-boundary chunking
 - implement `display-message` error surfacing with `-c <client-tty>` scoping
+- wire `tprompt send <id>` for synchronous direct delivery (never via daemon)
+- add adapter-focused tests for target resolution, command construction, and
+  tmux-specific failure modes
 
 Read first:
 
