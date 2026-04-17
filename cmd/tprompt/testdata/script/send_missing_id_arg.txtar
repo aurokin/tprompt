@@ -1,0 +1,7 @@
+# send requires exactly one positional arg (the prompt ID).
+
+! tprompt send --config config.toml
+stderr 'accepts 1 arg'
+
+-- config.toml --
+prompts_dir = "prompts"

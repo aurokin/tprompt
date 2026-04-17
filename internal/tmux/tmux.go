@@ -2,8 +2,8 @@
 // delivery. See docs/tmux/delivery.md and docs/tmux/verification.md.
 package tmux
 
-// TargetContext identifies a tmux pane plus the client whose popup launched
-// the TUI. Phase 3 fills this in.
+// TargetContext identifies a tmux pane plus (when known) the client whose
+// context the delivery should be scoped to.
 type TargetContext struct {
 	Session   string
 	Window    string

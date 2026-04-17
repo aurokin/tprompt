@@ -1,0 +1,14 @@
+# send without $TMUX and without --target-pane fails with ExitTmux (4).
+
+env TMUX=
+
+mkdir prompts
+! tprompt send alpha --config config.toml
+stderr 'tmux environment unavailable'
+stderr 'not running inside tmux'
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- prompts/alpha.md --
+Alpha body.

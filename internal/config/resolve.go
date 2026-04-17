@@ -53,13 +53,19 @@ func ResolveDelivery(cfg Resolved, fm FrontmatterDefaults, flags DeliveryFlags) 
 	switch d.Mode {
 	case "paste", "type":
 	default:
-		return Delivery{}, fmt.Errorf("invalid delivery mode %q: must be paste or type", d.Mode)
+		return Delivery{}, &ValidationError{
+			Field:   "mode",
+			Message: fmt.Sprintf("invalid delivery mode %q: must be paste or type", d.Mode),
+		}
 	}
 
 	switch d.Sanitize {
 	case "off", "safe", "strict":
 	default:
-		return Delivery{}, fmt.Errorf("invalid sanitize mode %q: must be off, safe, or strict", d.Sanitize)
+		return Delivery{}, &ValidationError{
+			Field:   "sanitize",
+			Message: fmt.Sprintf("invalid sanitize mode %q: must be off, safe, or strict", d.Sanitize),
+		}
 	}
 
 	return d, nil

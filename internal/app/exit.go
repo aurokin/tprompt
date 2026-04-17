@@ -6,6 +6,7 @@ import (
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/keybind"
 	"github.com/hsadler/tprompt/internal/store"
+	"github.com/hsadler/tprompt/internal/tmux"
 )
 
 // Exit codes documented in docs/commands/cli.md.
@@ -59,6 +60,23 @@ func ExitCode(err error) int {
 	var malformedKey *keybind.MalformedKeybindError
 	if errors.As(err, &malformedKey) {
 		return ExitPrompt
+	}
+
+	var envErr *tmux.EnvError
+	if errors.As(err, &envErr) {
+		return ExitTmux
+	}
+	var paneMissing *tmux.PaneMissingError
+	if errors.As(err, &paneMissing) {
+		return ExitTmux
+	}
+	var deliveryErr *tmux.DeliveryError
+	if errors.As(err, &deliveryErr) {
+		return ExitDelivery
+	}
+	var oversizeErr *tmux.OversizeError
+	if errors.As(err, &oversizeErr) {
+		return ExitDelivery
 	}
 
 	return ExitGeneral

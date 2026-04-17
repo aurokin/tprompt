@@ -1,0 +1,11 @@
+# send --mode bogus is rejected before any adapter work.
+
+mkdir prompts
+! tprompt send alpha --config config.toml --target-pane %1 --mode bogus
+stderr 'invalid delivery mode'
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- prompts/alpha.md --
+Alpha body.

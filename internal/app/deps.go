@@ -51,7 +51,7 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 			return s, nil
 		},
 		NewTmux: func() (tmux.Adapter, error) {
-			return nil, ErrNotImplemented
+			return tmux.New(tmux.NewExecRunner("")), nil
 		},
 		NewClip: func(cfg config.Resolved) (clipboard.Reader, error) {
 			return nil, ErrNotImplemented
