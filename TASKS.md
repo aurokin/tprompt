@@ -138,13 +138,33 @@ Tasks:
   - clear failure when neither is available
 - implement pane existence checks
 - implement selected-pane checks
-- implement capture-pane helper
 - implement paste delivery: `load-buffer` + `paste-buffer -d -p` with separate `send-keys Enter` when `--enter`
-- implement type delivery: `send-keys -l` with rune-boundary chunking
+  - use a per-invocation buffer name (`tprompt-send-<pid>-<unix-nanos>`) since
+    direct `send` has no daemon-issued job ID
+- implement type delivery: `send-keys -l` with rune-boundary chunking (4096B
+  default)
 - implement `display-message` error surfacing with `-c <client-tty>` scoping
-- wire `tprompt send <id>` for synchronous direct delivery (never via daemon)
-- add adapter-focused tests for target resolution, command construction, and
-  tmux-specific failure modes
+- introduce a `Runner` seam around `os/exec` so tmux command construction is
+  unit-testable without invoking real tmux
+- define tmux error taxonomy and wire into `app.ExitCode`:
+  - `tmux.EnvError` (not inside tmux, no target supplied) → exit 4
+  - `tmux.PaneMissingError` (resolved/supplied pane does not exist) → exit 4
+  - `tmux.DeliveryError` (load-buffer / paste-buffer / send-keys non-zero) → exit 6
+- wire `tprompt send <id>` for synchronous direct delivery (never via daemon):
+  - flags `--target-pane`, `--mode`, `--enter`, `--sanitize`
+  - `ResolveDelivery` (config package) is the first real caller — handler must
+    feed it flags + prompt frontmatter defaults
+  - enforce `max_paste_bytes` before the adapter is invoked (applies to both
+    modes, per `docs/tmux/delivery.md`)
+  - `--sanitize` flag is accepted and validated, but the sanitizer itself
+    lands in Phase 3.5; Phase 3 delivers bodies as-is
+- `CapturePaneTail` (from `Adapter` interface) is deferred to Phase 4; it has
+  no caller in Phase 3 and exists for daemon post-injection verification
+- add adapter-focused tests for target resolution, command construction,
+  chunking, and tmux-specific failure modes (against a fake Runner)
+- add `testscript` coverage for `tprompt send`: happy path (paste, type,
+  enter), pane-missing, not-in-tmux-no-target, oversize body, unknown prompt
+  id — using a test-only Deps hook that injects a fake adapter
 
 Read first:
 
@@ -152,6 +172,7 @@ Read first:
 - `docs/tmux/delivery.md`
 - `docs/tmux/verification.md`
 - `docs/implementation/interfaces.md`
+- `docs/implementation/error-handling.md`
 
 ## Phase 3.5 — clipboard reader and sanitizer
 

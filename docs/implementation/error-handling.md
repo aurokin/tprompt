@@ -41,6 +41,17 @@ MVP should prefer explicit operational errors over silent fallback behavior.
 - delivery mode invalid
 - **job replaced by newer job targeting the same pane** (informational; logged and surfaced via `display-message`)
 
+### tmux error taxonomy (Phase 3)
+
+Concrete error types the tmux adapter surfaces. `app.ExitCode` maps these to
+the CLI exit codes documented in `docs/commands/cli.md`.
+
+| Error type | Meaning | Exit code |
+|---|---|---|
+| `tmux.EnvError` | not inside tmux and no `--target-pane` supplied | 4 |
+| `tmux.PaneMissingError` | resolved/supplied pane does not exist | 4 |
+| `tmux.DeliveryError` | `load-buffer` / `paste-buffer` / `send-keys` returned non-zero, or body exceeds `max_paste_bytes` | 6 |
+
 ## Behavioral guidance
 
 - do not silently pick one duplicate ID
