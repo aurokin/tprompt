@@ -6,6 +6,7 @@ import (
 
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/keybind"
+	"github.com/hsadler/tprompt/internal/sanitize"
 	"github.com/hsadler/tprompt/internal/store"
 )
 
@@ -41,6 +42,7 @@ func TestExitCodePromptErrors(t *testing.T) {
 		{"DuplicateKeybind", &keybind.DuplicateKeybindError{Key: 'a'}},
 		{"ReservedKeybind", &keybind.ReservedKeybindError{Key: 'p', Action: "clipboard"}},
 		{"MalformedKeybind", &keybind.MalformedKeybindError{Value: "ctrl+x"}},
+		{"StrictReject", &sanitize.StrictRejectError{Class: "OSC", Offset: 0}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

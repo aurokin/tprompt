@@ -27,7 +27,7 @@ MVP should prefer explicit operational errors over silent fallback behavior.
 
 - **clipboard is empty**
 - **clipboard content is not valid UTF-8 text**
-- **clipboard content exceeds `max_paste_bytes`** (include byte count)
+- **clipboard content exceeds `max_paste_bytes`** (include byte count and cap, e.g. `(N > max_paste_bytes)`)
 
 ### Sanitization errors
 
@@ -51,6 +51,16 @@ the CLI exit codes documented in `docs/commands/cli.md`.
 | `tmux.EnvError` | not inside tmux and no `--target-pane` supplied | 4 |
 | `tmux.PaneMissingError` | resolved/supplied pane does not exist | 4 |
 | `tmux.DeliveryError` | `load-buffer` / `paste-buffer` / `send-keys` returned non-zero, or body exceeds `max_paste_bytes` | 6 |
+
+### Sanitizer error taxonomy (Phase 3.5)
+
+| Error type | Meaning | Exit code |
+|---|---|---|
+| `sanitize.StrictRejectError` | content contained an escape sequence in `strict` mode (fields: `Class`, 0-based `Offset`) | 3 |
+
+Treated as a content-validation error, parallel to clipboard validation
+failures — the payload was rejected before any tmux command was issued, so
+delivery-layer exit 6 is the wrong bucket.
 
 ## Behavioral guidance
 

@@ -3,7 +3,9 @@ package app
 import (
 	"bytes"
 	"errors"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -13,18 +15,30 @@ import (
 	"github.com/hsadler/tprompt/internal/tmux"
 )
 
+func isDarwin() bool { return runtime.GOOS == "darwin" }
+
 func TestDoctorHealthy(t *testing.T) {
 	dir := t.TempDir()
 	fs := &fakeStore{summaries: []store.Summary{{ID: "a"}, {ID: "b"}}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, ConfigPath: "/etc/tprompt/config.toml"}, nil
+		return config.Resolved{
+			PromptsDir:    dir,
+			ConfigPath:    "/etc/tprompt/config.toml",
+			ClipboardArgv: []string{"custom-paste"},
+		}, nil
 	}
 	deps.Env = func(key string) string {
 		if key == "TMUX" {
 			return "/tmp/tmux-0/default,1,0"
 		}
 		return ""
+	}
+	deps.LookPath = func(name string) (string, error) {
+		if name == "custom-paste" {
+			return "/usr/bin/custom-paste", nil
+		}
+		return "", exec.ErrNotFound
 	}
 
 	stdout, _, err := executeRootWith(t, deps, "doctor")
@@ -33,8 +47,8 @@ func TestDoctorHealthy(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("want 4 lines, got %d:\n%s", len(lines), stdout)
+	if len(lines) != 5 {
+		t.Fatalf("want 5 lines, got %d:\n%s", len(lines), stdout)
 	}
 	assertPrefix(t, lines[0], "ok")
 	assertContains(t, lines[0], "config loaded")
@@ -45,6 +59,8 @@ func TestDoctorHealthy(t *testing.T) {
 	assertContains(t, lines[2], "2 prompts discovered")
 	assertPrefix(t, lines[3], "ok")
 	assertContains(t, lines[3], "inside tmux")
+	assertPrefix(t, lines[4], "ok")
+	assertContains(t, lines[4], "clipboard reader: custom-paste (override)")
 }
 
 func TestDoctorNoTmux(t *testing.T) {
@@ -54,16 +70,111 @@ func TestDoctorNoTmux(t *testing.T) {
 	deps.LoadConfig = func(string) (config.Resolved, error) {
 		return config.Resolved{PromptsDir: dir}, nil
 	}
+	deps.LookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 
 	stdout, _, err := executeRootWith(t, deps, "doctor")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	last := lines[len(lines)-1]
-	assertPrefix(t, last, "warn")
-	assertContains(t, last, "not inside tmux")
+	assertContains(t, stdout, "warn not inside tmux")
+}
+
+func TestDoctorClipboardAutoDetectWayland(t *testing.T) {
+	if isDarwin() {
+		t.Skip("darwin always auto-detects pbpaste")
+	}
+	dir := t.TempDir()
+	fs := &fakeStore{summaries: []store.Summary{}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{PromptsDir: dir}, nil
+	}
+	deps.Env = func(key string) string {
+		if key == "WAYLAND_DISPLAY" {
+			return "wayland-0"
+		}
+		return ""
+	}
+	deps.LookPath = func(name string) (string, error) {
+		if name == "wl-paste" {
+			return "/usr/bin/wl-paste", nil
+		}
+		return "", exec.ErrNotFound
+	}
+
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertContains(t, stdout, "ok   clipboard reader: wl-paste (auto-detected, Wayland)")
+}
+
+func TestDoctorClipboardAutoDetectX11(t *testing.T) {
+	if isDarwin() {
+		t.Skip("darwin always auto-detects pbpaste")
+	}
+	dir := t.TempDir()
+	fs := &fakeStore{summaries: []store.Summary{}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{PromptsDir: dir}, nil
+	}
+	deps.Env = func(key string) string {
+		if key == "DISPLAY" {
+			return ":0"
+		}
+		return ""
+	}
+	deps.LookPath = func(name string) (string, error) {
+		if name == "xclip" {
+			return "/usr/bin/xclip", nil
+		}
+		return "", exec.ErrNotFound
+	}
+
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertContains(t, stdout, "ok   clipboard reader: xclip (auto-detected, X11)")
+}
+
+func TestDoctorClipboardOverrideMissing(t *testing.T) {
+	dir := t.TempDir()
+	fs := &fakeStore{summaries: []store.Summary{}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{PromptsDir: dir, ClipboardArgv: []string{"not-on-path"}}, nil
+	}
+	deps.LookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertContains(t, stdout, "warn clipboard reader: not-on-path (override) not found on $PATH")
+}
+
+func TestDoctorClipboardNoneAvailable(t *testing.T) {
+	if isDarwin() {
+		t.Skip("darwin always auto-detects pbpaste")
+	}
+	dir := t.TempDir()
+	fs := &fakeStore{summaries: []store.Summary{}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{PromptsDir: dir}, nil
+	}
+	// No env hints, no PATH hits.
+	deps.Env = func(string) string { return "" }
+	deps.LookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertContains(t, stdout, "warn clipboard reader: none available")
 }
 
 func TestDoctorConfigFailure(t *testing.T) {
@@ -150,8 +261,8 @@ func TestDoctorPromptsDirMissing(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("want 3 lines (config ok, dir fail, tmux warn), got %d:\n%s", len(lines), stdout)
+	if len(lines) != 4 {
+		t.Fatalf("want 4 lines (config ok, dir fail, tmux warn, clipboard), got %d:\n%s", len(lines), stdout)
 	}
 	assertPrefix(t, lines[0], "ok")
 	assertContains(t, lines[0], "config loaded")
@@ -159,4 +270,5 @@ func TestDoctorPromptsDirMissing(t *testing.T) {
 	assertContains(t, lines[1], "prompts directory missing")
 	assertPrefix(t, lines[2], "warn")
 	assertContains(t, lines[2], "not inside tmux")
+	assertContains(t, lines[3], "clipboard reader")
 }

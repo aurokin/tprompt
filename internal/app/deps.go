@@ -2,6 +2,7 @@ package app
 
 import (
 	"io"
+	"os/exec"
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
@@ -13,10 +14,11 @@ import (
 // supplies real implementations; tests inject fakes. Lazy factory functions
 // let each handler pay only for what it uses.
 type Deps struct {
-	Stdout io.Writer
-	Stderr io.Writer
-	Stdin  io.Reader
-	Env    func(string) string
+	Stdout   io.Writer
+	Stderr   io.Writer
+	Stdin    io.Reader
+	Env      func(string) string
+	LookPath func(string) (string, error)
 
 	ConfigPath *string
 	LoadConfig func(explicitPath string) (config.Resolved, error)
@@ -28,10 +30,11 @@ type Deps struct {
 // ProductionDeps returns a Deps wired for real execution.
 func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 	return Deps{
-		Stdout: stdout,
-		Stderr: stderr,
-		Stdin:  stdin,
-		Env:    lookupEnv,
+		Stdout:   stdout,
+		Stderr:   stderr,
+		Stdin:    stdin,
+		Env:      lookupEnv,
+		LookPath: exec.LookPath,
 		LoadConfig: func(explicitPath string) (config.Resolved, error) {
 			cfg, path, err := config.LoadOrDefault(explicitPath, lookupEnv)
 			if err != nil {
@@ -54,7 +57,10 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 			return tmux.New(tmux.NewExecRunner("")), nil
 		},
 		NewClip: func(cfg config.Resolved) (clipboard.Reader, error) {
-			return nil, ErrNotImplemented
+			if len(cfg.ClipboardArgv) > 0 {
+				return clipboard.NewCommand(cfg.ClipboardArgv), nil
+			}
+			return clipboard.NewAutoDetect(lookupEnv, exec.LookPath)
 		},
 	}
 }

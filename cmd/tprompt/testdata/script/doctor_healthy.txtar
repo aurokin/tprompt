@@ -6,6 +6,7 @@ stdout 'ok   config loaded'
 stdout 'ok   prompts directory exists'
 stdout 'ok   2 prompts discovered'
 stdout 'warn not inside tmux'
+stdout 'clipboard reader'
 ! stderr .
 
 -- config.toml --

@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/hsadler/tprompt/internal/config"
+	"github.com/hsadler/tprompt/internal/sanitize"
 	"github.com/hsadler/tprompt/internal/tmux"
 )
 
@@ -78,10 +79,10 @@ func newShowCmd(deps Deps) *cobra.Command {
 
 func newSendCmd(deps Deps) *cobra.Command {
 	var (
-		targetPane string
-		mode       string
-		pressEnter bool
-		sanitize   string
+		targetPane   string
+		mode         string
+		pressEnter   bool
+		sanitizeFlag string
 	)
 	cmd := &cobra.Command{
 		Use:   "send <id>",
@@ -96,7 +97,7 @@ func newSendCmd(deps Deps) *cobra.Command {
 				f.pressEnter = &pressEnter
 			}
 			if c.Flags().Changed("sanitize") {
-				f.sanitize = &sanitize
+				f.sanitize = &sanitizeFlag
 			}
 			return runSend(deps, args[0], f)
 		},
@@ -104,7 +105,7 @@ func newSendCmd(deps Deps) *cobra.Command {
 	cmd.Flags().StringVar(&targetPane, "target-pane", "", "tmux pane ID to deliver into")
 	cmd.Flags().StringVar(&mode, "mode", "", "delivery mode: paste or type")
 	cmd.Flags().BoolVar(&pressEnter, "enter", false, "press Enter after delivery")
-	cmd.Flags().StringVar(&sanitize, "sanitize", "", "sanitize mode: off, safe, or strict (currently validated but not applied)")
+	cmd.Flags().StringVar(&sanitizeFlag, "sanitize", "", "sanitize mode: off, safe, or strict")
 	return cmd
 }
 
@@ -146,6 +147,12 @@ func runSend(deps Deps, id string, f sendFlags) error {
 	if cfg.MaxPasteBytes > 0 && int64(len(body)) > cfg.MaxPasteBytes {
 		return &tmux.OversizeError{Bytes: len(body), Limit: cfg.MaxPasteBytes}
 	}
+
+	cleaned, err := sanitize.New(sanitize.Mode(delivery.Sanitize)).Process([]byte(body))
+	if err != nil {
+		return err
+	}
+	body = string(cleaned)
 
 	adapter, err := deps.NewTmux()
 	if err != nil {

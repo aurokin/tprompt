@@ -120,7 +120,7 @@ When the user cancels an interactive flow (TUI `Esc`, `pick` external cancel), t
 
 - `0` success **or** user cancellation
 - `2` usage/config error
-- `3` prompt resolution error / clipboard validation error
+- `3` prompt resolution error / clipboard validation error / sanitizer strict-mode rejection
 - `4` tmux environment error
 - `5` daemon/IPC error
 - `6` delivery or verification error

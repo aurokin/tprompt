@@ -5,6 +5,7 @@ import (
 
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/keybind"
+	"github.com/hsadler/tprompt/internal/sanitize"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
 )
@@ -21,6 +22,8 @@ const (
 )
 
 // ExitCode maps an error to the appropriate process exit code.
+//
+//nolint:funlen // flat errors.As dispatch is clearest as a sequence of branches
 func ExitCode(err error) int {
 	if err == nil {
 		return ExitOK
@@ -59,6 +62,11 @@ func ExitCode(err error) int {
 	}
 	var malformedKey *keybind.MalformedKeybindError
 	if errors.As(err, &malformedKey) {
+		return ExitPrompt
+	}
+
+	var strictReject *sanitize.StrictRejectError
+	if errors.As(err, &strictReject) {
 		return ExitPrompt
 	}
 

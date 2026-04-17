@@ -1,0 +1,19 @@
+# send --sanitize strict rejects a body containing an escape sequence.
+# Exits ExitPrompt (3) with the canonical error message; adapter is never
+# invoked, so delivery failure modes are not surfaced.
+#
+# NOTE: prompts/alpha.md below contains literal 0x1b (ESC) and 0x07 (BEL)
+# bytes around "]0;title" — they are invisible in most editors but are what
+# makes this a real OSC sequence. Do not "clean up" the file.
+
+mkdir prompts
+! tprompt send alpha --config config.toml --target-pane %1 --sanitize strict
+stderr 'content rejected by sanitizer \(mode=strict\)'
+stderr 'escape sequence detected at byte'
+stderr '\(OSC\)'
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- prompts/alpha.md --
+before]0;titleafter

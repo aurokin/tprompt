@@ -60,7 +60,18 @@ Sanitizer
 - `safe` — returns `(cleaned, nil)` where `cleaned` has dangerous sequences removed; never errors on content
 - `strict` — returns `(nil, err)` when any escape sequence is detected; otherwise returns `(content, nil)`
 
+### Malformed-sequence handling in `safe`
+
+An OSC or DCS that lacks its terminator (BEL or ESC-backslash) is treated as
+running to end-of-input and stripped in full. Rationale: a truncated control
+string is unsafe by definition — the terminal would continue consuming bytes
+looking for the terminator, so refusing to forward the tail is the
+conservative choice. A CSI with a non-final trailing byte is likewise
+treated as dangerous and stripped.
+
 ## Error shape (strict mode)
+
+Concrete type: `sanitize.StrictRejectError{Class, Offset}`.
 
 ```text
 content rejected by sanitizer (mode=strict): escape sequence detected at byte 142 (OSC)
@@ -69,7 +80,13 @@ content rejected by sanitizer (mode=strict): escape sequence detected at byte 14
 The error includes:
 
 - offending class (OSC / DCS / CSI / etc.)
-- byte offset where the first offense was found
+- byte offset where the first offense was found — **0-based**, matching Go
+  slice indexing; no translation between internal representation and the
+  user-facing message
+
+Exit code: **3** (`ExitPrompt`), treated as a content-validation error
+parallel to clipboard validation failures. See `docs/commands/cli.md` and
+`docs/implementation/error-handling.md`.
 
 Callers surface this via the daemon's normal error-feedback channels (`tmux display-message` + log) or directly as CLI stderr.
 
@@ -94,6 +111,19 @@ tprompt paste --sanitize strict
 ```
 
 Precedence: flag > config > built-in default (`off`).
+
+## Ordering with `max_paste_bytes`
+
+The `max_paste_bytes` cap is enforced **pre-sanitize**. Callers check the raw
+body/clipboard length against the cap first, then hand the bytes to
+`Sanitizer.Process`. Rationale:
+
+- `safe` only shrinks, so a body that passes the pre-check also passes
+  post-sanitize.
+- `strict` rejects before delivery anyway, so post-check would only add a
+  pointless second measurement.
+- Checking pre-sanitize keeps a single, predictable size contract across
+  `tprompt send`, `tprompt paste`, and the TUI-flow daemon job.
 
 ## Interaction with bracketed paste
 

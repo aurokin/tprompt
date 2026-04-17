@@ -1,0 +1,12 @@
+# A clipboard_read_command whose binary is not on $PATH is a warn, not a fail.
+# Doctor exit code stays 0. The configured binary is deliberately an unlikely
+# name so the test passes regardless of the host's $PATH.
+
+mkdir prompts
+tprompt doctor --config config.toml
+stdout 'warn clipboard reader: tprompt-nonexistent-override \(override\) not found on \$PATH'
+! stderr .
+
+-- config.toml --
+prompts_dir = "prompts"
+clipboard_read_command = "tprompt-nonexistent-override"

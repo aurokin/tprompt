@@ -176,15 +176,86 @@ Read first:
 
 ## Phase 3.5 — clipboard reader and sanitizer
 
-Goal: add the two content-source/transformation modules needed for paste and strict-mode workflows.
+Goal: land the two content-source/transformation modules. The sanitizer is
+fully wired into `tprompt send` in this phase. The clipboard reader is built
+and wired into `Deps.NewClip`, but has no CLI caller until Phase 5.5
+(`tprompt paste`) and Phase 5b (TUI `P`). `tprompt send` never reads the
+clipboard.
 
-Tasks:
+Status: complete
 
-- implement `ClipboardReader` with auto-detect (pbpaste, wl-paste, xclip, xsel) and command override
-- implement `doctor` reporting for clipboard reader resolution
-- implement `Sanitizer` with `off`/`safe`/`strict` modes
-- test sanitizer against fixture corpus covering each escape-sequence class
-- wire both into `tprompt send` and the future `tprompt paste`
+Locked decisions (resolved during plan review):
+
+- `max_paste_bytes` is enforced **pre-sanitize** — the cap gates what we hand
+  to the sanitizer, not what the sanitizer emits.
+- Strict-mode rejection exits with code **3** (content-validation error,
+  parallel to clipboard validation failures), not 6.
+- Strict-mode byte offsets in error messages are **0-based** (matches Go slice
+  indexing; no internal-vs-user translation).
+- `doctor` clipboard check is **warn-only** when no reader is detected, and
+  does **not** exec a dry-run (xclip/xsel exit non-zero on empty clipboards,
+  which would false-fail). `exec.LookPath` is the only probe.
+
+### Sanitizer
+
+- implement `safe` (strip dangerous classes: OSC, DCS, CSI mode toggles,
+  application keypad, DEC private modes) and `strict` (reject on any escape
+  sequence, cosmetic included)
+- add a concrete error type `sanitize.StrictRejectError{Class, Offset}` whose
+  `Error()` matches the shape in `docs/implementation/sanitization.md`
+- map `sanitize.StrictRejectError` to `ExitPrompt` (3) in `app.ExitCode`
+- test against a fixture corpus: each dangerous class (one positive case
+  each), each cosmetic class (preserved in `safe`, rejected in `strict`),
+  multi-byte UTF-8 adjacent to escape sequences, identity in all modes for
+  content with no sequences
+
+### Sanitizer wiring into `tprompt send`
+
+- construct the sanitizer from `delivery.Sanitize` inside `runSend`
+- call `Process` **after** the `max_paste_bytes` check and **before** the
+  adapter call (paste or type)
+- remove the "currently validated but not applied" note from the `--sanitize`
+  flag help in `internal/app/commands.go`
+- extend `testscript` coverage for `tprompt send --sanitize strict` on an
+  escape-carrying fixture (exit 3, no delivery attempted)
+
+### Clipboard reader
+
+- implement `NewAutoDetect(getenv, lookPath)`:
+  - `runtime.GOOS == "darwin"` → `pbpaste`
+  - else `WAYLAND_DISPLAY` set → `wl-paste`
+  - else `DISPLAY` set → try `xclip -selection clipboard -o`, then
+    `xsel -b -o`, each gated on `lookPath`
+  - else return an error shaped for the install-hint message in
+    `docs/storage/clipboard.md`
+- implement `NewCommand(argv)` that execs the argv, returns stdout on exit 0,
+  and surfaces stderr verbatim on non-zero
+- seams `getenv` and `lookPath` are injected so tests can fake platform and
+  `$PATH` without touching the real host
+- add a shared `clipboard.Validate(content []byte, cap int64) error` helper
+  (empty / non-UTF-8 / oversize) using the error strings locked in
+  `docs/implementation/error-handling.md`; consumed by Phase 5.5 and 5b
+- tests: platform/env selection, X11 fallback order, command-reader stdout
+  capture, non-zero-exit stderr surfacing, `Validate` matrix
+
+### Clipboard wiring
+
+- replace `Deps.NewClip` stub in `internal/app/deps.go`:
+  - if `cfg.ClipboardArgv` non-empty → `clipboard.NewCommand(cfg.ClipboardArgv)`
+  - else → `clipboard.NewAutoDetect(...)`
+- no CLI caller yet; the wiring exists so Phase 5.5 and 5b have a seam and
+  `doctor` can share the resolution logic
+
+### Doctor
+
+- add a clipboard section to `runDoctor`:
+  - if `cfg.ClipboardArgv` set → report
+    `clipboard reader: <argv[0]> (override)` and warn if `exec.LookPath` fails
+  - else run the auto-detect selection and report
+    `clipboard reader: <tool> (auto-detected, <reason>)`, or
+    `clipboard reader: none available` as a **warning**
+- doctor exit code is unaffected by clipboard warnings (a user who only runs
+  `tprompt send` should still see `doctor` succeed on a clipboard-less host)
 
 Read first:
 

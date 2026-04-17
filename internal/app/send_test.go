@@ -7,6 +7,7 @@ import (
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
+	"github.com/hsadler/tprompt/internal/sanitize"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
 )
@@ -27,6 +28,7 @@ type pasteCall struct {
 	Body   string
 	Enter  bool
 }
+
 type typeCall struct {
 	Target tmux.TargetContext
 	Body   string
@@ -36,15 +38,18 @@ type typeCall struct {
 func (f *fakeAdapter) CurrentContext() (tmux.TargetContext, error) {
 	return f.currentContext, f.currentContextErr
 }
+
 func (f *fakeAdapter) PaneExists(string) (bool, error) {
 	return f.paneExists, f.paneExistsErr
 }
 func (f *fakeAdapter) IsTargetSelected(tmux.TargetContext) (bool, error) { return true, nil }
 func (f *fakeAdapter) CapturePaneTail(string, int) (string, error)       { return "", nil }
+
 func (f *fakeAdapter) Paste(t tmux.TargetContext, body string, enter bool) error {
 	f.pasteCalls = append(f.pasteCalls, pasteCall{Target: t, Body: body, Enter: enter})
 	return f.pasteErr
 }
+
 func (f *fakeAdapter) Type(t tmux.TargetContext, body string, enter bool) error {
 	f.typeCalls = append(f.typeCalls, typeCall{Target: t, Body: body, Enter: enter})
 	return f.typeErr
@@ -299,18 +304,72 @@ func TestSend_InvalidSanitizeFlag(t *testing.T) {
 	}
 }
 
-func TestSend_SanitizeFlagAcceptedButInert(t *testing.T) {
-	// Phase 3: --sanitize validates but does not mutate body.
+func TestSend_SanitizeOffUnchanged(t *testing.T) {
 	p := basePrompt()
 	p.Body = "raw body"
 	adapter := &fakeAdapter{paneExists: true}
 	deps := sendDeps(t, p, adapter)
 
-	_, _, err := executeRootWith(t, deps, "send", "code-review", "--target-pane", "%1", "--sanitize", "strict")
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "--target-pane", "%1", "--sanitize", "off")
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
 	if adapter.pasteCalls[0].Body != "raw body" {
-		t.Fatalf("body should be unchanged in Phase 3, got %q", adapter.pasteCalls[0].Body)
+		t.Fatalf("body should pass through for --sanitize off, got %q", adapter.pasteCalls[0].Body)
+	}
+}
+
+func TestSend_SanitizeSafeStripsDangerous(t *testing.T) {
+	p := basePrompt()
+	p.Body = "before\x1b]0;title\x07after"
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, p, adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "--target-pane", "%1", "--sanitize", "safe")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(adapter.pasteCalls) != 1 {
+		t.Fatalf("want 1 paste call, got %d", len(adapter.pasteCalls))
+	}
+	if adapter.pasteCalls[0].Body != "beforeafter" {
+		t.Fatalf("body = %q, want %q", adapter.pasteCalls[0].Body, "beforeafter")
+	}
+}
+
+func TestSend_SanitizeStrictRejectsEscape(t *testing.T) {
+	p := basePrompt()
+	p.Body = "ok\x1b]0;t\x07end"
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, p, adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "--target-pane", "%1", "--sanitize", "strict")
+	var sre *sanitize.StrictRejectError
+	if !errors.As(err, &sre) {
+		t.Fatalf("want StrictRejectError, got %T: %v", err, err)
+	}
+	if sre.Offset != 2 || sre.Class != "OSC" {
+		t.Fatalf("got offset=%d class=%q, want 2/OSC", sre.Offset, sre.Class)
+	}
+	if ExitCode(err) != ExitPrompt {
+		t.Fatalf("want ExitPrompt, got %d", ExitCode(err))
+	}
+	if len(adapter.pasteCalls) != 0 {
+		t.Fatal("adapter should not be called after strict rejection")
+	}
+}
+
+func TestSend_OversizeCheckedBeforeSanitize(t *testing.T) {
+	// Body with escape sequence, safe mode would shrink it — but the cap
+	// must be enforced pre-sanitize, so oversize still fails.
+	p := basePrompt()
+	p.Body = "x\x1b]0;title\x07y" + strings.Repeat("z", 50)
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, p, adapter, func(c *config.Resolved) { c.MaxPasteBytes = 20 })
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "--target-pane", "%1", "--sanitize", "safe")
+	var oe *tmux.OversizeError
+	if !errors.As(err, &oe) {
+		t.Fatalf("want OversizeError (cap is pre-sanitize), got %T: %v", err, err)
 	}
 }

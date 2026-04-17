@@ -28,7 +28,7 @@ See `docs/tmux/delivery.md` for the exact tmux command construction.
 3. Validate the content:
    - empty → fail with `clipboard is empty`
    - non-UTF-8 → fail with `clipboard content is not valid UTF-8 text`
-   - exceeds `max_paste_bytes` → fail with `clipboard content exceeds max_paste_bytes (N bytes)`
+   - exceeds `max_paste_bytes` → fail with `clipboard content exceeds max_paste_bytes (N > max_paste_bytes)`
 4. Apply sanitization if configured.
 5. Deliver via the tmux adapter using the selected mode.
 
