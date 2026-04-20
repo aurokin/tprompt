@@ -405,35 +405,190 @@ Read first:
 
 ## Phase 5 — TUI flow and built-in TUI
 
-Goal: make the TUI flow (typically launched from a tmux popup) the best experience.
+Goal: make the TUI flow (typically launched from a tmux popup) the best
+experience. Phase 5a ships the command shell and submission path with a
+cancel-only stub `Renderer`; Phase 5b swaps in the real bubbletea TUI.
 
-### Phase 5a — TUI shell
+Libraries introduced in Phase 5:
 
-- implement `tprompt tui` command
-- capture target pane/client/session context
-- wire to the built-in TUI
-- submit job to daemon based on TUI result
-- exit TUI process cleanly (cancel = exit 0)
+- `github.com/charmbracelet/bubbletea` (TUI runtime, 5b)
+- `github.com/charmbracelet/lipgloss` (TUI styling, 5b)
+- `github.com/sahilm/fuzzy` (fuzzy search, 5b)
 
-(Bare-`tprompt` dispatch per DECISIONS.md §29 was wired in Phase 0; Phase 5a only replaces the `tui` stub with the real command.)
+Locked decisions (resolved during plan review):
 
-Libraries introduced this phase:
+- **`--target-pane` is required.** Inside a popup, `CurrentContext()` returns
+  the popup's own pane, so env-fallback is actively dangerous. Missing flag
+  exits 2 with a usage error. Applies equally to bare-`tprompt` dispatch.
+- **`--client-tty` and `--session-id` are optional.** When passed, they scope
+  daemon failure banners to the originating client; when omitted, the daemon
+  falls back to pane-scoped `display-message` per existing Phase 4 behavior.
+- **No delivery-override flags on `tprompt tui`.** `--mode`, `--enter`, and
+  `--sanitize` are exposed on `send` and `paste` only. TUI submissions resolve
+  delivery from frontmatter + config + defaults. Per-prompt overrides belong
+  in frontmatter; session-wide knobs belong in config.
+- **Pre-flight order: config → store → daemon socket → target pane.** Each
+  step short-circuits on error. This surfaces the most fundamental broken
+  state first (misconfigured prompts beat missing daemon beats vanished pane).
+- **Pre-flight daemon dial runs before rendering.** Failure exits 5 with
+  "daemon not running" on stderr. No auto-start (deferred to Phase 7); no
+  stay-open fallback.
+- **Pre-flight pane existence check.** `adapter.PaneExists(target)` before
+  rendering. Missing pane exits 4. Matches `send`'s behavior for an explicit
+  `--target-pane`.
+- **Store metadata escape-strip at load.** OSC/DCS/CSI sequences stripped
+  from `title`, `description`, and each `tags` entry as prompts are loaded.
+  Body is untouched (body sanitization remains the user's `--sanitize`
+  choice). Touches Phase 1 code but lands in Phase 5a because it is
+  load-bearing for Phase 5b rendering safety and also benefits `list`/`show`.
+- **TUI owns submission via an injected `Submitter`.** The "stay open on
+  clipboard validation error" requirement forces the TUI to know about the
+  daemon client anyway; making prompt submission asymmetric would add
+  complexity for no gain. One code path: on selection, TUI resolves body,
+  validates size, dials daemon, exits.
+- **Clipboard read is `tea.Cmd`-async.** `P` dispatches a command that execs
+  the clipboard reader; result arrives as a message. No "reading clipboard…"
+  feedback. Freezes visually for the (usually <20ms) subprocess duration.
+- **Submit failure exits 5 with no retry.** Daemon death between pre-flight
+  and submit is non-correctable from inside the TUI. Per `tui-flow.md`.
+- **`Ctrl+C` equals `Esc` on the board.** Both cancel with exit 0. Popup
+  callers don't benefit from SIGINT distinction.
+- **`max_paste_bytes` pre-checked in the TUI.** Oversize prompt body → inline
+  footer error, TUI stays open. Mirrors clipboard validation.
+- **`ReplacedJobID` from `SubmitResponse` is ignored.** The displaced job's
+  banner is surfaced by the daemon in its target pane; no user-facing
+  notification in the replacer's TUI.
+- **Verification policy from config only.** `VerificationTimeoutMS` and
+  `VerificationPollIntervalMS` come from resolved config. No TUI flags, no
+  frontmatter overrides.
 
-- `github.com/charmbracelet/bubbletea` (TUI runtime)
-- `github.com/charmbracelet/lipgloss` (TUI styling, used by Phase 5b)
+### Phase 5a — TUI command shell
 
-### Phase 5b — built-in TUI
+Status: planned.
 
-- render three-column row layout (`[key]  id  description`)
-- soft-truncate description with ellipsis
-- fall back `description → title → blank`
-- render reserved-key hints in footer
-- handle single-key prompt selection
-- handle `P` for clipboard (read-on-keypress, validate, submit)
-- handle `/`-search with fuzzy matching over id + title + description + tags
-- handle `Esc` cancel and `Esc` exit-search
-- handle overflow (search-only, not on board)
-- inline error display on clipboard validation failure
+- register `tprompt tui` with flags `--target-pane` (required), `--client-tty`
+  (optional), `--session-id` (optional); remove the `ErrNotImplemented` stub
+- implement `runTUI` orchestrator in `internal/app/`:
+  - load + validate config
+  - build store, surface load errors (duplicate ID, malformed/duplicate/
+    reserved keys) as `ExitPrompt` (3)
+  - dial daemon socket; `daemon.SocketUnavailableError` → `ExitDaemon` (5)
+  - check `--target-pane` exists via tmux adapter; missing → `ExitTmux` (4)
+  - build `tui.State` (board rows alphabetical by id, overflow rows,
+    reserved-key map, clipboard-row hint)
+  - call `Renderer.Run(state)` → `tui.Result`
+  - on `ActionCancel` return nil (exit 0); on selection dispatch to
+    `Submitter.Submit(result)`
+- extend `tui.Result` with `ClipboardBody []byte` for `ActionClipboard` so the
+  bytes captured by the TUI travel through to the daemon (the daemon never
+  reads the clipboard itself)
+- implement `Submitter` in `internal/tui/` (deep module):
+  - for `ActionPrompt`: resolve from store, run
+    `config.ResolveDelivery(cfg, frontmatter, nil)`, check body ≤
+    `max_paste_bytes` (returns typed `BodyTooLargeError` that the Renderer can
+    surface inline without exiting), build `SubmitRequest` with verification
+    policy from config, dial `daemon.Client`, return on non-`Accepted`
+  - for `ActionClipboard`: same as above but with `Source = clipboard`,
+    `Body = result.ClipboardBody`, `PromptID`/`SourcePath` empty; no store
+    resolution
+- add `Deps.NewRenderer func(state tui.State, submitter tui.Submitter)
+  tui.Renderer` to `internal/app/deps.go`; production returns a cancel-stub
+  `Renderer` whose `Run` immediately yields `Result{Action: ActionCancel}`;
+  tests override this factory to inject canned results and observe the
+  captured `SubmitRequest`
+- implement the store metadata escape-stripper in `internal/store/`:
+  - strip the same escape classes as the `safe` sanitizer from `title`,
+    `description`, and each `tags` entry at load
+  - body bytes are untouched
+  - applies uniformly to every store consumer
+- tests:
+  - Go unit tests on `Submitter` against a fake `daemon.Client`: prompt-happy,
+    prompt-oversize, clipboard-happy, clipboard-oversize, non-`Accepted`
+    response, dial failure; assert on captured `SubmitRequest` fields
+  - Go unit tests on the metadata stripper: each dangerous class, UTF-8
+    adjacency, body-preservation invariant
+  - Go integration tests on `runTUI` with fake Renderer + store + daemon
+    client + tmux adapter: each pre-flight failure class, cancel path,
+    selection → submit happy path
+  - testscript: missing flag (exit 2), daemon unreachable (exit 5), pane
+    missing (exit 4), stub-Renderer cancel (exit 0), injected-Renderer
+    selection (exit 0 with captured request), oversize prompt (exit 3)
+
+### Phase 5b — built-in Bubble Tea TUI
+
+Status: planned.
+
+- replace the cancel-stub `Renderer` in `app.ProductionDeps.NewRenderer` with
+  a production implementation that wraps `tea.NewProgram(model).Run()` and
+  returns the final `Result`
+- implement `internal/tui/` Bubble Tea `Model`:
+  - single struct implementing `Init`/`Update`/`View`
+  - `mode` enum (`modeBoard` | `modeSearch`)
+  - state fields: cursor index, search query, `highlightedPromptID` (anchor
+    across filter changes), scroll offset, inline error, pending-clipboard
+    flag, terminal dimensions from `tea.WindowSizeMsg`
+  - `Update` is a pure `(Model, Msg) → (Model, Cmd)` — no hidden I/O, all
+    external work via `tea.Cmd`
+  - board-mode keys: `Esc`/`Ctrl+C` cancel, `Enter` selects highlighted,
+    `↑`/`↓` scroll+cursor, `/` enter search, `P` dispatch clipboard-read
+    `tea.Cmd`; any other printable key matched case-insensitively against the
+    board's assigned keys
+  - search-mode keys: `Esc` return to board (clear query), `Enter` select
+    highlighted match, `Ctrl+C` cancel, `Backspace`/`↑`/`↓` edit/navigate;
+    every other keystroke appends to query and triggers a re-filter
+  - letter keybinds render lowercase in the `[key]` column; digits/symbols
+    render as-declared. Matching uses `unicode.ToLower` on both sides for
+    letters, literal for non-letters
+  - inline errors cleared on real action (selection, mode switch, clipboard
+    retry, cancel); navigation keys preserve them
+- implement `searchIndex` deep module in `internal/tui/`:
+  - constructor takes board rows + overflow rows + clipboard row
+  - builds four corpuses (`ids`, `titles`, `descriptions`, `tags`) with back-
+    references to the source rows
+  - `Query(q string)` returns `[]MatchedRow`:
+    - empty query → full alphabetical catalog (board + overflow + clipboard
+      row first)
+    - non-empty → one `sahilm/fuzzy.Find` per corpus, weighted merge
+      (id×1.0, title×0.75, description×0.5, tags×0.25), summed per row,
+      sorted descending with alphabetical-by-id tiebreak; clipboard row is
+      excluded (no searchable text)
+  - `sahilm/fuzzy` coupling fully contained inside this module
+- implement highlight anchoring: before re-filter on query change, capture
+  current `highlightedPromptID`; after filter, set cursor to that ID's new
+  index or 0 if gone
+- rendering (`View`) with lipgloss:
+  - three-column board rows (`[key]  id  description`), soft-truncated
+    description to terminal width with ellipsis, never wrapped
+  - clipboard row pinned first on board with resolved reserved key (default
+    `[p]`) and hint text `(read on select)`
+  - board footer `[/ search (N more)]  [Esc cancel]`, omitting `(N more)` when
+    no overflow
+  - search footer `/query  [Esc exit search]  [Enter select]  [N matches]`
+  - error view prepends the inline error text to the mode-appropriate footer
+  - empty-store board shows only the clipboard row plus footer hint
+    `no prompts found — press P for clipboard or Esc to exit`
+  - fixed viewport scroll with `↑`/`↓`; no scrollbar, chevrons, or position
+    indicator
+- clipboard read command:
+  - on `P`: return a `tea.Cmd` that calls the injected `clipboard.Reader` and
+    runs `clipboard.Validate(content, cfg.MaxPasteBytes)`
+  - result message populates `Result.ClipboardBody` and fires the submit
+    `tea.Cmd` followed by `tea.Quit`, or populates inline error and stays open
+- prompt selection:
+  - on matched keypress (board) or `Enter` (search): resolve prompt from
+    store, pre-check `len(body) ≤ cfg.MaxPasteBytes` → set inline error if
+    oversize (stay open); otherwise fire submit `tea.Cmd` then `tea.Quit`
+- tests:
+  - unit tests on `searchIndex`: empty-query catalog; per-field ranking
+    precedence; id-match-beats-title-match ordering; alphabetical tiebreak;
+    no-match empty result; summed multi-field scores
+  - pure-function `Update` tests: every board keypress class, search mode
+    entry/exit, letter-typing into query, `Esc`/`Ctrl+C` cancel, case-
+    insensitive keybind match, oversize-prompt inline error, empty-clipboard
+    inline error, error-persists-on-navigation, error-cleared-on-action,
+    highlight anchoring across query edits, scroll bounds, empty-store state
+  - no golden-file or teatest coverage in Phase 5b; layout regressions
+    surface via manual testing or a later phase
 
 Read first:
 
@@ -441,6 +596,7 @@ Read first:
 - `docs/commands/tui.md`
 - `docs/tmux/verification.md`
 - `examples/tmux-bindings.md`
+- `docs/implementation/interfaces.md`
 
 ## Phase 5.5 — `tprompt paste`
 
