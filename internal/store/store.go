@@ -220,6 +220,7 @@ func discoverPromptFiles(root string) ([]discoveredPrompt, error) {
 		if err != nil {
 			return fmt.Errorf("parse prompt %s: %w", path, err)
 		}
+		sanitizeMeta(&parsed.Meta)
 
 		entries = append(entries, discoveredPrompt{
 			prompt: Prompt{

@@ -82,6 +82,28 @@ func (s safe) Process(content []byte) ([]byte, error) {
 	return out, nil
 }
 
+// StripAll removes every ESC-initiated sequence (OSC, DCS, CSI, KEYPAD, and
+// bare ESC) from content. Unlike safe mode, cosmetic CSI sequences (SGR, cursor
+// movement, erase) are also removed — intended for contexts like metadata
+// display where any escape is a visual-manipulation vector.
+func StripAll(content []byte) []byte {
+	if !hasESC(content) {
+		return content
+	}
+	out := make([]byte, 0, len(content))
+	i := 0
+	for i < len(content) {
+		if content[i] != 0x1b {
+			out = append(out, content[i])
+			i++
+			continue
+		}
+		_, end, _ := scanSequence(content, i)
+		i = end
+	}
+	return out
+}
+
 type strict struct{ mode Mode }
 
 func (s strict) Mode() Mode { return s.mode }
