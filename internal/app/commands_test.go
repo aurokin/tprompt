@@ -11,6 +11,7 @@ import (
 	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
+	"github.com/hsadler/tprompt/internal/tui"
 )
 
 func TestZeroArgCommandsRejectExtraOperands(t *testing.T) {
@@ -21,7 +22,7 @@ func TestZeroArgCommandsRejectExtraOperands(t *testing.T) {
 		{name: "list", args: []string{"list", "extra"}},
 		{name: "paste", args: []string{"paste", "extra"}},
 		{name: "doctor", args: []string{"doctor", "extra"}},
-		{name: "tui", args: []string{"tui", "extra"}},
+		{name: "tui", args: []string{"tui", "--target-pane", "%0", "extra"}},
 		{name: "pick", args: []string{"pick", "extra"}},
 		{name: "daemon start", args: []string{"daemon", "start", "extra"}},
 		{name: "daemon status", args: []string{"daemon", "status", "extra"}},
@@ -51,7 +52,6 @@ func TestZeroArgCommandsAcceptBareInvocation(t *testing.T) {
 		{name: "list", args: []string{"list"}},
 		{name: "paste", args: []string{"paste"}},
 		{name: "doctor", args: []string{"doctor"}},
-		{name: "tui", args: []string{"tui"}},
 		{name: "pick", args: []string{"pick"}},
 	}
 
@@ -154,7 +154,17 @@ func workingDeps(t *testing.T, fs *fakeStore) Deps {
 		NewDaemonClient: func(config.Resolved) (daemon.Client, error) {
 			return nil, ErrNotImplemented
 		},
+		NewRenderer: func(config.Resolved) (tui.Renderer, error) {
+			return cancelRenderer{}, nil
+		},
 	}
+}
+
+// cancelRenderer is the test-side equivalent of the production cancel stub.
+type cancelRenderer struct{}
+
+func (cancelRenderer) Run(tui.State) (tui.Result, error) {
+	return tui.Result{Action: tui.ActionCancel}, nil
 }
 
 func TestListPrintsIDsAlphabetically(t *testing.T) {

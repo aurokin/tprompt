@@ -1,0 +1,245 @@
+package app
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/hsadler/tprompt/internal/config"
+	"github.com/hsadler/tprompt/internal/store"
+	"github.com/hsadler/tprompt/internal/tui"
+)
+
+type recordingRenderer struct {
+	state  tui.State
+	called bool
+	result tui.Result
+	err    error
+}
+
+func (r *recordingRenderer) Run(s tui.State) (tui.Result, error) {
+	r.called = true
+	r.state = s
+	return r.result, r.err
+}
+
+func tuiDeps(t *testing.T, fs *fakeStore, rend tui.Renderer, cfgOverride ...func(*config.Resolved)) Deps {
+	t.Helper()
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		cfg := config.Resolved{
+			PromptsDir: "/prompts",
+			ReservedPrintable: map[rune]string{
+				'p': "clipboard",
+				'/': "search",
+			},
+		}
+		for _, fn := range cfgOverride {
+			fn(&cfg)
+		}
+		return cfg, nil
+	}
+	deps.NewRenderer = func(config.Resolved) (tui.Renderer, error) {
+		return rend, nil
+	}
+	return deps
+}
+
+func TestTUI_MissingTargetPaneExitsUsage(t *testing.T) {
+	fs := &fakeStore{}
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, fs, rend)
+
+	_, _, err := executeRootWith(t, deps, "tui")
+	if err == nil {
+		t.Fatal("want error for missing --target-pane")
+	}
+	if !strings.Contains(err.Error(), "target-pane") {
+		t.Fatalf("want required-flag error mentioning target-pane, got %v", err)
+	}
+	if ExitCode(err) != ExitUsage {
+		t.Fatalf("want ExitUsage, got %d", ExitCode(err))
+	}
+	if rend.called {
+		t.Fatal("renderer must not run when required flag is missing")
+	}
+}
+
+func TestTUI_CancelStubExitsZero(t *testing.T) {
+	fs := &fakeStore{}
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, fs, rend)
+
+	stdout, stderr, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	if err != nil {
+		t.Fatalf("want nil, got %v", err)
+	}
+	if stdout != "" {
+		t.Fatalf("want silent stdout, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("want silent stderr, got %q", stderr)
+	}
+	if !rend.called {
+		t.Fatal("renderer should have been called")
+	}
+}
+
+func TestTUI_BuildsStateFromStore(t *testing.T) {
+	fs := &fakeStore{
+		summaries: []store.Summary{
+			{ID: "alpha", Title: "Alpha", Key: "1"},
+			{ID: "beta", Description: "Second", Key: "2"},
+			{ID: "overflow-one"}, // no Key → overflow
+		},
+	}
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, fs, rend)
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+
+	// Clipboard row pinned first, then board rows from summaries with a Key.
+	if len(rend.state.Rows) != 3 {
+		t.Fatalf("want 3 rows (clipboard + 2 board), got %d", len(rend.state.Rows))
+	}
+	if rend.state.Rows[0].Key != 'p' || rend.state.Rows[0].PromptID != "" {
+		t.Fatalf("row[0] should be pinned clipboard with key 'p', got %+v", rend.state.Rows[0])
+	}
+	if rend.state.Rows[1].PromptID != "alpha" || rend.state.Rows[1].Key != '1' {
+		t.Fatalf("row[1] = %+v, want alpha/1", rend.state.Rows[1])
+	}
+	if rend.state.Rows[2].PromptID != "beta" || rend.state.Rows[2].Key != '2' {
+		t.Fatalf("row[2] = %+v, want beta/2", rend.state.Rows[2])
+	}
+
+	if len(rend.state.Overflow) != 1 || rend.state.Overflow[0].PromptID != "overflow-one" {
+		t.Fatalf("overflow mismatch: %+v", rend.state.Overflow)
+	}
+
+	if role := rend.state.Reserved['p']; role != "clipboard" {
+		t.Fatalf("reserved map should include clipboard, got %q", role)
+	}
+}
+
+func TestTUI_StateOmitsClipboardRowWhenKeyDisabled(t *testing.T) {
+	fs := &fakeStore{
+		summaries: []store.Summary{
+			{ID: "alpha", Key: "1"},
+		},
+	}
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, fs, rend, func(c *config.Resolved) {
+		c.ReservedPrintable = map[rune]string{'/': "search"} // no clipboard role
+	})
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(rend.state.Rows) != 1 || rend.state.Rows[0].PromptID != "alpha" {
+		t.Fatalf("want single board row alpha, got %+v", rend.state.Rows)
+	}
+}
+
+func TestTUI_LoadConfigErrorPropagates(t *testing.T) {
+	fs := &fakeStore{}
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, fs, rend)
+	cfgErr := &config.ValidationError{Field: "prompts_dir", Message: "must be set"}
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{}, cfgErr
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	var ve *config.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want config.ValidationError, got %T: %v", err, err)
+	}
+	if ExitCode(err) != ExitUsage {
+		t.Fatalf("want ExitUsage, got %d", ExitCode(err))
+	}
+	if rend.called {
+		t.Fatal("renderer must not run when config load fails")
+	}
+}
+
+func TestTUI_RendererErrorPropagates(t *testing.T) {
+	fs := &fakeStore{}
+	rendErr := errors.New("renderer boom")
+	rend := &recordingRenderer{err: rendErr}
+	deps := tuiDeps(t, fs, rend)
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	if !errors.Is(err, rendErr) {
+		t.Fatalf("want renderer error, got %v", err)
+	}
+}
+
+func TestTUI_BareDispatchInTmuxTTYHitsRequiredFlagCheck(t *testing.T) {
+	// Mirrors what RunCLI does: dispatchArgs rewrites bare args to [tui] when
+	// in tmux+tty; cobra then errors on --target-pane before the renderer runs.
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, &fakeStore{}, rend)
+	deps.Env = func(k string) string {
+		if k == "TMUX" {
+			return "/tmp/tmux-0/default,1,0"
+		}
+		return ""
+	}
+	withStdinTTY(t, true)
+
+	root := NewRootCmd(deps)
+	root.SetOut(deps.Stdout)
+	root.SetErr(deps.Stderr)
+	root.SetArgs(dispatchArgs(root, nil, deps.Env, stdinIsTTY))
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("want required-flag error from bare dispatch, got nil")
+	}
+	if ExitCode(err) != ExitUsage {
+		t.Fatalf("want ExitUsage, got %d (err=%v)", ExitCode(err), err)
+	}
+	if rend.called {
+		t.Fatal("renderer must not run when required flag is missing")
+	}
+}
+
+func TestTUI_BareDispatchWithFlagInTmuxTTYSucceeds(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, &fakeStore{}, rend)
+	deps.Env = func(k string) string {
+		if k == "TMUX" {
+			return "/tmp/tmux-0/default,1,0"
+		}
+		return ""
+	}
+	withStdinTTY(t, true)
+
+	root := NewRootCmd(deps)
+	root.SetOut(deps.Stdout)
+	root.SetErr(deps.Stderr)
+	args := []string{"--target-pane", "%0"}
+	root.SetArgs(dispatchArgs(root, args, deps.Env, stdinIsTTY))
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("bare --target-pane invocation should succeed via cancel stub, got %v", err)
+	}
+	if !rend.called {
+		t.Fatal("renderer should have been called")
+	}
+}
+
+func TestTUI_BuildTargetThreadsFlags(t *testing.T) {
+	target := buildTUITarget(tuiFlags{
+		targetPane: "%9",
+		clientTTY:  "/dev/pts/2",
+		sessionID:  "$3",
+	})
+	if target.PaneID != "%9" || target.ClientTTY != "/dev/pts/2" || target.Session != "$3" {
+		t.Fatalf("TargetContext = %+v", target)
+	}
+}

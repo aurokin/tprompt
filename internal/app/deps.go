@@ -9,6 +9,7 @@ import (
 	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
+	"github.com/hsadler/tprompt/internal/tui"
 )
 
 // Deps provides the capabilities that CLI handlers need. Production code
@@ -28,6 +29,7 @@ type Deps struct {
 	NewTmux          func() (tmux.Adapter, error)
 	NewClip          func(cfg config.Resolved) (clipboard.Reader, error)
 	NewDaemonClient  func(cfg config.Resolved) (daemon.Client, error)
+	NewRenderer      func(cfg config.Resolved) (tui.Renderer, error)
 }
 
 // ProductionDeps returns a Deps wired for real execution.
@@ -75,5 +77,17 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 		NewDaemonClient: func(cfg config.Resolved) (daemon.Client, error) {
 			return daemon.NewSocketClient(cfg.SocketPath), nil
 		},
+		NewRenderer: func(config.Resolved) (tui.Renderer, error) {
+			return cancelStubRenderer{}, nil
+		},
 	}
+}
+
+// cancelStubRenderer is the Phase 5a production Renderer. It never draws — it
+// immediately yields ActionCancel so the orchestrator exits cleanly. Phase 5b
+// replaces the factory with the real bubbletea implementation.
+type cancelStubRenderer struct{}
+
+func (cancelStubRenderer) Run(tui.State) (tui.Result, error) {
+	return tui.Result{Action: tui.ActionCancel}, nil
 }

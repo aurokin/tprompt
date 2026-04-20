@@ -24,16 +24,16 @@ var stdinIsTTY = func() bool {
 
 // NewRootCmd builds the root cobra command with all subcommands registered.
 func NewRootCmd(deps Deps) *cobra.Command {
-	tuiCmd := newTUICmd(deps)
 	root := &cobra.Command{
 		Use:           "tprompt",
 		Short:         "Deliver markdown prompts into tmux panes",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if deps.Env("TMUX") != "" && stdinIsTTY() {
-				return tuiCmd.RunE(tuiCmd, nil)
-			}
+			// Bare `tprompt` outside tmux+tty: help is the MVP behavior.
+			// Bare dispatch to `tui` in tmux+tty is handled by dispatchArgs in
+			// RunCLI (see DECISIONS.md §29) so cobra flag parsing applies to
+			// `tui`'s required --target-pane.
 			return cmd.Help()
 		},
 	}
@@ -48,7 +48,7 @@ func NewRootCmd(deps Deps) *cobra.Command {
 		newSendCmd(deps),
 		newPasteCmd(deps),
 		newDoctorCmd(deps),
-		tuiCmd,
+		newTUICmd(deps),
 		newPickCmd(deps),
 		newDaemonCmd(deps),
 	)
@@ -63,7 +63,7 @@ func RunCLI(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	cmd := NewRootCmd(deps)
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	cmd.SetArgs(args)
+	cmd.SetArgs(dispatchArgs(cmd, args, deps.Env, stdinIsTTY))
 
 	err := cmd.Execute()
 	if err != nil {
@@ -71,4 +71,24 @@ func RunCLI(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		return ExitCode(err)
 	}
 	return ExitOK
+}
+
+// dispatchArgs implements the DECISIONS.md §29 default-subcommand rule: when
+// stdin is a tty and $TMUX is set and the user has not named a subcommand, the
+// invocation is rewritten to run `tui`. This happens before cobra parses flags
+// so `tui`'s required --target-pane validation fires normally.
+func dispatchArgs(root *cobra.Command, args []string, env func(string) string, stdinTTY func() bool) []string {
+	if env("TMUX") == "" || !stdinTTY() {
+		return args
+	}
+	for _, a := range args {
+		if a == "--help" || a == "-h" || a == "help" {
+			return args
+		}
+	}
+	matched, _, err := root.Find(args)
+	if err != nil || matched != root {
+		return args
+	}
+	return append([]string{"tui"}, args...)
 }

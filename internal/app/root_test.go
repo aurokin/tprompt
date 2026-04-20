@@ -2,7 +2,6 @@ package app
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"testing"
 
@@ -10,6 +9,7 @@ import (
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
+	"github.com/hsadler/tprompt/internal/tui"
 )
 
 func TestRootCmdRegistersAllSubcommands(t *testing.T) {
@@ -48,30 +48,76 @@ func TestDaemonRunAliasExists(t *testing.T) {
 	}
 }
 
-func TestRootDispatchRoutesToTUIInTmuxTTY(t *testing.T) {
-	withStdinTTY(t, true)
-
-	deps := fakeDeps(t)
-	deps.Env = func(key string) string {
+func TestDispatchArgsRewritesBareInvocationInTmuxTTY(t *testing.T) {
+	root := NewRootCmd(fakeDeps(t))
+	env := func(key string) string {
 		if key == "TMUX" {
 			return "/tmp/tmux-0/default,1,0"
 		}
 		return ""
 	}
+	tty := func() bool { return true }
 
-	root := NewRootCmd(deps)
-	err := root.RunE(root, nil)
-	if !errors.Is(err, ErrNotImplemented) {
-		t.Fatalf("dispatch should hit tui stub (ErrNotImplemented), got %v", err)
+	got := dispatchArgs(root, nil, env, tty)
+	if len(got) != 1 || got[0] != "tui" {
+		t.Fatalf("bare args should rewrite to [tui], got %v", got)
+	}
+
+	got = dispatchArgs(root, []string{"--target-pane", "%0"}, env, tty)
+	want := []string{"tui", "--target-pane", "%0"}
+	if !stringSliceEqual(got, want) {
+		t.Fatalf("flagged bare args should prepend tui, got %v want %v", got, want)
 	}
 }
 
-func TestRootDispatchFallsBackToHelpWithoutTmux(t *testing.T) {
-	withStdinTTY(t, true)
+func TestDispatchArgsPreservesSubcommandInvocation(t *testing.T) {
+	root := NewRootCmd(fakeDeps(t))
+	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
+	tty := func() bool { return true }
 
+	got := dispatchArgs(root, []string{"list"}, env, tty)
+	if !stringSliceEqual(got, []string{"list"}) {
+		t.Fatalf("subcommand args should pass through, got %v", got)
+	}
+}
+
+func TestDispatchArgsPreservesHelp(t *testing.T) {
+	root := NewRootCmd(fakeDeps(t))
+	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
+	tty := func() bool { return true }
+
+	for _, helpArg := range []string{"--help", "-h", "help"} {
+		got := dispatchArgs(root, []string{helpArg}, env, tty)
+		if !stringSliceEqual(got, []string{helpArg}) {
+			t.Fatalf("%q should pass through, got %v", helpArg, got)
+		}
+	}
+}
+
+func TestDispatchArgsSkipsRewriteWithoutTmux(t *testing.T) {
+	root := NewRootCmd(fakeDeps(t))
+	env := func(string) string { return "" }
+	tty := func() bool { return true }
+
+	got := dispatchArgs(root, nil, env, tty)
+	if len(got) != 0 {
+		t.Fatalf("bare args outside tmux should not be rewritten, got %v", got)
+	}
+}
+
+func TestDispatchArgsSkipsRewriteWithoutTTY(t *testing.T) {
+	root := NewRootCmd(fakeDeps(t))
+	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
+	tty := func() bool { return false }
+
+	got := dispatchArgs(root, nil, env, tty)
+	if len(got) != 0 {
+		t.Fatalf("bare args without tty should not be rewritten, got %v", got)
+	}
+}
+
+func TestRootBareInvocationFallsBackToHelp(t *testing.T) {
 	deps := fakeDeps(t)
-	deps.Env = func(string) string { return "" }
-
 	root := NewRootCmd(deps)
 	root.SetOut(io.Discard)
 	root.SetErr(io.Discard)
@@ -80,23 +126,16 @@ func TestRootDispatchFallsBackToHelpWithoutTmux(t *testing.T) {
 	}
 }
 
-func TestRootDispatchFallsBackToHelpWithoutTTY(t *testing.T) {
-	withStdinTTY(t, false)
-
-	deps := fakeDeps(t)
-	deps.Env = func(key string) string {
-		if key == "TMUX" {
-			return "/tmp/tmux-0/default,1,0"
+func stringSliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
 		}
-		return ""
 	}
-
-	root := NewRootCmd(deps)
-	root.SetOut(io.Discard)
-	root.SetErr(io.Discard)
-	if err := root.RunE(root, nil); err != nil {
-		t.Fatalf("want nil from Help path, got %v", err)
-	}
+	return true
 }
 
 func TestConfigFlagExists(t *testing.T) {
@@ -133,6 +172,9 @@ func fakeDeps(t *testing.T) Deps {
 			return nil, ErrNotImplemented
 		},
 		NewClip: func(config.Resolved) (clipboard.Reader, error) {
+			return nil, ErrNotImplemented
+		},
+		NewRenderer: func(config.Resolved) (tui.Renderer, error) {
 			return nil, ErrNotImplemented
 		},
 	}
