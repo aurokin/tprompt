@@ -375,6 +375,36 @@ func TestFSStoreClearsCachedPromptsWhenRediscoveryFails(t *testing.T) {
 	}
 }
 
+func TestFSStoreStripsEscapesFromMetadataButPreservesBody(t *testing.T) {
+	dir := t.TempDir()
+	bodyBytes := "evil\x1b]0;pwn\x07tail\n"
+	writePrompt(t, dir, "escape.md", "---\n"+
+		`title: "evil\e]0;pwn\atail"`+"\n"+
+		`description: "d\e[?1049hd"`+"\n"+
+		`tags: ["ok", "b\e]0;x\aad"]`+"\n"+
+		"---\n\n"+bodyBytes)
+
+	store := NewFS(dir, nil, []rune("1"))
+	prompt, err := store.Resolve("escape")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	if prompt.Title != "eviltail" {
+		t.Fatalf("Title = %q, want %q", prompt.Title, "eviltail")
+	}
+	if prompt.Description != "dd" {
+		t.Fatalf("Description = %q, want %q", prompt.Description, "dd")
+	}
+	wantTags := []string{"ok", "bad"}
+	if diff := cmp.Diff(wantTags, prompt.Tags); diff != "" {
+		t.Fatalf("Tags mismatch (-want +got):\n%s", diff)
+	}
+	if prompt.Body != bodyBytes {
+		t.Fatalf("Body = %q, want %q (body must be preserved byte-for-byte)", prompt.Body, bodyBytes)
+	}
+}
+
 func writePrompt(t *testing.T, root, relPath, content string) {
 	t.Helper()
 
