@@ -81,8 +81,11 @@ func dispatchArgs(root *cobra.Command, args []string, env func(string) string, s
 	if env("TMUX") == "" || !stdinTTY() {
 		return args
 	}
+	// Preserve root help output for explicit help flags. Matching on the
+	// literal string "help" is unsafe — it can appear as a flag value such
+	// as `--config help` — so rely on Find for the help-subcommand case.
 	for _, a := range args {
-		if a == "--help" || a == "-h" || a == "help" {
+		if a == "--help" || a == "-h" {
 			return args
 		}
 	}

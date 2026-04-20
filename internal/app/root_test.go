@@ -81,16 +81,31 @@ func TestDispatchArgsPreservesSubcommandInvocation(t *testing.T) {
 	}
 }
 
-func TestDispatchArgsPreservesHelp(t *testing.T) {
+func TestDispatchArgsPreservesExplicitHelpFlags(t *testing.T) {
 	root := NewRootCmd(fakeDeps(t))
 	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
 	tty := func() bool { return true }
 
-	for _, helpArg := range []string{"--help", "-h", "help"} {
+	for _, helpArg := range []string{"--help", "-h"} {
 		got := dispatchArgs(root, []string{helpArg}, env, tty)
 		if !stringSliceEqual(got, []string{helpArg}) {
 			t.Fatalf("%q should pass through, got %v", helpArg, got)
 		}
+	}
+}
+
+func TestDispatchArgsRewritesWhenHelpIsFlagValue(t *testing.T) {
+	// Regression: `tprompt --config help --target-pane %0` should still
+	// rewrite — "help" is the value of --config, not a help invocation.
+	root := NewRootCmd(fakeDeps(t))
+	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
+	tty := func() bool { return true }
+
+	args := []string{"--config", "help", "--target-pane", "%0"}
+	got := dispatchArgs(root, args, env, tty)
+	want := []string{"tui", "--config", "help", "--target-pane", "%0"}
+	if !stringSliceEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
 	}
 }
 
