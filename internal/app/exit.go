@@ -128,6 +128,12 @@ func isCobraUsageError(err error) bool {
 		return true
 	case strings.HasPrefix(msg, "unknown command"):
 		return true
+	case strings.HasPrefix(msg, "flag needs an argument"):
+		return true
+	case strings.HasPrefix(msg, "bad flag syntax"):
+		return true
+	case strings.HasPrefix(msg, "invalid argument"):
+		return true
 	case strings.Contains(msg, "arg(s), received"):
 		return true
 	case strings.Contains(msg, "accepts "):
