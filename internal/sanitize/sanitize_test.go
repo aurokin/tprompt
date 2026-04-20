@@ -195,6 +195,44 @@ func TestStrictErrorMessageShape(t *testing.T) {
 	}
 }
 
+// StripAll: removes every ESC-initiated sequence, including cosmetic ones
+// that safe mode preserves. Used for metadata rendering where any escape is a
+// visual-manipulation vector.
+
+func TestStripAllNoESCIsIdentity(t *testing.T) {
+	input := []byte("plain αβγ text")
+	got := StripAll(input)
+	if string(got) != string(input) {
+		t.Fatalf("got %q, want %q", got, input)
+	}
+}
+
+func TestStripAllRemovesDangerousAndCosmeticClasses(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"OSC", "a\x1b]0;t\x07b", "ab"},
+		{"DCS", "a\x1bPpayload\x1b\\b", "ab"},
+		{"CSI private", "a\x1b[?1049hb", "ab"},
+		{"CSI SGR cosmetic", "a\x1b[31mred\x1b[0mb", "aredb"},
+		{"CSI cursor cosmetic", "a\x1b[10;5Hb", "ab"},
+		{"CSI erase cosmetic", "a\x1b[2Jb\x1b[Kc", "abc"},
+		{"KEYPAD", "a\x1b=b\x1b>c", "abc"},
+		{"bare ESC trailing", "ab\x1b", "ab"},
+		{"UTF-8 around sequence", "α\x1b[31mβ\x1b[0mγ", "αβγ"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := StripAll([]byte(tc.in))
+			if string(got) != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // Identity: content without escape sequences passes through unchanged in all modes.
 
 func TestIdentityNoSequences(t *testing.T) {

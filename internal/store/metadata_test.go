@@ -111,12 +111,21 @@ func TestSanitizeMetaStripsDangerousEscapes(t *testing.T) {
 			},
 		},
 		{
-			name: "cosmetic SGR in description preserved (safe-mode parity)",
+			name: "cosmetic SGR in description is also stripped",
 			in: promptmeta.Meta{
 				Description: "red\x1b[31mword\x1b[0mend",
 			},
 			want: promptmeta.Meta{
-				Description: "red\x1b[31mword\x1b[0mend",
+				Description: "redwordend",
+			},
+		},
+		{
+			name: "cursor movement and erase in title are stripped",
+			in: promptmeta.Meta{
+				Title: "a\x1b[10;5Hb\x1b[2Jc",
+			},
+			want: promptmeta.Meta{
+				Title: "abc",
 			},
 		},
 	}

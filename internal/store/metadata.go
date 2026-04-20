@@ -7,19 +7,21 @@ import (
 
 // sanitizeMeta cleans metadata fields only. Body sanitization is deferred to
 // delivery time so the author's bytes aren't altered behind their back.
+//
+// Metadata uses the all-escapes strip (not safe mode): any CSI in a rendered
+// title/description/tag — even cosmetic SGR or cursor movement — is a display
+// corruption vector in show/TUI, so we drop everything ESC-initiated.
 func sanitizeMeta(meta *promptmeta.Meta) {
-	s := sanitize.New(sanitize.ModeSafe)
-	meta.Title = stripUnsafeEscapes(s, meta.Title)
-	meta.Description = stripUnsafeEscapes(s, meta.Description)
+	meta.Title = stripEscapes(meta.Title)
+	meta.Description = stripEscapes(meta.Description)
 	for i, tag := range meta.Tags {
-		meta.Tags[i] = stripUnsafeEscapes(s, tag)
+		meta.Tags[i] = stripEscapes(tag)
 	}
 }
 
-func stripUnsafeEscapes(s sanitize.Sanitizer, value string) string {
+func stripEscapes(value string) string {
 	if value == "" {
 		return value
 	}
-	cleaned, _ := s.Process([]byte(value))
-	return string(cleaned)
+	return string(sanitize.StripAll([]byte(value)))
 }
