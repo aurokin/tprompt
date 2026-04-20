@@ -40,12 +40,13 @@ Required per-job fields:
 - mode (`paste` | `type`)
 - press-enter flag
 - sanitize mode
-- target pane/session/client info
+- delivery pane ID
+- originating session/window/client info (when known)
 - verification policy
 
 ## Replacement semantics
 
-When a new job arrives for the **same `target.pane_id`** as a job already pending verification, the pending job is **discarded** and replaced. The logged reason is `replaced by job <new-id>`.
+When a new job arrives for the **same `pane_id`** as a job already pending verification, the daemon keeps only the newest pending work for that pane. A running worker is cancelled and allowed to exit before the replacement starts; a not-yet-started replacement is discarded immediately in favor of the newest arrival. The logged reason is `replaced by job <new-id>`.
 
 Rationale: this matches user intent ("I changed my mind and picked something else"). Queuing both would deliver unwanted content.
 
@@ -75,7 +76,7 @@ Two channels, both always on:
 
 ### `tmux display-message`
 
-On failure, the daemon runs `tmux display-message -c <originating-client-tty> "tprompt: <error>"`. Example messages:
+On failure, the daemon runs `tmux display-message -c <originating-client-tty> "tprompt: <error>"` when `client_tty` is known. Otherwise it uses explicit `-t <target-pane|window|session>` fallback when a safe scope remains so the detached daemon does not rely on tmux's implicit current-client resolution. Example messages:
 
 ```text
 tprompt: target pane %12 no longer exists
@@ -84,7 +85,7 @@ tprompt: content rejected by sanitizer (mode=strict)
 tprompt: replaced by a newer job — this delivery was dropped
 ```
 
-The banner appears in the tmux status area of the originating client. If `client_tty` is not available on the job, the daemon falls back to `display-message` without `-c` (which posts to all clients in the session).
+The banner appears in the tmux status area of the originating client when `client_tty` is known. If `client_tty` is unavailable, the daemon targets the pane explicitly when it still exists; pane-missing failures without any remaining client/window/session scope are logged without broadcasting an unscoped banner.
 
 ### Append-only log
 

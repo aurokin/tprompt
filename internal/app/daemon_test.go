@@ -1,0 +1,324 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/hsadler/tprompt/internal/clipboard"
+	"github.com/hsadler/tprompt/internal/config"
+	"github.com/hsadler/tprompt/internal/daemon"
+	"github.com/hsadler/tprompt/internal/store"
+	"github.com/hsadler/tprompt/internal/tmux"
+)
+
+type fakeDaemonClient struct {
+	submitFn func(daemon.SubmitRequest) (daemon.SubmitResponse, error)
+	statusFn func() (daemon.StatusResponse, error)
+}
+
+func (f *fakeDaemonClient) Submit(req daemon.SubmitRequest) (daemon.SubmitResponse, error) {
+	return f.submitFn(req)
+}
+
+func (f *fakeDaemonClient) Status() (daemon.StatusResponse, error) {
+	return f.statusFn()
+}
+
+func daemonDeps(t *testing.T, client daemon.Client) Deps {
+	t.Helper()
+	deps := workingDeps(t, &fakeStore{})
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{
+			PromptsDir: "/prompts",
+			SocketPath: "/tmp/tprompt-test.sock",
+			LogPath:    "/tmp/tprompt-test.log",
+		}, nil
+	}
+	deps.LoadDaemonConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{
+			SocketPath:    "/tmp/tprompt-test.sock",
+			LogPath:       "/tmp/tprompt-test.log",
+			MaxPasteBytes: 1 << 20,
+		}, nil
+	}
+	deps.NewStore = func(config.Resolved) (store.Store, error) {
+		return &fakeStore{}, nil
+	}
+	deps.NewTmux = func() (tmux.Adapter, error) {
+		return nil, ErrNotImplemented
+	}
+	deps.NewClip = func(config.Resolved) (clipboard.Reader, error) {
+		return nil, ErrNotImplemented
+	}
+	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+		return client, nil
+	}
+	return deps
+}
+
+func TestDaemonStatusPrintsFields(t *testing.T) {
+	client := &fakeDaemonClient{
+		statusFn: func() (daemon.StatusResponse, error) {
+			return daemon.StatusResponse{
+				PID:         12345,
+				Socket:      "/tmp/x.sock",
+				LogPath:     "/tmp/x.log",
+				UptimeSec:   42,
+				PendingJobs: 3,
+				Version:     "0.1.0",
+			}, nil
+		},
+	}
+	stdout, _, err := executeRootWith(t, daemonDeps(t, client), "daemon", "status")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{
+		"pid:          12345",
+		"socket:       /tmp/x.sock",
+		"log:          /tmp/x.log",
+		"uptime:       42s",
+		"pending jobs: 3",
+		"version:      0.1.0",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout missing %q\ngot:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestDaemonStatusSocketUnavailableMapsToExitDaemon(t *testing.T) {
+	client := &fakeDaemonClient{
+		statusFn: func() (daemon.StatusResponse, error) {
+			return daemon.StatusResponse{}, &daemon.SocketUnavailableError{
+				Path:   "/tmp/x.sock",
+				Reason: "connect: connection refused",
+			}
+		},
+	}
+	_, _, err := executeRootWith(t, daemonDeps(t, client), "daemon", "status")
+	var sue *daemon.SocketUnavailableError
+	if !errors.As(err, &sue) {
+		t.Fatalf("want SocketUnavailableError, got %T: %v", err, err)
+	}
+	if ExitCode(err) != ExitDaemon {
+		t.Fatalf("ExitCode = %d, want %d", ExitCode(err), ExitDaemon)
+	}
+}
+
+func TestDaemonStatusLoadConfigError(t *testing.T) {
+	client := &fakeDaemonClient{
+		statusFn: func() (daemon.StatusResponse, error) {
+			t.Fatal("Status should not be called when config fails")
+			return daemon.StatusResponse{}, nil
+		},
+	}
+	deps := daemonDeps(t, client)
+	deps.LoadDaemonConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{}, &config.ValidationError{Field: "socket_path", Message: "must be set"}
+	}
+	_, _, err := executeRootWith(t, deps, "daemon", "status")
+	var ve *config.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want ValidationError, got %T: %v", err, err)
+	}
+}
+
+func TestDaemonStatusIgnoresPromptConfigValidation(t *testing.T) {
+	client := &fakeDaemonClient{
+		statusFn: func() (daemon.StatusResponse, error) {
+			return daemon.StatusResponse{Socket: "/tmp/x.sock"}, nil
+		},
+	}
+	deps := daemonDeps(t, client)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		t.Fatal("LoadConfig should not be called by daemon status")
+		return config.Resolved{}, nil
+	}
+	deps.LoadDaemonConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{SocketPath: "/tmp/tprompt-test.sock"}, nil
+	}
+
+	if _, _, err := executeRootWith(t, deps, "daemon", "status"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDaemonStatusRejectsEmptySocketPath(t *testing.T) {
+	client := &fakeDaemonClient{
+		statusFn: func() (daemon.StatusResponse, error) {
+			t.Fatal("Status should not be called when socket_path is invalid")
+			return daemon.StatusResponse{}, nil
+		},
+	}
+	deps := daemonDeps(t, client)
+	deps.LoadDaemonConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{}, nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "daemon", "status")
+	var ve *config.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want ValidationError, got %T: %v", err, err)
+	}
+	if ve.Field != "socket_path" {
+		t.Fatalf("Field = %q, want %q", ve.Field, "socket_path")
+	}
+}
+
+type stubTmuxAdapter struct{}
+
+func (stubTmuxAdapter) CurrentContext() (tmux.TargetContext, error) {
+	return tmux.TargetContext{}, nil
+}
+
+func (stubTmuxAdapter) PaneExists(context.Context, string) (bool, error) { return true, nil }
+
+func (stubTmuxAdapter) IsTargetSelected(context.Context, tmux.TargetContext) (bool, error) {
+	return true, nil
+}
+
+func (stubTmuxAdapter) CapturePaneTail(string, int) (string, error) { return "", nil }
+
+func (stubTmuxAdapter) Paste(context.Context, tmux.TargetContext, string, bool) error { return nil }
+
+func (stubTmuxAdapter) Type(context.Context, tmux.TargetContext, string, bool) error { return nil }
+
+func (stubTmuxAdapter) DisplayMessage(tmux.MessageTarget, string) error { return nil }
+
+func TestDaemonStartIgnoresPromptConfigValidation(t *testing.T) {
+	deps := daemonDeps(t, &fakeDaemonClient{})
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		t.Fatal("LoadConfig should not be called by daemon start")
+		return config.Resolved{}, nil
+	}
+
+	dir := t.TempDir()
+	socketPath := filepath.Join(dir, "daemon.sock")
+	logPath := filepath.Join(dir, "daemon.log")
+	deps.LoadDaemonConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{
+			SocketPath:    socketPath,
+			LogPath:       logPath,
+			MaxPasteBytes: 1 << 20,
+		}, nil
+	}
+	deps.NewTmux = func() (tmux.Adapter, error) {
+		return stubTmuxAdapter{}, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := runDaemonStart(ctx, deps); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDaemonStartRejectsEmptyLogPath(t *testing.T) {
+	deps := daemonDeps(t, &fakeDaemonClient{})
+	deps.LoadDaemonConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{
+			SocketPath:    "/tmp/tprompt-test.sock",
+			MaxPasteBytes: 1 << 20,
+		}, nil
+	}
+	deps.NewTmux = func() (tmux.Adapter, error) {
+		t.Fatal("NewTmux should not be called when config is invalid")
+		return nil, nil
+	}
+
+	err := runDaemonStart(context.Background(), deps)
+	var ve *config.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want ValidationError, got %T: %v", err, err)
+	}
+	if ve.Field != "log_path" {
+		t.Fatalf("Field = %q, want %q", ve.Field, "log_path")
+	}
+}
+
+func TestDaemonStartSkipsStoppedLogWhenRunReturnsError(t *testing.T) {
+	deps := daemonDeps(t, &fakeDaemonClient{})
+	dir := t.TempDir()
+	socketPath := filepath.Join(dir, "daemon.sock")
+	logPath := filepath.Join(dir, "daemon.log")
+	deps.LoadDaemonConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{
+			SocketPath:    socketPath,
+			LogPath:       logPath,
+			MaxPasteBytes: 1 << 20,
+		}, nil
+	}
+	deps.NewTmux = func() (tmux.Adapter, error) {
+		return stubTmuxAdapter{}, nil
+	}
+
+	prevRunDaemon := runDaemon
+	runDaemon = func(_ context.Context, _ *daemon.Server, onReady func()) (daemon.RunResult, error) {
+		onReady()
+		return daemon.RunResult{Started: true, ExitReason: daemon.RunExitServeError}, errors.New("boom")
+	}
+	t.Cleanup(func() { runDaemon = prevRunDaemon })
+
+	err := runDaemonStart(context.Background(), deps)
+	if err == nil || err.Error() != "boom" {
+		t.Fatalf("runDaemonStart error = %v, want boom", err)
+	}
+
+	logged, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile(logPath): %v", readErr)
+	}
+	logText := string(logged)
+	if !strings.Contains(logText, "outcome=started") {
+		t.Fatalf("expected started log entry, got %q", logText)
+	}
+	if strings.Contains(logText, "outcome=stopped") {
+		t.Fatalf("unexpected stopped log entry on run error, got %q", logText)
+	}
+}
+
+func TestDaemonStartLogsStoppedOnCleanShutdown(t *testing.T) {
+	deps := daemonDeps(t, &fakeDaemonClient{})
+	dir := t.TempDir()
+	socketPath := filepath.Join(dir, "daemon.sock")
+	logPath := filepath.Join(dir, "daemon.log")
+	deps.LoadDaemonConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{
+			SocketPath:    socketPath,
+			LogPath:       logPath,
+			MaxPasteBytes: 1 << 20,
+		}, nil
+	}
+	deps.NewTmux = func() (tmux.Adapter, error) {
+		return stubTmuxAdapter{}, nil
+	}
+
+	prevRunDaemon := runDaemon
+	runDaemon = func(_ context.Context, _ *daemon.Server, onReady func()) (daemon.RunResult, error) {
+		onReady()
+		return daemon.RunResult{Started: true, ExitReason: daemon.RunExitContextCanceled}, nil
+	}
+	t.Cleanup(func() { runDaemon = prevRunDaemon })
+
+	if err := runDaemonStart(context.Background(), deps); err != nil {
+		t.Fatalf("runDaemonStart: %v", err)
+	}
+
+	logged, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile(logPath): %v", readErr)
+	}
+	logText := string(logged)
+	if !strings.Contains(logText, "outcome=started") {
+		t.Fatalf("expected started log entry, got %q", logText)
+	}
+	if !strings.Contains(logText, "outcome=stopped") {
+		t.Fatalf("expected stopped log entry, got %q", logText)
+	}
+}

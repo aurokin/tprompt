@@ -1,0 +1,13 @@
+# `tprompt daemon status` against a missing socket exits ExitDaemon (5)
+# with the SocketUnavailableError message on stderr. No stdout.
+
+! tprompt daemon status --config config.toml
+stderr 'daemon socket .* unavailable'
+! stdout .
+
+-- config.toml --
+prompts_dir = "prompts"
+socket_path = "missing/daemon.sock"
+log_path = "missing/daemon.log"
+
+-- prompts/.keep --

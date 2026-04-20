@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/hsadler/tprompt/internal/config"
+	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/keybind"
 	"github.com/hsadler/tprompt/internal/sanitize"
 	"github.com/hsadler/tprompt/internal/store"
@@ -23,7 +24,7 @@ const (
 
 // ExitCode maps an error to the appropriate process exit code.
 //
-//nolint:funlen // flat errors.As dispatch is clearest as a sequence of branches
+//nolint:funlen,gocognit // flat errors.As dispatch is clearest as a sequence of branches; funlen (length) and gocognit (branch count) both flag this shape unavoidably.
 func ExitCode(err error) int {
 	if err == nil {
 		return ExitOK
@@ -68,6 +69,23 @@ func ExitCode(err error) int {
 	var strictReject *sanitize.StrictRejectError
 	if errors.As(err, &strictReject) {
 		return ExitPrompt
+	}
+
+	var socketErr *daemon.SocketUnavailableError
+	if errors.As(err, &socketErr) {
+		return ExitDaemon
+	}
+	var ipcErr *daemon.IPCError
+	if errors.As(err, &ipcErr) {
+		return ExitDaemon
+	}
+	var timeoutErr *daemon.TimeoutError
+	if errors.As(err, &timeoutErr) {
+		return ExitDaemon
+	}
+	var policyErr *daemon.InvalidPolicyError
+	if errors.As(err, &policyErr) {
+		return ExitDaemon
 	}
 
 	var envErr *tmux.EnvError

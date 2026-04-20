@@ -21,7 +21,7 @@ TmuxAdapter
 - CapturePaneTail(paneID string, lines int) -> string, error
 - Paste(target TargetContext, body string, pressEnter bool) -> error
 - Type(target TargetContext, body string, pressEnter bool) -> error
-- DisplayMessage(clientTTY string, message string) -> error
+- DisplayMessage(target MessageTarget, message string) -> error
 ```
 
 ## Clipboard reader

@@ -19,6 +19,7 @@ If the target pane disappeared, fail the job.
 The daemon should only deliver after the TUI command is gone.
 
 When the TUI is launched inside a tmux popup, this can be approximated indirectly via the client returning to the target pane (tmux only returns focus after the popup command exits).
+When the submitting process PID is known, the daemon should prefer that direct signal over pane-selection heuristics and wait for the submitting process to exit before delivering.
 
 ### 3. The target pane is again the selected or intended target
 
@@ -26,11 +27,15 @@ Preferred check:
 
 - originating client/session is back on the target pane
 
-Fallback acceptable for MVP if client-scoped verification is difficult:
+Fallback acceptable when the submitter PID is unavailable:
 
 - verify that the target pane is now the selected pane in its session/window context
 
-Document exactly which verification level was implemented.
+Implemented contract:
+
+- always verify the target pane still exists
+- if the job includes the submitter PID, wait for that process to exit
+- then verify the target pane is selected before delivery
 
 ## Post-injection check
 

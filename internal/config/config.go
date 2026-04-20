@@ -82,6 +82,19 @@ type Resolved struct {
 	ConfigPath                 string
 }
 
+// ResolveDaemon extracts only the config fields the daemon lifecycle needs.
+// Unlike Normalize, it intentionally skips prompt-store, keybinding, and
+// clipboard parsing so daemon start/status are not coupled to unrelated
+// validation.
+func ResolveDaemon(cfg Config, configPath string) Resolved {
+	return Resolved{
+		SocketPath:    expandHome(cfg.SocketPath),
+		LogPath:       expandHome(cfg.LogPath),
+		MaxPasteBytes: cfg.MaxPasteBytes,
+		ConfigPath:    configPath,
+	}
+}
+
 // ValidationError reports a single config validation failure.
 type ValidationError struct {
 	Field   string

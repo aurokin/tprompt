@@ -8,6 +8,7 @@ import (
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
+	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
 )
@@ -52,8 +53,6 @@ func TestZeroArgCommandsAcceptBareInvocation(t *testing.T) {
 		{name: "doctor", args: []string{"doctor"}},
 		{name: "tui", args: []string{"tui"}},
 		{name: "pick", args: []string{"pick"}},
-		{name: "daemon start", args: []string{"daemon", "start"}},
-		{name: "daemon status", args: []string{"daemon", "status"}},
 	}
 
 	for _, tt := range tests {
@@ -136,6 +135,13 @@ func workingDeps(t *testing.T, fs *fakeStore) Deps {
 				PromptsDir: "/test/prompts",
 			}, nil
 		},
+		LoadDaemonConfig: func(string) (config.Resolved, error) {
+			return config.Resolved{
+				SocketPath:    "/tmp/tprompt-test.sock",
+				LogPath:       "/tmp/tprompt-test.log",
+				MaxPasteBytes: 1 << 20,
+			}, nil
+		},
 		NewStore: func(config.Resolved) (store.Store, error) {
 			return fs, nil
 		},
@@ -143,6 +149,9 @@ func workingDeps(t *testing.T, fs *fakeStore) Deps {
 			return nil, ErrNotImplemented
 		},
 		NewClip: func(config.Resolved) (clipboard.Reader, error) {
+			return nil, ErrNotImplemented
+		},
+		NewDaemonClient: func(config.Resolved) (daemon.Client, error) {
 			return nil, ErrNotImplemented
 		},
 	}

@@ -54,11 +54,10 @@ KeybindAssignment {
 }
 ```
 
-## Delivery target
+## Origin context
 
 ```text
-TargetContext {
-  pane_id: string
+OriginContext {
   session_id: string?
   window_id: string?
   client_tty: string?
@@ -76,7 +75,8 @@ DeliveryRequest {
   mode: "paste" | "type"
   press_enter: bool
   sanitize_mode: "off" | "safe" | "strict"
-  target: TargetContext
+  pane_id: string
+  origin: OriginContext?
 }
 ```
 
@@ -111,7 +111,7 @@ VerificationPolicy {
 
 ## Replacement semantics
 
-When a new `DeferredJob` arrives with the same `request.target.pane_id` as a pending job, the pending job is **discarded**. Only the newer job is executed once verification passes.
+When a new `DeferredJob` arrives with the same `request.pane_id` as a pending job, the pending job is **discarded**. Only the newer job is executed once verification passes.
 
 ## Notes
 

@@ -419,6 +419,24 @@ func TestNormalizeEmptyClipboardCommand(t *testing.T) {
 	}
 }
 
+func TestResolveDaemonIgnoresPromptAndClipboardFields(t *testing.T) {
+	cfg := Default()
+	cfg.PromptsDir = ""
+	cfg.ClipboardReadCommand = `"unterminated`
+	cfg.ReservedKeys["clipboard"] = "ctrl+x"
+
+	r := ResolveDaemon(cfg, "/tmp/config.toml")
+	if r.SocketPath == "" {
+		t.Fatal("ResolveDaemon left SocketPath empty")
+	}
+	if r.LogPath == "" {
+		t.Fatal("ResolveDaemon left LogPath empty")
+	}
+	if r.ConfigPath != "/tmp/config.toml" {
+		t.Fatalf("ConfigPath = %q, want %q", r.ConfigPath, "/tmp/config.toml")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Validate tests
 // ---------------------------------------------------------------------------

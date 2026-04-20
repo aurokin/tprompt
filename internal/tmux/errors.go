@@ -31,6 +31,7 @@ type DeliveryError struct {
 	Op      string
 	Target  string
 	Message string
+	Cause   error
 }
 
 func (e *DeliveryError) Error() string {
@@ -39,6 +40,8 @@ func (e *DeliveryError) Error() string {
 	}
 	return fmt.Sprintf("tmux %s failed: %s", e.Op, e.Message)
 }
+
+func (e *DeliveryError) Unwrap() error { return e.Cause }
 
 // OversizeError reports that a prompt body exceeds the configured
 // max_paste_bytes ceiling and was rejected before any tmux call.

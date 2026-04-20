@@ -265,19 +265,135 @@ Read first:
 
 ## Phase 4 — daemon and job queue
 
-Goal: implement deferred TUI-flow delivery with local IPC.
+Goal: implement deferred TUI-flow delivery with local IPC. The daemon has no
+in-tree caller until Phase 5 (TUI); Phase 4 builds and tests it end-to-end via
+direct `daemon.Client` usage and `tprompt daemon start`/`status`.
 
-Tasks:
+Status: complete
 
-- create a per-user daemon
-- define local socket path
-- define job payload (including `source`, `sanitize_mode`, and captured clipboard bytes when applicable)
-- enqueue send jobs
-- implement replace-same-target semantics
-- validate target pane before execution
-- run sanitizer immediately before adapter delivery
-- return structured success/failure to the CLI
-- surface failures via `tmux display-message` + append-only log
+Locked decisions (resolved during plan review):
+
+- **Wire format:** line-delimited JSON, one request per connection. Server
+  reads one request, writes one response, closes. No multi-message framing.
+- **`Submit` is fire-and-ack.** It returns immediately with
+  `{Accepted, ReplacedJobID}`; verification + delivery happens asynchronously
+  on the server. The TUI (Phase 5) submits and exits — it does not wait for
+  delivery.
+- **No `daemon stop` subcommand.** Lifecycle is SIGINT/SIGTERM only. The
+  current CLI scaffold and `TestZeroArgCommandsAcceptBareInvocation` already
+  reflect this — only `start` and `status` are registered. `stop` may be
+  revisited if a real need surfaces; deferred to Phase 7.
+- **No CLI auto-start of the daemon.** `tprompt tui` (Phase 5) and
+  `tprompt daemon status` will fail with a clear "daemon not running" error if
+  the socket is unreachable. Auto-start is deferred to Phase 7.
+- **Post-injection capture-pane verification is out of MVP.** Optional per
+  `docs/tmux/verification.md`. `CapturePaneTail` is wired but unused by the
+  daemon. May land in Phase 7 if it earns its keep.
+- **Stale-socket detection** uses a dial-probe: `net.DialTimeout("unix", path,
+  200ms)`. Dial succeeds → another daemon is live, refuse to start with
+  `SocketUnavailableError`. Dial fails → unlink, bind. Same primitive backs
+  `daemon status`'s "daemon not running" detection.
+- **Daemon entry point is `daemon.Run(ctx, *Server, onReady func()) error`**,
+  not a blocking cobra handler. The `daemon start` handler is a thin shim
+  that builds the `*Server` from cfg+deps, wires
+  `signal.NotifyContext(SIGINT, SIGTERM)`, and calls `Run`. The `onReady`
+  callback fires once after `Listen` succeeds and before `Serve` accepts —
+  callers gate "daemon started" log/banner output on it. Tests drive `Run`
+  with a controlled context.
+- **Log format:** logfmt single-line entries
+  (`time=… job_id=… pane=… source=… outcome=… msg=…`). Bodies and clipboard
+  bytes are never logged (sanitizer rejections record class + offset only,
+  consistent with Phase 3.5).
+- **Job ID format:** `j-<unix-nanos>-<atomic-counter>` per daemon process.
+  Unique within one daemon, monotonic. The daemon mints the ID in
+  `Server.handle()` before calling `Queue.Enqueue`; any client-supplied
+  `Job.JobID` is discarded so logs and the `SubmitResponse` always reference
+  the same authoritative key.
+
+### Phase 4a — data model and wire types
+
+- replace the stub `daemon.Job` with the real model from
+  `docs/architecture/data-model.md`: `Job` containing `JobID`, `CreatedAt`,
+  `Source`, `PromptID`, `SourcePath`, `Body`, `Mode`, `Enter`, `SanitizeMode`,
+  `Target tmux.TargetContext`, `VerificationPolicy`
+- define wire envelopes: `SubmitRequest`/`SubmitResponse`,
+  `StatusRequest`/`StatusResponse`
+- introduce typed errors `daemon.SocketUnavailableError`, `daemon.TimeoutError`,
+  `daemon.InvalidPolicyError`
+- map all three into `app.ExitCode` → `ExitDaemon` (5)
+- delete the existing zero-value `daemon_test.go` stub
+
+### Phase 4b — append-only logger
+
+- `daemon.NewLogger(path)` opens with `O_APPEND|O_CREATE`, mkdir-p the parent
+- mutex-guarded `Write`; logfmt one-line entries
+- API forbids passing body bytes (signature accepts only metadata fields)
+- tests: format snapshot, concurrent-write integrity, parent-dir creation
+
+### Phase 4c — job queue with replace-same-target
+
+- `Queue` keyed by `target.PaneID`; mutex-protected map of pending workers
+- `Enqueue(job)`:
+  - if a worker exists for the same pane: keep only the newest pending job;
+    cancel the active worker and wait for it to exit before starting its
+    replacement; queued replacements are discarded immediately
+  - log `outcome=replaced msg="replaced by job <new-id>"` and send
+    `DisplayMessage(target, "tprompt: replaced by a newer job — this delivery was dropped")`
+    for the displaced job
+  - register the new worker, return `SubmitResult{Accepted, ReplacedJobID}`
+- different-pane jobs run concurrently
+- tests: same-pane replace cancels and banners the displaced job;
+  different-pane concurrent jobs both run; displaced-job banner content
+  matches the documented string
+
+### Phase 4d — verification engine
+
+- `Verify(ctx, adapter, target, policy)`:
+  - poll `IsTargetSelected(target)` every `VerificationPollIntervalMS` until
+    `VerificationTimeoutMS`
+  - propagate `tmux.PaneMissingError` immediately when the underlying check
+    surfaces it
+  - on timeout return `daemon.TimeoutError{TimeoutMS}`
+- tests with fake adapter: ready-now; ready-after-N polls; never-ready
+  (timeout); pane-vanishes-mid-loop
+
+### Phase 4e — delivery executor
+
+- after verification: `MaxPasteBytes` check → sanitize → `Paste`/`Type`
+  (mirrors `runSend`'s ordering — cap is pre-sanitize)
+- on any failure: log entry + `DisplayMessage(target, "tprompt: <error>")`
+  with explicit pane targeting when `client_tty == ""`
+- on success: no log entry, no banner (per spec)
+- tests: happy paste; strict-reject (no delivery, banner + log); oversize
+  (banner + log); post-verify pane-vanish race surfaces `DeliveryError`;
+  adapter `DeliveryError` propagates
+
+### Phase 4f — IPC server, client, and Deps seam
+
+- `Server` binds Unix socket at `cfg.SocketPath` with `0600`; stale-socket
+  cleanup via dial-probe; one JSON request per connection; dispatches to
+  queue or status responder
+- `Client` is a thin `net.Dial("unix", path)` + JSON write/read
+- add `Deps.NewDaemonClient func(cfg config.Resolved) (daemon.Client, error)`
+  to `internal/app/deps.go`; production wires `daemon.NewSocketClient`
+- `StatusResponse`: `pid`, `socket`, `log`, `uptime`, `pending_jobs`, `version`
+- tests over real `unix` socket on `t.TempDir()`: submit ack round-trip;
+  status round-trip; stale-socket cleanup; refusal when a live daemon holds
+  the socket; `0600` permission check
+
+### Phase 4g — CLI wiring
+
+- replace `ErrNotImplemented` in `daemon start` and `daemon status` handlers
+- `daemon start`: shim that builds adapter + logger + queue + server, calls
+  `daemon.Run(signal.NotifyContext(SIGINT, SIGTERM), cfg, deps)`; clean
+  shutdown drains in-flight workers up to a bounded grace period
+- `daemon status`: dial socket, send `StatusRequest`, print fields. Connect
+  refused → `daemon not running` on stderr + `ExitDaemon` (5)
+- update `TestZeroArgCommandsAcceptBareInvocation` to drop the `daemon start`
+  and `daemon status` rows (they no longer return `ErrNotImplemented`)
+- testscript: `daemon status` when no daemon is running (no live process
+  needed). Live-daemon lifecycle is covered by Go integration tests in
+  `internal/daemon/`, not testscript.
 
 Read first:
 
@@ -285,6 +401,7 @@ Read first:
 - `docs/architecture/components.md`
 - `docs/architecture/data-model.md`
 - `docs/implementation/error-handling.md`
+- `docs/tmux/verification.md`
 
 ## Phase 5 — TUI flow and built-in TUI
 
@@ -372,11 +489,23 @@ Goal: make the tool pleasant to use without changing scope.
 
 Tasks:
 
-- improve `doctor`
+- improve `doctor` (add a daemon-reachability check now that the socket is real)
 - improve help text
 - improve prompt list/show formatting (show resolved keybind)
 - support configurable picker command if desired (for `tprompt pick` only)
 - refine logs and daemon status output
+- **CLI auto-start of the daemon** (deferred from Phase 4): when the TUI flow
+  or `daemon status` finds the socket unreachable, optionally spawn the
+  daemon and retry. Behavior, opt-in flag, and PID-file/lock semantics to be
+  designed here, not in MVP.
+- **`daemon stop` subcommand** (deferred from Phase 4): only if SIGTERM
+  proves insufficient in practice. Would dial the socket, send a shutdown
+  request, and wait for graceful exit.
+- **Post-injection capture-pane verification** (deferred from Phase 4):
+  optional per `docs/tmux/verification.md`. Capture pane tail before/after
+  delivery and log a warning if the tail is unchanged. Adds noise without
+  proving semantic success, so only land this if it earns its keep in real
+  use.
 
 Read first:
 

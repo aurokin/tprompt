@@ -53,7 +53,7 @@ Sequence:
 
 ## Target resolution
 
-`TargetContext` (see `docs/architecture/data-model.md`) supplies `pane_id` and optionally `session_id`, `window_id`, `client_tty`. The adapter uses `pane_id` as the authoritative `-t` target. Other fields are used for verification (see `docs/tmux/verification.md`).
+The adapter uses `pane_id` as the authoritative `-t` delivery target. The daemon may also reconstruct a `TargetContext` from the job's optional origin metadata (`session_id`, `window_id`, `client_tty`) when verification needs broader tmux context. See `docs/architecture/data-model.md` and `docs/tmux/verification.md`.
 
 ## Size cap
 

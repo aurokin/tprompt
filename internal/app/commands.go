@@ -1,15 +1,27 @@
 package app
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/hsadler/tprompt/internal/config"
+	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/sanitize"
 	"github.com/hsadler/tprompt/internal/tmux"
 )
+
+// appVersion is reported by `tprompt daemon status`. Bumped here for MVP;
+// later phases may wire it to a build-time variable.
+const appVersion = "0.1.0"
+
+var runDaemon = daemon.Run
 
 func newListCmd(deps Deps) *cobra.Command {
 	return &cobra.Command{
@@ -166,7 +178,7 @@ func runSend(deps Deps, id string, f sendFlags) error {
 	// CurrentContext() returns our own pane, so existence is implicit — only
 	// verify a user-supplied --target-pane.
 	if f.targetPane != "" {
-		exists, err := adapter.PaneExists(target.PaneID)
+		exists, err := adapter.PaneExists(context.Background(), target.PaneID)
 		if err != nil {
 			return err
 		}
@@ -177,9 +189,9 @@ func runSend(deps Deps, id string, f sendFlags) error {
 
 	switch delivery.Mode {
 	case "paste":
-		return adapter.Paste(target, body, delivery.Enter)
+		return adapter.Paste(context.Background(), target, body, delivery.Enter)
 	case "type":
-		return adapter.Type(target, body, delivery.Enter)
+		return adapter.Type(context.Background(), target, body, delivery.Enter)
 	default:
 		return fmt.Errorf("internal error: unresolved delivery mode %q", delivery.Mode)
 	}
@@ -259,11 +271,8 @@ func newDaemonCmd(deps Deps) *cobra.Command {
 			Aliases: []string{"run"},
 			Short:   "Start the daemon in the foreground",
 			Args:    cobra.NoArgs,
-			RunE: func(*cobra.Command, []string) error {
-				if _, err := deps.LoadConfig(*deps.ConfigPath); err != nil {
-					return err
-				}
-				return ErrNotImplemented
+			RunE: func(c *cobra.Command, _ []string) error {
+				return runDaemonStart(c.Context(), deps)
 			},
 		},
 		&cobra.Command{
@@ -271,12 +280,115 @@ func newDaemonCmd(deps Deps) *cobra.Command {
 			Short: "Report daemon status",
 			Args:  cobra.NoArgs,
 			RunE: func(*cobra.Command, []string) error {
-				if _, err := deps.LoadConfig(*deps.ConfigPath); err != nil {
-					return err
-				}
-				return ErrNotImplemented
+				return runDaemonStatus(deps)
 			},
 		},
 	)
 	return cmd
+}
+
+func runDaemonStart(parent context.Context, deps Deps) error {
+	cfg, err := deps.LoadDaemonConfig(*deps.ConfigPath)
+	if err != nil {
+		return err
+	}
+	if err := validateDaemonStartConfig(cfg); err != nil {
+		return err
+	}
+	adapter, err := deps.NewTmux()
+	if err != nil {
+		return err
+	}
+	logger, err := daemon.NewLogger(cfg.LogPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = logger.Close() }()
+
+	executor := daemon.NewExecutor(adapter, logger, cfg.MaxPasteBytes)
+	queue := daemon.NewQueue(adapter, logger, executor.Run)
+	started := time.Now()
+
+	server := daemon.NewServer(daemon.ServerConfig{
+		SocketPath: cfg.SocketPath,
+		Queue:      queue,
+		Logger:     logger,
+		StatusFn: func() daemon.StatusResponse {
+			return daemon.StatusResponse{
+				PID:         os.Getpid(),
+				Socket:      cfg.SocketPath,
+				LogPath:     cfg.LogPath,
+				UptimeSec:   int64(time.Since(started).Seconds()),
+				PendingJobs: queue.Pending(),
+				Version:     appVersion,
+			}
+		},
+	})
+
+	ctx, stop := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	runResult, runErr := runDaemon(ctx, server, func() {
+		_, _ = fmt.Fprintf(deps.Stdout, "tprompt daemon listening on %s\n", cfg.SocketPath)
+		_ = logger.Log(daemon.Entry{
+			Outcome: daemon.OutcomeStarted,
+			Msg:     fmt.Sprintf("pid=%d socket=%s", os.Getpid(), cfg.SocketPath),
+		})
+	})
+
+	if runResult.Started && runErr == nil && runResult.ExitReason == daemon.RunExitContextCanceled {
+		_ = logger.Log(daemon.Entry{Outcome: daemon.OutcomeStopped})
+		_, _ = fmt.Fprintln(deps.Stdout, "tprompt daemon stopped")
+	}
+	return runErr
+}
+
+func runDaemonStatus(deps Deps) error {
+	cfg, err := deps.LoadDaemonConfig(*deps.ConfigPath)
+	if err != nil {
+		return err
+	}
+	if err := validateDaemonStatusConfig(cfg); err != nil {
+		return err
+	}
+	client, err := deps.NewDaemonClient(cfg)
+	if err != nil {
+		return err
+	}
+	status, err := client.Status()
+	if err != nil {
+		return err
+	}
+
+	w := deps.Stdout
+	_, _ = fmt.Fprintf(w, "pid:          %d\n", status.PID)
+	_, _ = fmt.Fprintf(w, "socket:       %s\n", status.Socket)
+	_, _ = fmt.Fprintf(w, "log:          %s\n", status.LogPath)
+	_, _ = fmt.Fprintf(w, "uptime:       %ds\n", status.UptimeSec)
+	_, _ = fmt.Fprintf(w, "pending jobs: %d\n", status.PendingJobs)
+	_, _ = fmt.Fprintf(w, "version:      %s\n", status.Version)
+	return nil
+}
+
+func validateDaemonStatusConfig(cfg config.Resolved) error {
+	if cfg.SocketPath == "" {
+		return &config.ValidationError{Field: "socket_path", Message: "must be set"}
+	}
+	return nil
+}
+
+func validateDaemonStartConfig(cfg config.Resolved) error {
+	if err := validateDaemonStatusConfig(cfg); err != nil {
+		return err
+	}
+	if cfg.LogPath == "" {
+		return &config.ValidationError{Field: "log_path", Message: "must be set"}
+	}
+	if cfg.MaxPasteBytes <= 0 {
+		return &config.ValidationError{
+			Field:   "max_paste_bytes",
+			Message: fmt.Sprintf("must be positive, got %d", cfg.MaxPasteBytes),
+		}
+	}
+	return nil
 }
