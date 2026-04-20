@@ -6,7 +6,9 @@ This file describes the command surface for MVP.
 
 ### `tprompt` (no subcommand)
 
-Default dispatch: runs `tprompt tui` when stdin is a tty **and** `$TMUX` is set; otherwise prints help. This keeps the tmux binding short (`display-popup -E tprompt`) while preserving the convention that no-args → usage in a regular shell.
+Default dispatch: when stdin is a tty **and** `$TMUX` is set, the invocation is rewritten to `tprompt tui` before cobra parses flags, so a tmux binding can use `tprompt --target-pane '#{pane_id}' ...` instead of `tprompt tui --target-pane '#{pane_id}' ...`. Outside tmux (or without a tty), bare `tprompt` prints help.
+
+Because rewriting happens before flag parsing, `tui`'s required `--target-pane` still fires — bare `tprompt` with no flags inside tmux+tty errors clearly with exit 2. This is intentional: see DECISIONS.md §29 and `examples/tmux-bindings.md`.
 
 ### `tprompt list`
 

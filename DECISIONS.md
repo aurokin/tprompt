@@ -228,7 +228,9 @@ Multiple TUI instances (including multiple tmux popups) can be open simultaneous
 
 ### 29. Bare `tprompt` defaults to `tprompt tui` in tmux + tty
 
-When invoked with no subcommand and no args, `tprompt` dispatches to `tprompt tui` if stdin is a tty **and** `$TMUX` is set. Otherwise it prints help. This keeps the tmux binding short (`display-popup -E tprompt`) while preserving the convention that no-args → usage in a regular shell. The TUI is the signature workflow, so this default matches user intent when the environment supports it.
+When invoked with no subcommand, `tprompt` dispatches to `tprompt tui` if stdin is a tty **and** `$TMUX` is set, so users can write `tprompt --target-pane '#{pane_id}' ...` in their binding instead of `tprompt tui --target-pane '#{pane_id}' ...`. Outside tmux (or without a tty), it prints help, preserving the no-args → usage convention in a regular shell. The TUI is the signature workflow, so this default matches user intent when the environment supports it.
+
+The dispatch is a pure arg rewrite at the top of `RunCLI` — cobra still parses flags and enforces `tui`'s required `--target-pane`, so bare `tprompt` with no flags inside tmux+tty errors clearly (exit 2). This is intentional: inside a `display-popup -E` popup, `$TMUX_PANE` resolves to the popup's own pane, not the originating one, so the binding must pass `#{pane_id}` at trigger time for delivery to target the correct pane. See `examples/tmux-bindings.md` for the canonical binding.
 
 ### 30. Implementation tech stack
 
