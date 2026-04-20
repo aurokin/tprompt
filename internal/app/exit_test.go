@@ -85,3 +85,26 @@ func TestExitCodeUnknownError(t *testing.T) {
 		t.Fatalf("ExitCode(generic) = %d, want %d", got, ExitGeneral)
 	}
 }
+
+func TestExitCodeCobraUsageErrors(t *testing.T) {
+	// Exact strings from cobra/pflag; kept here so drift in upstream wording
+	// fails this test loudly rather than silently degrading exit code 2 → 1.
+	cases := []string{
+		`required flag(s) "target-pane" not set`,
+		"unknown flag: --nope",
+		"unknown shorthand flag: 'x' in -x",
+		`unknown command "bogus" for "tprompt"`,
+		"flag needs an argument: --config",
+		"flag needs an argument: --target-pane",
+		"bad flag syntax: --=x",
+		`invalid argument "abc" for "--count" flag: strconv.ParseInt: parsing "abc": invalid syntax`,
+		"accepts 1 arg(s), received 0",
+	}
+	for _, msg := range cases {
+		t.Run(msg, func(t *testing.T) {
+			if got := ExitCode(errors.New(msg)); got != ExitUsage {
+				t.Fatalf("ExitCode(%q) = %d, want %d", msg, got, ExitUsage)
+			}
+		})
+	}
+}

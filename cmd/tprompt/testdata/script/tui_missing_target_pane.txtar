@@ -1,0 +1,7 @@
+# `tprompt tui` without --target-pane exits 2 with a usage error on stderr.
+
+! tprompt tui --config config.toml
+stderr 'target-pane'
+
+-- config.toml --
+prompts_dir = "prompts"

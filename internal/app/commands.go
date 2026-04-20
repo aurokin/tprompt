@@ -232,20 +232,6 @@ func newDoctorCmd(deps Deps) *cobra.Command {
 	}
 }
 
-func newTUICmd(deps Deps) *cobra.Command {
-	return &cobra.Command{
-		Use:   "tui",
-		Short: "Launch the interactive TUI (typically from a tmux popup)",
-		Args:  cobra.NoArgs,
-		RunE: func(*cobra.Command, []string) error {
-			if _, err := deps.LoadConfig(*deps.ConfigPath); err != nil {
-				return err
-			}
-			return ErrNotImplemented
-		},
-	}
-}
-
 func newPickCmd(deps Deps) *cobra.Command {
 	return &cobra.Command{
 		Use:   "pick",

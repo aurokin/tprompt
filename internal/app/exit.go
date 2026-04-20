@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
@@ -105,5 +106,38 @@ func ExitCode(err error) int {
 		return ExitDelivery
 	}
 
+	if isCobraUsageError(err) {
+		return ExitUsage
+	}
+
 	return ExitGeneral
+}
+
+// isCobraUsageError recognizes the plain-text errors cobra/pflag emit for
+// flag and arg validation failures (required flag missing, unknown flag,
+// unknown subcommand, wrong arg count). Cobra doesn't return typed errors
+// for these, so string-matching is the established pattern.
+func isCobraUsageError(err error) bool {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, `required flag(s)`):
+		return true
+	case strings.HasPrefix(msg, "unknown flag"):
+		return true
+	case strings.HasPrefix(msg, "unknown shorthand flag"):
+		return true
+	case strings.HasPrefix(msg, "unknown command"):
+		return true
+	case strings.HasPrefix(msg, "flag needs an argument"):
+		return true
+	case strings.HasPrefix(msg, "bad flag syntax"):
+		return true
+	case strings.HasPrefix(msg, "invalid argument"):
+		return true
+	case strings.Contains(msg, "arg(s), received"):
+		return true
+	case strings.Contains(msg, "accepts "):
+		return true
+	}
+	return false
 }
