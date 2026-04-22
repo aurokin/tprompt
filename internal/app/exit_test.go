@@ -4,11 +4,13 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/keybind"
 	"github.com/hsadler/tprompt/internal/sanitize"
 	"github.com/hsadler/tprompt/internal/store"
+	"github.com/hsadler/tprompt/internal/submitter"
 )
 
 func TestExitCodeNilIsZero(t *testing.T) {
@@ -44,6 +46,9 @@ func TestExitCodePromptErrors(t *testing.T) {
 		{"ReservedKeybind", &keybind.ReservedKeybindError{Key: 'p', Action: "clipboard"}},
 		{"MalformedKeybind", &keybind.MalformedKeybindError{Value: "ctrl+x"}},
 		{"StrictReject", &sanitize.StrictRejectError{Class: "OSC", Offset: 0}},
+		{"BodyTooLarge", &submitter.BodyTooLargeError{Bytes: 10, Limit: 5}},
+		{"ClipboardEmpty", &clipboard.EmptyClipboardError{}},
+		{"ClipboardInvalidUTF8", &clipboard.InvalidUTF8Error{}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

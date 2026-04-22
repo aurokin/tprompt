@@ -1,0 +1,30 @@
+# `tprompt tui` with a test-injected clipboard-returning Renderer submits to
+# the daemon and exits 0. Exercises the full AUR-22 path end-to-end:
+# pre-flight chain (config → store → daemon → pane) → Renderer →
+# Submitter.submitClipboard → daemon.Submit(Accepted=true).
+
+[!exec:tmux] skip
+
+# $WORK exceeds macOS's unix-socket path limit, so use the short per-test
+# tmpdir the testscript harness provides.
+env TMUX_TMPDIR=$SHORT_TMPDIR
+# testscript's `env` splits on whitespace, so the body must not contain spaces.
+env TPROMPT_TEST_RENDERER=clipboard:hello-from-the-test-clipboard
+
+# Fresh tmux server; the first session's first pane is assigned %0.
+exec tmux new-session -d -s tuiclip 'sleep 60'
+
+mkdir prompts state
+tprompt daemon start --config config.toml &
+
+exec sh -c 'for i in $(seq 1 50); do test -S state/daemon.sock && exit 0; sleep 0.1; done; exit 1'
+
+tprompt tui --target-pane %0 --config config.toml
+! stderr .
+
+exec tmux kill-server
+
+-- config.toml --
+prompts_dir = "prompts"
+socket_path = "state/daemon.sock"
+log_path = "state/daemon.log"

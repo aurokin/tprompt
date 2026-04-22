@@ -4,11 +4,13 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/keybind"
 	"github.com/hsadler/tprompt/internal/sanitize"
 	"github.com/hsadler/tprompt/internal/store"
+	"github.com/hsadler/tprompt/internal/submitter"
 	"github.com/hsadler/tprompt/internal/tmux"
 )
 
@@ -69,6 +71,24 @@ func ExitCode(err error) int {
 
 	var strictReject *sanitize.StrictRejectError
 	if errors.As(err, &strictReject) {
+		return ExitPrompt
+	}
+
+	var bodyTooLarge *submitter.BodyTooLargeError
+	if errors.As(err, &bodyTooLarge) {
+		return ExitPrompt
+	}
+
+	// Clipboard content errors from the Submitter. Oversize clipboard content
+	// is translated to *submitter.BodyTooLargeError (handled above); the
+	// oversize-from-clipboard.Validate case (Phase 6 `paste`) is not wired
+	// here yet because it has no caller in Phase 5a.
+	var clipEmpty *clipboard.EmptyClipboardError
+	if errors.As(err, &clipEmpty) {
+		return ExitPrompt
+	}
+	var clipUTF8 *clipboard.InvalidUTF8Error
+	if errors.As(err, &clipUTF8) {
 		return ExitPrompt
 	}
 

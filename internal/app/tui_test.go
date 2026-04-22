@@ -5,9 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/store"
+	"github.com/hsadler/tprompt/internal/submitter"
 	"github.com/hsadler/tprompt/internal/tmux"
 	"github.com/hsadler/tprompt/internal/tui"
 )
@@ -333,6 +335,254 @@ func TestTUI_PaneMissingExitsTmux(t *testing.T) {
 	}
 	if rend.called {
 		t.Fatal("renderer must not run when pane preflight fails")
+	}
+}
+
+// recordingSubmitter captures the Submit call so tests can assert on the
+// Result that runTUI threaded through.
+type recordingSubmitter struct {
+	called  bool
+	result  tui.Result
+	err     error
+	cfg     config.Resolved
+	target  tmux.TargetContext
+	prompts store.Store
+	client  daemon.Client
+}
+
+func (r *recordingSubmitter) Submit(result tui.Result) error {
+	r.called = true
+	r.result = result
+	return r.err
+}
+
+func TestTUI_PromptSelectionInvokesSubmitterWithDeps(t *testing.T) {
+	fs := &fakeStore{
+		summaries: []store.Summary{{ID: "demo", Key: "1"}},
+		prompts:   map[string]store.Prompt{"demo": {Summary: store.Summary{ID: "demo"}, Body: "x"}},
+	}
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionPrompt, PromptID: "demo"}}
+	rec := &recordingSubmitter{}
+	deps := tuiDeps(t, fs, rend)
+	deps.NewSubmitter = func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter {
+		rec.cfg = cfg
+		rec.prompts = prompts
+		rec.client = client
+		rec.target = target
+		return rec
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%9", "--client-tty", "/dev/pts/4", "--session-id", "$2")
+	if err != nil {
+		t.Fatalf("Submit happy path: want nil, got %v", err)
+	}
+	if !rec.called {
+		t.Fatal("submitter should have been called for ActionPrompt")
+	}
+	if rec.result.Action != tui.ActionPrompt || rec.result.PromptID != "demo" {
+		t.Errorf("Submit got %+v, want ActionPrompt/demo", rec.result)
+	}
+	if rec.target.PaneID != "%9" || rec.target.ClientTTY != "/dev/pts/4" || rec.target.Session != "$2" {
+		t.Errorf("target threaded into submitter = %+v", rec.target)
+	}
+	if rec.prompts != fs {
+		t.Error("store not threaded into submitter")
+	}
+	if rec.client == nil {
+		t.Error("daemon client not threaded into submitter")
+	}
+}
+
+func TestTUI_OversizePromptExitsExitPrompt(t *testing.T) {
+	fs := &fakeStore{
+		summaries: []store.Summary{{ID: "demo", Key: "1"}},
+	}
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionPrompt, PromptID: "demo"}}
+	deps := tuiDeps(t, fs, rend)
+	deps.NewSubmitter = func(config.Resolved, store.Store, daemon.Client, tmux.TargetContext) submitter.Submitter {
+		return &recordingSubmitter{err: &submitter.BodyTooLargeError{Bytes: 99, Limit: 10}}
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	var tooLarge *submitter.BodyTooLargeError
+	if !errors.As(err, &tooLarge) {
+		t.Fatalf("want *BodyTooLargeError, got %T: %v", err, err)
+	}
+	if ExitCode(err) != ExitPrompt {
+		t.Fatalf("ExitCode = %d, want ExitPrompt", ExitCode(err))
+	}
+}
+
+func TestTUI_DaemonSubmitFailureExitsExitDaemon(t *testing.T) {
+	fs := &fakeStore{
+		summaries: []store.Summary{{ID: "demo", Key: "1"}},
+	}
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionPrompt, PromptID: "demo"}}
+	deps := tuiDeps(t, fs, rend)
+	dialErr := &daemon.SocketUnavailableError{Path: "/tmp/x.sock", Reason: "broken pipe mid-submit"}
+	deps.NewSubmitter = func(config.Resolved, store.Store, daemon.Client, tmux.TargetContext) submitter.Submitter {
+		return &recordingSubmitter{err: dialErr}
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	if !errors.Is(err, dialErr) {
+		t.Fatalf("want SocketUnavailableError, got %v", err)
+	}
+	if ExitCode(err) != ExitDaemon {
+		t.Fatalf("ExitCode = %d, want ExitDaemon", ExitCode(err))
+	}
+}
+
+func TestTUI_ClipboardSelectionInvokesSubmitterWithDeps(t *testing.T) {
+	fs := &fakeStore{} // clipboard path must never touch the store
+	rend := &recordingRenderer{result: tui.Result{
+		Action:        tui.ActionClipboard,
+		ClipboardBody: []byte("clip body"),
+	}}
+	rec := &recordingSubmitter{}
+	deps := tuiDeps(t, fs, rend)
+	deps.NewSubmitter = func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter {
+		rec.cfg = cfg
+		rec.prompts = prompts
+		rec.client = client
+		rec.target = target
+		return rec
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%9", "--client-tty", "/dev/pts/4", "--session-id", "$2")
+	if err != nil {
+		t.Fatalf("clipboard happy path: want nil, got %v", err)
+	}
+	if !rec.called {
+		t.Fatal("submitter should have been called for ActionClipboard")
+	}
+	if rec.result.Action != tui.ActionClipboard {
+		t.Errorf("Action = %q, want ActionClipboard", rec.result.Action)
+	}
+	if string(rec.result.ClipboardBody) != "clip body" {
+		t.Errorf("ClipboardBody = %q, want %q", rec.result.ClipboardBody, "clip body")
+	}
+	if rec.target.PaneID != "%9" || rec.target.ClientTTY != "/dev/pts/4" || rec.target.Session != "$2" {
+		t.Errorf("target threaded into submitter = %+v", rec.target)
+	}
+	if rec.prompts != fs {
+		t.Error("store not threaded into submitter")
+	}
+	if rec.client == nil {
+		t.Error("daemon client not threaded into submitter")
+	}
+}
+
+func TestTUI_ClipboardOversizeExitsExitPrompt(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{
+		Action:        tui.ActionClipboard,
+		ClipboardBody: []byte("too big"),
+	}}
+	deps := tuiDeps(t, &fakeStore{}, rend)
+	deps.NewSubmitter = func(config.Resolved, store.Store, daemon.Client, tmux.TargetContext) submitter.Submitter {
+		return &recordingSubmitter{err: &submitter.BodyTooLargeError{Bytes: 7, Limit: 3}}
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	var tooLarge *submitter.BodyTooLargeError
+	if !errors.As(err, &tooLarge) {
+		t.Fatalf("want *BodyTooLargeError, got %T: %v", err, err)
+	}
+	if ExitCode(err) != ExitPrompt {
+		t.Fatalf("ExitCode = %d, want ExitPrompt", ExitCode(err))
+	}
+}
+
+func TestTUI_ClipboardEmptyExitsExitPrompt(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{
+		Action:        tui.ActionClipboard,
+		ClipboardBody: nil,
+	}}
+	deps := tuiDeps(t, &fakeStore{}, rend)
+	deps.NewSubmitter = func(config.Resolved, store.Store, daemon.Client, tmux.TargetContext) submitter.Submitter {
+		return &recordingSubmitter{err: &clipboard.EmptyClipboardError{}}
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	var empty *clipboard.EmptyClipboardError
+	if !errors.As(err, &empty) {
+		t.Fatalf("want *clipboard.EmptyClipboardError, got %T: %v", err, err)
+	}
+	if ExitCode(err) != ExitPrompt {
+		t.Fatalf("ExitCode = %d, want ExitPrompt", ExitCode(err))
+	}
+}
+
+func TestTUI_ClipboardDaemonFailureExitsExitDaemon(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{
+		Action:        tui.ActionClipboard,
+		ClipboardBody: []byte("x"),
+	}}
+	deps := tuiDeps(t, &fakeStore{}, rend)
+	dialErr := &daemon.SocketUnavailableError{Path: "/tmp/x.sock", Reason: "broken pipe mid-submit"}
+	deps.NewSubmitter = func(config.Resolved, store.Store, daemon.Client, tmux.TargetContext) submitter.Submitter {
+		return &recordingSubmitter{err: dialErr}
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	if !errors.Is(err, dialErr) {
+		t.Fatalf("want SocketUnavailableError, got %v", err)
+	}
+	if ExitCode(err) != ExitDaemon {
+		t.Fatalf("ExitCode = %d, want ExitDaemon", ExitCode(err))
+	}
+}
+
+// TestTUI_ClipboardEndToEndThroughRealSubmitter wires the real submitter.New
+// against a capturing fakeDaemonClient so the test observes the actual
+// SubmitRequest that would reach the daemon for a clipboard selection.
+func TestTUI_ClipboardEndToEndThroughRealSubmitter(t *testing.T) {
+	fs := &fakeStore{}
+	rend := &recordingRenderer{result: tui.Result{
+		Action:        tui.ActionClipboard,
+		ClipboardBody: []byte("end-to-end clip"),
+	}}
+	var captured daemon.SubmitRequest
+	dc := &fakeDaemonClient{
+		statusFn: func() (daemon.StatusResponse, error) { return daemon.StatusResponse{}, nil },
+		submitFn: func(req daemon.SubmitRequest) (daemon.SubmitResponse, error) {
+			captured = req
+			return daemon.SubmitResponse{Accepted: true, JobID: "j-e2e"}, nil
+		},
+	}
+	deps := tuiDeps(t, fs, rend, func(c *config.Resolved) {
+		c.DefaultMode = "paste"
+		c.DefaultEnter = false
+		c.Sanitize = "safe"
+		c.MaxPasteBytes = 1024
+		c.VerificationTimeoutMS = 5000
+		c.VerificationPollIntervalMS = 100
+	})
+	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) { return dc, nil }
+	deps.NewSubmitter = func(cfg config.Resolved, s store.Store, c daemon.Client, target tmux.TargetContext) submitter.Submitter {
+		return submitter.New(s, c, cfg, target)
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%9")
+	if err != nil {
+		t.Fatalf("end-to-end: want nil, got %v", err)
+	}
+	if captured.Job.Source != daemon.SourceClipboard {
+		t.Errorf("Source = %q, want clipboard", captured.Job.Source)
+	}
+	if string(captured.Job.Body) != "end-to-end clip" {
+		t.Errorf("Body = %q", captured.Job.Body)
+	}
+	if captured.Job.PaneID != "%9" {
+		t.Errorf("PaneID = %q, want %%9", captured.Job.PaneID)
+	}
+	if captured.Job.PromptID != "" || captured.Job.SourcePath != "" {
+		t.Errorf("prompt fields should be empty for clipboard, got PromptID=%q SourcePath=%q",
+			captured.Job.PromptID, captured.Job.SourcePath)
+	}
+	if captured.Job.Mode != "paste" || captured.Job.SanitizeMode != "safe" {
+		t.Errorf("delivery = Mode=%q Sanitize=%q, want paste/safe (config defaults)",
+			captured.Job.Mode, captured.Job.SanitizeMode)
 	}
 }
 
