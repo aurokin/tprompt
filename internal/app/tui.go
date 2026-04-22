@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -38,6 +39,8 @@ func newTUICmd(deps Deps) *cobra.Command {
 }
 
 func runTUI(deps Deps, f tuiFlags) error {
+	// Pre-flight chain: config → store → daemon → pane. Each step short-circuits
+	// on error so the user sees the most-fundamental broken layer first.
 	cfg, err := deps.LoadConfig(*deps.ConfigPath)
 	if err != nil {
 		return err
@@ -52,9 +55,28 @@ func runTUI(deps Deps, f tuiFlags) error {
 		return err
 	}
 
+	client, err := deps.NewDaemonClient(cfg)
+	if err != nil {
+		return err
+	}
+	if _, err := client.Status(); err != nil {
+		return err
+	}
+
+	adapter, err := deps.NewTmux()
+	if err != nil {
+		return err
+	}
+	target := buildTUITarget(f)
+	exists, err := adapter.PaneExists(context.Background(), target.PaneID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return &tmux.PaneMissingError{PaneID: target.PaneID}
+	}
+
 	state := buildTUIState(summaries, cfg)
-	_ = buildTUITarget(f) // Phase 5a scaffolding: target threaded through but
-	// not yet consumed — Submitter (AUR-21/22) will pick it up.
 
 	renderer, err := deps.NewRenderer(cfg)
 	if err != nil {

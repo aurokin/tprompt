@@ -1,0 +1,13 @@
+# `tprompt tui` with the daemon socket missing exits ExitDaemon (5) during the
+# pre-flight chain, before any Renderer runs. Stderr surfaces the
+# SocketUnavailableError message so users know the daemon isn't running.
+
+mkdir prompts
+! tprompt tui --target-pane %0 --config config.toml
+stderr 'daemon socket .* unavailable'
+! stdout .
+
+-- config.toml --
+prompts_dir = "prompts"
+socket_path = "missing/daemon.sock"
+log_path = "missing/daemon.log"
