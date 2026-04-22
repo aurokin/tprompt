@@ -1,8 +1,10 @@
 package app
 
 import (
+	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
@@ -80,6 +82,9 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 			return daemon.NewSocketClient(cfg.SocketPath), nil
 		},
 		NewRenderer: func(config.Resolved) (tui.Renderer, error) {
+			if spec := lookupEnv("TPROMPT_TEST_RENDERER"); spec != "" {
+				return parseTestRenderer(spec)
+			}
 			return cancelStubRenderer{}, nil
 		},
 		NewSubmitter: func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter {
@@ -95,4 +100,29 @@ type cancelStubRenderer struct{}
 
 func (cancelStubRenderer) Run(tui.State) (tui.Result, error) {
 	return tui.Result{Action: tui.ActionCancel}, nil
+}
+
+// parseTestRenderer decodes TPROMPT_TEST_RENDERER into a stub Renderer for
+// testscript coverage of the TUI submit paths. Never set in production.
+//
+// Spec grammar:
+//
+//	cancel              → ActionCancel
+//	clipboard:<body>    → ActionClipboard with ClipboardBody = <body>
+func parseTestRenderer(spec string) (tui.Renderer, error) {
+	switch {
+	case spec == "cancel":
+		return cancelStubRenderer{}, nil
+	case strings.HasPrefix(spec, "clipboard:"):
+		body := spec[len("clipboard:"):]
+		return staticClipboardRenderer{body: []byte(body)}, nil
+	default:
+		return nil, fmt.Errorf("TPROMPT_TEST_RENDERER: unsupported spec %q", spec)
+	}
+}
+
+type staticClipboardRenderer struct{ body []byte }
+
+func (r staticClipboardRenderer) Run(tui.State) (tui.Result, error) {
+	return tui.Result{Action: tui.ActionClipboard, ClipboardBody: r.body}, nil
 }

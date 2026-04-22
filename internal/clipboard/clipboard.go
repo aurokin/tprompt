@@ -103,17 +103,47 @@ func (c *commandReader) Read() ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
+// EmptyClipboardError is returned by Validate when the clipboard yielded
+// zero bytes. The 5b Renderer surfaces it inline; the CLI maps it to
+// ExitPrompt.
+type EmptyClipboardError struct{}
+
+func (*EmptyClipboardError) Error() string { return "clipboard is empty" }
+
+// InvalidUTF8Error is returned by Validate when clipboard bytes are not
+// valid UTF-8. The 5b Renderer surfaces it inline; the CLI maps it to
+// ExitPrompt.
+type InvalidUTF8Error struct{}
+
+func (*InvalidUTF8Error) Error() string {
+	return "clipboard content is not valid UTF-8 text"
+}
+
+// OversizeError is returned by Validate when content length exceeds the
+// configured max_paste_bytes ceiling. Distinct from submitter.BodyTooLargeError
+// (the Submitter-level equivalent): the Submitter translates to that type so a
+// single oversize contract flows through the submit path, while this type is
+// what the 5b Renderer and `tprompt paste` see from Validate directly.
+type OversizeError struct {
+	Bytes int
+	Limit int64
+}
+
+func (e *OversizeError) Error() string {
+	return fmt.Sprintf("clipboard content exceeds max_paste_bytes (%d > %d)", e.Bytes, e.Limit)
+}
+
 // Validate applies the content checks shared by `tprompt paste` and the TUI
 // clipboard row. Error strings are fixed by docs/implementation/error-handling.md.
 func Validate(content []byte, limit int64) error {
 	if len(content) == 0 {
-		return errors.New("clipboard is empty")
+		return &EmptyClipboardError{}
 	}
 	if !utf8.Valid(content) {
-		return errors.New("clipboard content is not valid UTF-8 text")
+		return &InvalidUTF8Error{}
 	}
 	if limit > 0 && int64(len(content)) > limit {
-		return fmt.Errorf("clipboard content exceeds max_paste_bytes (%d > %d)", len(content), limit)
+		return &OversizeError{Bytes: len(content), Limit: limit}
 	}
 	return nil
 }
