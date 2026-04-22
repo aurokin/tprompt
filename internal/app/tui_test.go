@@ -6,7 +6,9 @@ import (
 	"testing"
 
 	"github.com/hsadler/tprompt/internal/config"
+	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/store"
+	"github.com/hsadler/tprompt/internal/tmux"
 	"github.com/hsadler/tprompt/internal/tui"
 )
 
@@ -38,6 +40,14 @@ func tuiDeps(t *testing.T, fs *fakeStore, rend tui.Renderer, cfgOverride ...func
 			fn(&cfg)
 		}
 		return cfg, nil
+	}
+	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+		return &fakeDaemonClient{
+			statusFn: func() (daemon.StatusResponse, error) { return daemon.StatusResponse{}, nil },
+		}, nil
+	}
+	deps.NewTmux = func() (tmux.Adapter, error) {
+		return &fakeAdapter{paneExists: true}, nil
 	}
 	deps.NewRenderer = func(config.Resolved) (tui.Renderer, error) {
 		return rend, nil
@@ -241,5 +251,104 @@ func TestTUI_BuildTargetThreadsFlags(t *testing.T) {
 	})
 	if target.PaneID != "%9" || target.ClientTTY != "/dev/pts/2" || target.Session != "$3" {
 		t.Fatalf("TargetContext = %+v", target)
+	}
+}
+
+func TestTUI_StoreErrorShortCircuits(t *testing.T) {
+	storeErr := &store.DuplicatePromptIDError{ID: "dup", Paths: []string{"/a.md", "/b.md"}}
+	fs := &fakeStore{discoverErr: storeErr}
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, fs, rend)
+	daemonCalled := false
+	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+		daemonCalled = true
+		return nil, nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	var dup *store.DuplicatePromptIDError
+	if !errors.As(err, &dup) {
+		t.Fatalf("want DuplicatePromptIDError, got %T: %v", err, err)
+	}
+	if ExitCode(err) != ExitPrompt {
+		t.Fatalf("want ExitPrompt, got %d", ExitCode(err))
+	}
+	if daemonCalled {
+		t.Fatal("daemon factory must not be called when store load fails")
+	}
+	if rend.called {
+		t.Fatal("renderer must not run when store load fails")
+	}
+}
+
+func TestTUI_DaemonUnreachableExitsDaemon(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, &fakeStore{}, rend)
+	tmuxCalled := false
+	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+		return &fakeDaemonClient{
+			statusFn: func() (daemon.StatusResponse, error) {
+				return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Path: "/missing.sock", Reason: "connection refused"}
+			},
+		}, nil
+	}
+	deps.NewTmux = func() (tmux.Adapter, error) {
+		tmuxCalled = true
+		return nil, nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	var su *daemon.SocketUnavailableError
+	if !errors.As(err, &su) {
+		t.Fatalf("want SocketUnavailableError, got %T: %v", err, err)
+	}
+	if ExitCode(err) != ExitDaemon {
+		t.Fatalf("want ExitDaemon, got %d", ExitCode(err))
+	}
+	if tmuxCalled {
+		t.Fatal("tmux factory must not be called when daemon preflight fails")
+	}
+	if rend.called {
+		t.Fatal("renderer must not run when daemon preflight fails")
+	}
+}
+
+func TestTUI_PaneMissingExitsTmux(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, &fakeStore{}, rend)
+	deps.NewTmux = func() (tmux.Adapter, error) {
+		return &fakeAdapter{paneExists: false}, nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%42")
+	var pm *tmux.PaneMissingError
+	if !errors.As(err, &pm) {
+		t.Fatalf("want PaneMissingError, got %T: %v", err, err)
+	}
+	if pm.PaneID != "%42" {
+		t.Fatalf("PaneID = %q, want %%42", pm.PaneID)
+	}
+	if ExitCode(err) != ExitTmux {
+		t.Fatalf("want ExitTmux, got %d", ExitCode(err))
+	}
+	if rend.called {
+		t.Fatal("renderer must not run when pane preflight fails")
+	}
+}
+
+func TestTUI_PanePreflightSurfacesAdapterError(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, &fakeStore{}, rend)
+	envErr := &tmux.EnvError{Reason: "tmux server not running"}
+	deps.NewTmux = func() (tmux.Adapter, error) {
+		return &fakeAdapter{paneExistsErr: envErr}, nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	if !errors.Is(err, envErr) {
+		t.Fatalf("want adapter EnvError, got %v", err)
+	}
+	if rend.called {
+		t.Fatal("renderer must not run when pane preflight errors")
 	}
 }

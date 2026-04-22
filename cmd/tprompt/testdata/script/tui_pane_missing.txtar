@@ -1,0 +1,31 @@
+# `tprompt tui --target-pane` on a pane that does not exist in tmux exits
+# ExitTmux (4) with PaneMissingError on stderr. Requires a real tmux server
+# and a running tprompt daemon, both scoped to $WORK so the test is isolated.
+
+[!exec:tmux] skip
+
+# $WORK exceeds macOS's unix-socket path limit, so use the short per-test
+# tmpdir the testscript harness provides.
+env TMUX_TMPDIR=$SHORT_TMPDIR
+
+# Start a detached tmux session so `display-message -t %999` finds a server
+# but no matching pane.
+exec tmux new-session -d -s preflight 'sleep 60'
+
+mkdir prompts state
+tprompt daemon start --config config.toml &
+
+# Poll for the socket (daemon startup is async).
+exec sh -c 'for i in $(seq 1 50); do test -S state/daemon.sock && exit 0; sleep 0.1; done; exit 1'
+
+! tprompt tui --target-pane %999 --config config.toml
+stderr 'target pane %999 does not exist'
+
+# Clean up: kill the tmux server explicitly; the background daemon is killed
+# by testscript at end-of-test.
+exec tmux kill-server
+
+-- config.toml --
+prompts_dir = "prompts"
+socket_path = "state/daemon.sock"
+log_path = "state/daemon.log"
