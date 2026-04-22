@@ -43,53 +43,73 @@ func NewExecutor(adapter tmux.Adapter, logger *Logger, maxPasteBytes int64) *Exe
 // (replace-same-target) is silent here — the queue already logged and
 // surfaced the banner.
 func (e *Executor) Run(ctx context.Context, job Job) bool {
-	if err := Verify(ctx, e.adapter, job.verificationTarget(), job.Verification, job.SubmitterPID); err != nil {
-		if errors.Is(err, context.Canceled) {
-			return false
-		}
-		e.handleFailure(job, err)
-		return true
+	if done, result := e.finishStep(job, Verify(ctx, e.adapter, job.verificationTarget(), job.Verification, job.SubmitterPID)); done {
+		return result
 	}
-	if shouldStop, err := canceled(ctx); shouldStop {
-		if err != nil {
-			e.handleFailure(job, err)
-		}
-		return false
+	if done, result := e.finishContext(ctx, job); done {
+		return result
 	}
 
-	if e.maxPasteBytes > 0 && int64(len(job.Body)) > e.maxPasteBytes {
-		e.handleFailure(job, &tmux.OversizeError{Bytes: len(job.Body), Limit: e.maxPasteBytes})
+	if err := e.checkPasteSize(job); err != nil {
+		e.handleFailure(job, err)
 		return true
 	}
 
 	cleaned, err := sanitizeProcess(job.SanitizeMode, job.Body)
-	if err != nil {
-		e.handleFailure(job, err)
-		return true
+	if done, result := e.finishStep(job, err); done {
+		return result
 	}
-	if shouldStop, err := canceled(ctx); shouldStop {
-		if err != nil {
-			e.handleFailure(job, err)
-		}
-		return false
+	if done, result := e.finishContext(ctx, job); done {
+		return result
 	}
-
-	var deliveryErr error
-	switch job.Mode {
-	case "paste":
-		deliveryErr = e.adapter.Paste(ctx, job.deliveryTarget(), string(cleaned), job.Enter)
-	case "type":
-		deliveryErr = e.adapter.Type(ctx, job.deliveryTarget(), string(cleaned), job.Enter)
-	default:
-		deliveryErr = fmt.Errorf("unresolved delivery mode %q", job.Mode)
-	}
-	if deliveryErr != nil {
-		if errors.Is(deliveryErr, context.Canceled) {
-			return false
-		}
-		e.handleFailure(job, deliveryErr)
+	if done, result := e.finishStep(job, e.deliver(ctx, job, cleaned)); done {
+		return result
 	}
 	return true
+}
+
+func (e *Executor) finishStep(job Job, err error) (bool, bool) {
+	if err == nil {
+		return false, false
+	}
+	if errors.Is(err, context.Canceled) {
+		return true, false
+	}
+	e.handleFailure(job, err)
+	return true, true
+}
+
+func (e *Executor) finishContext(ctx context.Context, job Job) (bool, bool) {
+	shouldStop, err := canceled(ctx)
+	if !shouldStop {
+		return false, false
+	}
+	if err != nil {
+		e.handleFailure(job, err)
+		return true, true
+	}
+	return true, false
+}
+
+func (e *Executor) checkPasteSize(job Job) error {
+	if e.maxPasteBytes <= 0 || int64(len(job.Body)) <= e.maxPasteBytes {
+		return nil
+	}
+	return &tmux.OversizeError{Bytes: len(job.Body), Limit: e.maxPasteBytes}
+}
+
+func (e *Executor) deliver(ctx context.Context, job Job, cleaned []byte) error {
+	target := job.deliveryTarget()
+	body := string(cleaned)
+
+	switch job.Mode {
+	case "paste":
+		return e.adapter.Paste(ctx, target, body, job.Enter)
+	case "type":
+		return e.adapter.Type(ctx, target, body, job.Enter)
+	default:
+		return fmt.Errorf("unresolved delivery mode %q", job.Mode)
+	}
 }
 
 func canceled(ctx context.Context) (bool, error) {

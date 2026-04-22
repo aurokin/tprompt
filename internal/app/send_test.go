@@ -47,6 +47,7 @@ func (f *fakeAdapter) PaneExists(context.Context, string) (bool, error) {
 func (f *fakeAdapter) IsTargetSelected(context.Context, tmux.TargetContext) (bool, error) {
 	return true, nil
 }
+
 func (f *fakeAdapter) CapturePaneTail(string, int) (string, error) { return "", nil }
 
 func (f *fakeAdapter) Paste(_ context.Context, t tmux.TargetContext, body string, enter bool) error {
@@ -58,6 +59,7 @@ func (f *fakeAdapter) Type(_ context.Context, t tmux.TargetContext, body string,
 	f.typeCalls = append(f.typeCalls, typeCall{Target: t, Body: body, Enter: enter})
 	return f.typeErr
 }
+
 func (f *fakeAdapter) DisplayMessage(tmux.MessageTarget, string) error { return nil }
 
 func sendDeps(t *testing.T, prompt store.Prompt, adapter *fakeAdapter, cfgOverride ...func(*config.Resolved)) Deps {

@@ -84,8 +84,22 @@ func (resolver) Resolve(prompts []Input, reserved map[rune]string, pool []rune) 
 	normalizedReserved := normalizeReserved(reserved)
 	availablePool := normalizePool(pool, normalizedReserved)
 
+	frontmatterByKey, auto, err := groupPrompts(prompts, normalizedReserved)
+	if err != nil {
+		return Assignment{}, err
+	}
+	if err := bindFrontmatter(assignment.Bindings, frontmatterByKey); err != nil {
+		return Assignment{}, err
+	}
+	assignAutomatic(&assignment, auto, availablePool)
+
+	return assignment, nil
+}
+
+func groupPrompts(prompts []Input, reserved map[rune]string) (map[rune][]Input, []Input, error) {
 	frontmatterByKey := make(map[rune][]Input)
 	auto := make([]Input, 0, len(prompts))
+
 	for _, prompt := range prompts {
 		if !prompt.HasKey {
 			auto = append(auto, prompt)
@@ -94,47 +108,73 @@ func (resolver) Resolve(prompts []Input, reserved map[rune]string, pool []rune) 
 
 		key, err := normalizePromptKey(prompt.Key)
 		if err != nil {
-			return Assignment{}, &MalformedKeybindError{Value: prompt.Key, Path: prompt.Path}
+			return nil, nil, &MalformedKeybindError{Value: prompt.Key, Path: prompt.Path}
 		}
-		if action, ok := normalizedReserved[key]; ok {
-			return Assignment{}, &ReservedKeybindError{Key: key, Path: prompt.Path, Action: action}
+		if action, ok := reserved[key]; ok {
+			return nil, nil, &ReservedKeybindError{Key: key, Path: prompt.Path, Action: action}
 		}
-
 		frontmatterByKey[key] = append(frontmatterByKey[key], prompt)
 	}
 
-	for key, bound := range frontmatterByKey {
-		if len(bound) > 1 {
-			ids := make([]string, 0, len(bound))
-			paths := make([]string, 0, len(bound))
-			for _, prompt := range bound {
-				ids = append(ids, prompt.ID)
-				paths = append(paths, prompt.Path)
-			}
-			sort.Strings(ids)
-			sort.Strings(paths)
-			return Assignment{}, &DuplicateKeybindError{Key: key, IDs: ids, Paths: paths}
-		}
-		assignment.Bindings[key] = bound[0].ID
-	}
+	return frontmatterByKey, auto, nil
+}
 
+func bindFrontmatter(bindings map[rune]string, frontmatterByKey map[rune][]Input) error {
+	for _, key := range sortedKeys(frontmatterByKey) {
+		bound := frontmatterByKey[key]
+		if len(bound) > 1 {
+			return duplicateKeybindError(key, bound)
+		}
+		bindings[key] = bound[0].ID
+	}
+	return nil
+}
+
+func sortedKeys(frontmatterByKey map[rune][]Input) []rune {
+	keys := make([]rune, 0, len(frontmatterByKey))
+	for key := range frontmatterByKey {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	return keys
+}
+
+func duplicateKeybindError(key rune, bound []Input) error {
+	ids := make([]string, 0, len(bound))
+	paths := make([]string, 0, len(bound))
+	for _, prompt := range bound {
+		ids = append(ids, prompt.ID)
+		paths = append(paths, prompt.Path)
+	}
+	sort.Strings(ids)
+	sort.Strings(paths)
+	return &DuplicateKeybindError{Key: key, IDs: ids, Paths: paths}
+}
+
+func assignAutomatic(assignment *Assignment, auto []Input, pool []rune) {
 	sort.Slice(auto, func(i, j int) bool { return auto[i].ID < auto[j].ID })
+
 	nextPool := 0
 	for _, prompt := range auto {
-		for nextPool < len(availablePool) {
-			key := availablePool[nextPool]
-			nextPool++
-			if _, taken := assignment.Bindings[key]; taken {
-				continue
-			}
-			assignment.Bindings[key] = prompt.ID
-			goto nextPrompt
+		key, ok := nextAvailableKey(assignment.Bindings, pool, &nextPool)
+		if !ok {
+			assignment.Overflow = append(assignment.Overflow, prompt.ID)
+			continue
 		}
-		assignment.Overflow = append(assignment.Overflow, prompt.ID)
-	nextPrompt:
+		assignment.Bindings[key] = prompt.ID
 	}
+}
 
-	return assignment, nil
+func nextAvailableKey(bindings map[rune]string, pool []rune, nextPool *int) (rune, bool) {
+	for *nextPool < len(pool) {
+		key := pool[*nextPool]
+		*nextPool = *nextPool + 1
+		if _, taken := bindings[key]; taken {
+			continue
+		}
+		return key, true
+	}
+	return 0, false
 }
 
 func normalizePromptKey(raw string) (rune, error) {

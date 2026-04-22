@@ -145,7 +145,7 @@ func (s *FSStore) Discover() error {
 	summaries := make([]Summary, 0, len(entries))
 	for _, entry := range entries {
 		if resolvedKey, ok := resolvedKeyForPrompt(assignment.Bindings, entry.prompt.ID); ok {
-			entry.prompt.Summary.Key = string(resolvedKey)
+			entry.prompt.Key = string(resolvedKey)
 		}
 		promptsByID[entry.prompt.ID] = entry.prompt
 		summaries = append(summaries, entry.prompt.Summary)
@@ -195,53 +195,7 @@ type discoveredPrompt struct {
 
 func discoverPromptFiles(root string) ([]discoveredPrompt, error) {
 	entries := make([]discoveredPrompt, 0)
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if path != root && isHidden(filepath.Base(path)) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if filepath.Ext(path) != ".md" {
-			return nil
-		}
-
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("read prompt %s: %w", path, err)
-		}
-		parsed, err := promptmeta.Parse(content)
-		if err != nil {
-			return fmt.Errorf("parse prompt %s: %w", path, err)
-		}
-		sanitizeMeta(&parsed.Meta)
-
-		entries = append(entries, discoveredPrompt{
-			prompt: Prompt{
-				Summary: Summary{
-					ID:          strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
-					Title:       parsed.Meta.Title,
-					Description: parsed.Meta.Description,
-					Tags:        append([]string(nil), parsed.Meta.Tags...),
-					Path:        path,
-				},
-				Body: parsed.Body,
-				Defaults: DeliveryDefaults{
-					Mode:  parsed.Meta.Mode,
-					Enter: parsed.Meta.Enter,
-				},
-			},
-			rawKey: keyValue(parsed.Meta.Key),
-			hasKey: parsed.Meta.KeyDeclared,
-		})
-		return nil
-	})
+	err := filepath.WalkDir(root, promptFileWalker(root, &entries))
 	if err != nil {
 		return nil, err
 	}
@@ -251,6 +205,74 @@ func discoverPromptFiles(root string) ([]discoveredPrompt, error) {
 		return nil, err
 	}
 	return entries, nil
+}
+
+func promptFileWalker(root string, entries *[]discoveredPrompt) fs.WalkDirFunc {
+	return func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if shouldSkipPath(root, path, d) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() || filepath.Ext(path) != ".md" {
+			return nil
+		}
+
+		entry, err := loadPromptFile(path)
+		if err != nil {
+			return err
+		}
+		*entries = append(*entries, entry)
+		return nil
+	}
+}
+
+func shouldSkipPath(root, path string, d fs.DirEntry) bool {
+	return path != root && isHidden(filepath.Base(path))
+}
+
+func loadPromptFile(path string) (discoveredPrompt, error) {
+	content, err := readPromptFile(path)
+	if err != nil {
+		return discoveredPrompt{}, fmt.Errorf("read prompt %s: %w", path, err)
+	}
+	parsed, err := promptmeta.Parse(content)
+	if err != nil {
+		return discoveredPrompt{}, fmt.Errorf("parse prompt %s: %w", path, err)
+	}
+	sanitizeMeta(&parsed.Meta)
+	return buildDiscoveredPrompt(path, parsed), nil
+}
+
+func buildDiscoveredPrompt(path string, parsed promptmeta.Parsed) discoveredPrompt {
+	return discoveredPrompt{
+		prompt: Prompt{
+			Summary: Summary{
+				ID:          strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+				Title:       parsed.Meta.Title,
+				Description: parsed.Meta.Description,
+				Tags:        append([]string(nil), parsed.Meta.Tags...),
+				Path:        path,
+			},
+			Body: parsed.Body,
+			Defaults: DeliveryDefaults{
+				Mode:  parsed.Meta.Mode,
+				Enter: parsed.Meta.Enter,
+			},
+		},
+		rawKey: keyValue(parsed.Meta.Key),
+		hasKey: parsed.Meta.KeyDeclared,
+	}
+}
+
+func readPromptFile(path string) ([]byte, error) {
+	// Path comes from WalkDir rooted at the configured prompts directory.
+	//nolint:gosec // G304: bounded project file discovery, not arbitrary user input
+	return os.ReadFile(path)
 }
 
 func validateUniqueIDs(entries []discoveredPrompt) error {
