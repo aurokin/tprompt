@@ -8,6 +8,7 @@ import (
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/store"
+	"github.com/hsadler/tprompt/internal/submitter"
 	"github.com/hsadler/tprompt/internal/tmux"
 	"github.com/hsadler/tprompt/internal/tui"
 )
@@ -30,6 +31,7 @@ type Deps struct {
 	NewClip          func(cfg config.Resolved) (clipboard.Reader, error)
 	NewDaemonClient  func(cfg config.Resolved) (daemon.Client, error)
 	NewRenderer      func(cfg config.Resolved) (tui.Renderer, error)
+	NewSubmitter     func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter
 }
 
 // ProductionDeps returns a Deps wired for real execution.
@@ -79,6 +81,9 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 		},
 		NewRenderer: func(config.Resolved) (tui.Renderer, error) {
 			return cancelStubRenderer{}, nil
+		},
+		NewSubmitter: func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter {
+			return submitter.New(prompts, client, cfg, target)
 		},
 	}
 }
