@@ -6,10 +6,12 @@ import (
 	"net"
 	"path/filepath"
 	"testing"
+
+	"github.com/hsadler/tprompt/internal/testutil"
 )
 
 func TestSocketClientStatusReadFailureReturnsIPCError(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "daemon.sock")
+	path := filepath.Join(testutil.ShortTempDir(t), "daemon.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatalf("listen: %v", err)

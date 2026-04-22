@@ -64,13 +64,17 @@ func (s *scriptedAdapter) IsTargetSelected(ctx context.Context, target tmux.Targ
 func (s *scriptedAdapter) CurrentContext() (tmux.TargetContext, error) {
 	return tmux.TargetContext{}, nil
 }
+
 func (s *scriptedAdapter) CapturePaneTail(string, int) (string, error) { return "", nil }
+
 func (s *scriptedAdapter) Paste(context.Context, tmux.TargetContext, string, bool) error {
 	return nil
 }
+
 func (s *scriptedAdapter) Type(context.Context, tmux.TargetContext, string, bool) error {
 	return nil
 }
+
 func (s *scriptedAdapter) DisplayMessage(tmux.MessageTarget, string) error { return nil }
 
 func target() tmux.TargetContext { return tmux.TargetContext{PaneID: "%5"} }

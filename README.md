@@ -99,6 +99,24 @@ Go is the recommended default for v1 because it fits:
 
 Rust is acceptable if the implementation team strongly prefers it.
 
+## Tool bootstrap
+
+This repo includes a project-local `mise.toml` for the pinned Go toolchain and
+CLI tooling used by the health gate:
+
+```bash
+mise install
+```
+
+That installs:
+
+- `go 1.26.2`
+- `golangci-lint v2.1.6`
+- `gofumpt v0.7.0`
+- `goimports v0.26.0`
+
+`make tools` remains available as an alternative bootstrap path.
+
 ## Example user experience
 
 ### Non-interactive

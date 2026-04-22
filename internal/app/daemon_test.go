@@ -12,6 +12,7 @@ import (
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/store"
+	"github.com/hsadler/tprompt/internal/testutil"
 	"github.com/hsadler/tprompt/internal/tmux"
 )
 
@@ -197,7 +198,7 @@ func TestDaemonStartIgnoresPromptConfigValidation(t *testing.T) {
 		return config.Resolved{}, nil
 	}
 
-	dir := t.TempDir()
+	dir := testutil.ShortTempDir(t)
 	socketPath := filepath.Join(dir, "daemon.sock")
 	logPath := filepath.Join(dir, "daemon.log")
 	deps.LoadDaemonConfig = func(string) (config.Resolved, error) {
@@ -244,7 +245,7 @@ func TestDaemonStartRejectsEmptyLogPath(t *testing.T) {
 
 func TestDaemonStartSkipsStoppedLogWhenRunReturnsError(t *testing.T) {
 	deps := daemonDeps(t, &fakeDaemonClient{})
-	dir := t.TempDir()
+	dir := testutil.ShortTempDir(t)
 	socketPath := filepath.Join(dir, "daemon.sock")
 	logPath := filepath.Join(dir, "daemon.log")
 	deps.LoadDaemonConfig = func(string) (config.Resolved, error) {
@@ -285,7 +286,7 @@ func TestDaemonStartSkipsStoppedLogWhenRunReturnsError(t *testing.T) {
 
 func TestDaemonStartLogsStoppedOnCleanShutdown(t *testing.T) {
 	deps := daemonDeps(t, &fakeDaemonClient{})
-	dir := t.TempDir()
+	dir := testutil.ShortTempDir(t)
 	socketPath := filepath.Join(dir, "daemon.sock")
 	logPath := filepath.Join(dir, "daemon.log")
 	deps.LoadDaemonConfig = func(string) (config.Resolved, error) {

@@ -36,7 +36,32 @@ func Verify(
 		return err
 	}
 	deadline := time.Now().Add(time.Duration(policy.TimeoutMS) * time.Millisecond)
+	timer := newStoppedTimer()
+	defer timer.Stop()
 
+	for {
+		if _, err := remainingUntil(deadline, policy.TimeoutMS); err != nil {
+			return err
+		}
+
+		ready, err := probeReadyUntil(ctx, deadline, adapter, target, submitterPID, policy.TimeoutMS)
+		if err != nil {
+			return err
+		}
+		if ready {
+			return nil
+		}
+		remaining, err := remainingUntil(deadline, policy.TimeoutMS)
+		if err != nil {
+			return err
+		}
+		if err := policy.wait(ctx, timer, remaining); err != nil {
+			return err
+		}
+	}
+}
+
+func newStoppedTimer() *time.Timer {
 	// Reuse a single timer across iterations to avoid the per-iteration
 	// allocation of time.After. policy.wait handles the stop+drain+reset
 	// idiom so this loop stays flat.
@@ -44,36 +69,43 @@ func Verify(
 	if !timer.Stop() {
 		<-timer.C
 	}
-	defer timer.Stop()
+	return timer
+}
 
-	for {
-		if time.Until(deadline) <= 0 {
-			return &TimeoutError{TimeoutMS: policy.TimeoutMS}
-		}
-
-		probeCtx, cancel := context.WithDeadline(ctx, deadline)
-		ready, err := pollReady(probeCtx, adapter, target, submitterPID)
-		cancel()
-		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				return &TimeoutError{TimeoutMS: policy.TimeoutMS}
-			}
-			return err
-		}
-		if ready {
-			return nil
-		}
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			return &TimeoutError{TimeoutMS: policy.TimeoutMS}
-		}
-		if err := policy.wait(ctx, timer, remaining); err != nil {
-			return err
-		}
+func remainingUntil(deadline time.Time, timeoutMS int) (time.Duration, error) {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return 0, &TimeoutError{TimeoutMS: timeoutMS}
 	}
+	return remaining, nil
+}
+
+func probeReadyUntil(
+	ctx context.Context,
+	deadline time.Time,
+	adapter tmux.Adapter,
+	target tmux.TargetContext,
+	submitterPID int,
+	timeoutMS int,
+) (bool, error) {
+	probeCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+
+	ready, err := pollReady(probeCtx, adapter, target, submitterPID)
+	if err == nil {
+		return ready, nil
+	}
+	return false, normalizeProbeError(ctx, err, timeoutMS)
+}
+
+func normalizeProbeError(ctx context.Context, err error, timeoutMS int) error {
+	if !errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return &TimeoutError{TimeoutMS: timeoutMS}
 }
 
 // pollReady runs one verification iteration: the pane must exist (missing

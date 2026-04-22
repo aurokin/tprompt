@@ -28,6 +28,9 @@ type execRunner struct {
 }
 
 func (r *execRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte, error) {
+	// argv is assembled by the tmux adapter from fixed subcommands/flags, and
+	// binary defaults to "tmux" unless explicitly injected by trusted callers.
+	//nolint:gosec // G204: intentional exec of tmux with internally constructed args
 	cmd := exec.CommandContext(ctx, r.binary, argv...)
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)

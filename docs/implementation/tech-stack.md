@@ -98,10 +98,11 @@ Rejected: `testify`. Its `assert.Equal` style is fine, but stdlib `testing` + `g
 - `make lint` → `golangci-lint run`
 - `make test` → `go test -race -covermode=atomic ./...`
 - `make check` → `fmt-check && lint && test` (what CI runs)
+- `mise install` → installs the pinned project-local Go/tool versions from `mise.toml`
 - `make tools` → installs pinned versions of `golangci-lint`, `gofumpt`, `goimports` into `$(go env GOPATH)/bin`
 
 Release tooling (`goreleaser`, signed builds, Homebrew tap) is deferred to post-MVP.
 
 ## Version pinning
 
-Tooling versions are pinned in `Makefile` — not via `tools.go` (that pattern is legacy; Go 1.24+ prefers `go.mod` tool directives, but pinning in Makefile keeps the `go.mod` dep graph lean).
+Tooling versions are pinned in `Makefile` and mirrored in `mise.toml` — not via `tools.go` (that pattern is legacy; Go 1.24+ prefers `go.mod` tool directives, but pinning outside `go.mod` keeps the module dep graph lean).

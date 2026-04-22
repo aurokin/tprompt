@@ -36,12 +36,7 @@ type MessageTarget struct {
 // MessageTarget returns the notification scope implied by this target
 // context.
 func (t TargetContext) MessageTarget() MessageTarget {
-	return MessageTarget{
-		Session:   t.Session,
-		Window:    t.Window,
-		PaneID:    t.PaneID,
-		ClientTTY: t.ClientTTY,
-	}
+	return MessageTarget(t)
 }
 
 // WithPane combines the origin metadata with a specific pane.
