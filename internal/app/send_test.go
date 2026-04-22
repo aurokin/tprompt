@@ -43,6 +43,7 @@ func (f *fakeAdapter) CurrentContext() (tmux.TargetContext, error) {
 func (f *fakeAdapter) PaneExists(context.Context, string) (bool, error) {
 	return f.paneExists, f.paneExistsErr
 }
+
 func (f *fakeAdapter) IsTargetSelected(context.Context, tmux.TargetContext) (bool, error) {
 	return true, nil
 }

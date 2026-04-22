@@ -191,34 +191,63 @@ func TestNewCommand_EmptyArgv(t *testing.T) {
 // --- Validate ---
 
 func TestValidate(t *testing.T) {
+	type wantKind int
+	const (
+		wantOK wantKind = iota
+		wantEmpty
+		wantInvalidUTF8
+		wantOversize
+	)
 	cases := []struct {
 		name    string
 		content []byte
 		cap     int64
-		want    string
+		kind    wantKind
+		sub     string
 	}{
-		{"happy", []byte("hello"), 1024, ""},
-		{"empty", []byte{}, 1024, "clipboard is empty"},
-		{"nil", nil, 1024, "clipboard is empty"},
-		{"invalid utf-8", []byte{0xff, 0xfe}, 1024, "not valid UTF-8"},
-		{"at cap", []byte("abcde"), 5, ""},
-		{"over cap", []byte("abcdef"), 5, "exceeds max_paste_bytes (6 > 5)"},
-		{"unlimited cap", []byte("huge"), 0, ""},
+		{"happy", []byte("hello"), 1024, wantOK, ""},
+		{"empty", []byte{}, 1024, wantEmpty, "clipboard is empty"},
+		{"nil", nil, 1024, wantEmpty, "clipboard is empty"},
+		{"invalid utf-8", []byte{0xff, 0xfe}, 1024, wantInvalidUTF8, "not valid UTF-8"},
+		{"at cap", []byte("abcde"), 5, wantOK, ""},
+		{"over cap", []byte("abcdef"), 5, wantOversize, "exceeds max_paste_bytes (6 > 5)"},
+		{"unlimited cap", []byte("huge"), 0, wantOK, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := Validate(tc.content, tc.cap)
-			if tc.want == "" {
+			if tc.kind == wantOK {
 				if err != nil {
 					t.Fatalf("Validate: %v", err)
 				}
 				return
 			}
 			if err == nil {
-				t.Fatalf("want error containing %q, got nil", tc.want)
+				t.Fatalf("want error containing %q, got nil", tc.sub)
 			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("error = %q, want substring %q", err, tc.want)
+			if !strings.Contains(err.Error(), tc.sub) {
+				t.Fatalf("error = %q, want substring %q", err, tc.sub)
+			}
+			switch tc.kind {
+			case wantEmpty:
+				var target *EmptyClipboardError
+				if !errors.As(err, &target) {
+					t.Fatalf("want *EmptyClipboardError, got %T", err)
+				}
+			case wantInvalidUTF8:
+				var target *InvalidUTF8Error
+				if !errors.As(err, &target) {
+					t.Fatalf("want *InvalidUTF8Error, got %T", err)
+				}
+			case wantOversize:
+				var target *OversizeError
+				if !errors.As(err, &target) {
+					t.Fatalf("want *OversizeError, got %T", err)
+				}
+				if target.Bytes != len(tc.content) || target.Limit != tc.cap {
+					t.Fatalf("OversizeError = {Bytes:%d Limit:%d}, want {Bytes:%d Limit:%d}",
+						target.Bytes, target.Limit, len(tc.content), tc.cap)
+				}
 			}
 		})
 	}

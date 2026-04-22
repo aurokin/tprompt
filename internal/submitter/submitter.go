@@ -4,10 +4,11 @@
 package submitter
 
 import (
-	"errors"
 	"fmt"
 	"os"
+	"unicode/utf8"
 
+	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/store"
@@ -56,8 +57,7 @@ func (s *submitter) Submit(result tui.Result) error {
 	case tui.ActionPrompt:
 		return s.submitPrompt(result.PromptID)
 	case tui.ActionClipboard:
-		// AUR-22 wires this. Fail loud so accidental hits surface in tests.
-		return errors.New("submitter: clipboard path not yet implemented (AUR-22)")
+		return s.submitClipboard(result.ClipboardBody)
 	case tui.ActionCancel:
 		return nil
 	default:
@@ -89,6 +89,56 @@ func (s *submitter) submitPrompt(id string) error {
 		Source:       daemon.SourcePrompt,
 		PromptID:     prompt.ID,
 		SourcePath:   prompt.Path,
+		Body:         body,
+		Mode:         delivery.Mode,
+		Enter:        delivery.Enter,
+		SanitizeMode: delivery.Sanitize,
+		PaneID:       s.target.PaneID,
+		Origin:       buildOrigin(s.target),
+		Verification: daemon.VerificationPolicy{
+			TimeoutMS:      s.cfg.VerificationTimeoutMS,
+			PollIntervalMS: s.cfg.VerificationPollIntervalMS,
+		},
+	}
+
+	resp, err := s.client.Submit(daemon.SubmitRequest{Job: job})
+	if err != nil {
+		return err
+	}
+	if !resp.Accepted {
+		return &daemon.IPCError{
+			Op:     "submit",
+			Reason: fmt.Sprintf("daemon did not accept job (job_id=%q)", resp.JobID),
+		}
+	}
+	return nil
+}
+
+func (s *submitter) submitClipboard(body []byte) error {
+	// Validate content before resolving delivery or dialing the daemon so
+	// typed content errors propagate cheaply. The 5b Renderer pre-validates
+	// via clipboard.Validate, but the Phase 5a stub Renderer and tests hand
+	// bytes in directly — defense in depth.
+	if len(body) == 0 {
+		return &clipboard.EmptyClipboardError{}
+	}
+	if !utf8.Valid(body) {
+		return &clipboard.InvalidUTF8Error{}
+	}
+	if s.cfg.MaxPasteBytes > 0 && int64(len(body)) > s.cfg.MaxPasteBytes {
+		// Translate to BodyTooLargeError so the submit path has one uniform
+		// oversize contract across prompt and clipboard sources.
+		return &BodyTooLargeError{Bytes: len(body), Limit: s.cfg.MaxPasteBytes}
+	}
+
+	delivery, err := config.ResolveDelivery(s.cfg, config.FrontmatterDefaults{}, config.DeliveryFlags{})
+	if err != nil {
+		return err
+	}
+
+	job := daemon.Job{
+		SubmitterPID: os.Getpid(),
+		Source:       daemon.SourceClipboard,
 		Body:         body,
 		Mode:         delivery.Mode,
 		Enter:        delivery.Enter,
