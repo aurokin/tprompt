@@ -90,9 +90,14 @@ func runTUI(deps Deps, f tuiFlags) error {
 	switch result.Action {
 	case tui.ActionCancel:
 		return nil
-	default:
-		// Submitter wires up ActionPrompt / ActionClipboard in later slices.
+	case tui.ActionPrompt:
+		sub := deps.NewSubmitter(cfg, s, client, target)
+		return sub.Submit(result)
+	case tui.ActionClipboard:
+		// AUR-22 wires the clipboard path through Submitter.
 		return nil
+	default:
+		return fmt.Errorf("tui: unknown renderer action %q", result.Action)
 	}
 }
 

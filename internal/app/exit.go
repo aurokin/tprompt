@@ -9,6 +9,7 @@ import (
 	"github.com/hsadler/tprompt/internal/keybind"
 	"github.com/hsadler/tprompt/internal/sanitize"
 	"github.com/hsadler/tprompt/internal/store"
+	"github.com/hsadler/tprompt/internal/submitter"
 	"github.com/hsadler/tprompt/internal/tmux"
 )
 
@@ -69,6 +70,11 @@ func ExitCode(err error) int {
 
 	var strictReject *sanitize.StrictRejectError
 	if errors.As(err, &strictReject) {
+		return ExitPrompt
+	}
+
+	var bodyTooLarge *submitter.BodyTooLargeError
+	if errors.As(err, &bodyTooLarge) {
 		return ExitPrompt
 	}
 

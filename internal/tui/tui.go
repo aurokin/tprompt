@@ -17,6 +17,9 @@ const (
 type Result struct {
 	Action   Action
 	PromptID string // populated when Action == ActionPrompt
+	// ClipboardBody is captured by the Renderer at the moment of intent so the
+	// daemon never re-reads the clipboard. Populated when Action == ActionClipboard.
+	ClipboardBody []byte
 }
 
 // State holds everything the TUI needs to render without importing store or
