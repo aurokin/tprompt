@@ -11,6 +11,10 @@ env TPROMPT_TEST_RENDERER=clipboard:abcdefghij
 
 exec tmux new-session -d -s tuiclipoversize 'sleep 60'
 
+# Tripwire: confirm the server we created is on the isolated socket.
+exec tmux display-message -p '#{socket_path}'
+stdout $SHORT_TMPDIR
+
 mkdir prompts state
 tprompt daemon start --config config.toml &
 
