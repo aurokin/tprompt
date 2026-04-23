@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
@@ -44,10 +45,20 @@ type clipboardReadMsg struct {
 	err  error
 }
 
+// errClipboardUnavailable is surfaced as a clipboardReadMsg error when the
+// Model was constructed without a clipboard.Reader. Production never trips
+// this (buildTUIState omits the clipboard row + matchesReserved ignores a
+// disabled binding), but zero-value ModelDeps in tests or bespoke wiring
+// should degrade to an inline footer error rather than panicking.
+var errClipboardUnavailable = errors.New("clipboard is unavailable — choose another option")
+
 // readClipboardCmd returns a tea.Cmd that invokes the injected Reader and
 // validates the result against the paste limit, emitting clipboardReadMsg.
 func readClipboardCmd(r clipboard.Reader, limit int64) tea.Cmd {
 	return func() tea.Msg {
+		if r == nil {
+			return clipboardReadMsg{err: errClipboardUnavailable}
+		}
 		body, err := r.Read()
 		if err != nil {
 			return clipboardReadMsg{err: err}
@@ -82,18 +93,28 @@ const (
 
 // Model is the single bubbletea model for the TUI.
 type Model struct {
-	state         State
-	deps          ModelDeps
-	mode          mode
-	cursor        int
-	width         int
-	height        int
+	state            State
+	deps             ModelDeps
+	mode             mode
+	cursor           int
+	scrollOffset     int
+	width            int
+	height           int
 	result           Result
 	inlineError      string
 	submitErr        error
 	pendingSubmit    bool
 	pendingClipboard bool
 }
+
+// headerLines and footerLines are the fixed chrome subtracted from terminal
+// height to compute rowsPerFrame. No header is rendered yet; the footer is a
+// single hint/error line composed by m.footer(). Future slices that grow the
+// chrome (e.g. a multi-line search query line) should update these.
+const (
+	headerLines = 0
+	footerLines = 1
+)
 
 // NewModel constructs a Model seeded with the rendered state and deps.
 func NewModel(state State, deps ModelDeps) Model {
@@ -112,6 +133,44 @@ func (m Model) SubmitErr() error { return m.submitErr }
 // Init satisfies tea.Model. No startup command yet.
 func (m Model) Init() tea.Cmd { return nil }
 
+// rowsPerFrame returns how many row lines fit in the current viewport. Returns
+// 0 pre-WindowSizeMsg (m.height == 0) or when the chrome exceeds the window;
+// View treats that as "render all rows" so tests without a terminal still
+// see everything.
+func (m Model) rowsPerFrame() int {
+	rpf := m.height - headerLines - footerLines
+	if rpf <= 0 {
+		return 0
+	}
+	return rpf
+}
+
+// clampScrollOffset returns the scrollOffset that keeps cursor visible in the
+// window [offset, offset+rpf) and prevents overscroll past the list tail.
+// rpf <= 0 (pre-WindowSizeMsg) or an empty row set collapse to offset 0.
+func clampScrollOffset(cursor, offset, rowCount, rpf int) int {
+	if rpf <= 0 || rowCount == 0 {
+		return 0
+	}
+	if cursor < offset {
+		offset = cursor
+	}
+	if cursor >= offset+rpf {
+		offset = cursor - rpf + 1
+	}
+	max := rowCount - rpf
+	if max < 0 {
+		max = 0
+	}
+	if offset > max {
+		offset = max
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return offset
+}
+
 // Update handles inbound messages. Keypress handling forks by mode so later
 // slices can add modeSearch without disturbing board handling.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -119,6 +178,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.state.Rows), m.rowsPerFrame())
 		return m, nil
 	case submitResultMsg:
 		m.pendingSubmit = false
@@ -164,12 +224,14 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.Type == tea.KeyUp:
 		if m.cursor > 0 {
 			m.cursor--
+			m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.state.Rows), m.rowsPerFrame())
 		}
 		// ↑/↓ preserve inlineError per §19.
 		return m, nil
 	case msg.Type == tea.KeyDown:
 		if m.cursor < len(m.state.Rows)-1 {
 			m.cursor++
+			m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.state.Rows), m.rowsPerFrame())
 		}
 		return m, nil
 	case matchesReserved(msg, m.state.Reserved.Clipboard):
@@ -287,9 +349,10 @@ func (m Model) View() string {
 		descCol = 0
 	}
 
-	for i, row := range m.state.Rows {
+	start, end := m.visibleRowRange()
+	for i, row := range m.state.Rows[start:end] {
 		line := renderRow(row, idWidth, descCol)
-		if i == m.cursor {
+		if start+i == m.cursor {
 			line = selectedStyle.Render(line)
 		}
 		sb.WriteString(line)
@@ -297,6 +360,23 @@ func (m Model) View() string {
 	}
 	sb.WriteString(m.footer())
 	return sb.String()
+}
+
+// visibleRowRange returns [start, end) of m.state.Rows that fit in the current
+// viewport. Pre-WindowSizeMsg (rpf == 0) or when every row fits, it returns
+// the full range so the render-all fallback satisfies pre-WindowSize tests
+// and avoids division-by-zero paths.
+func (m Model) visibleRowRange() (int, int) {
+	rows := len(m.state.Rows)
+	rpf := m.rowsPerFrame()
+	if rpf <= 0 || rows <= rpf {
+		return 0, rows
+	}
+	end := m.scrollOffset + rpf
+	if end > rows {
+		end = rows
+	}
+	return m.scrollOffset, end
 }
 
 var selectedStyle = lipgloss.NewStyle().Reverse(true)
