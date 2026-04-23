@@ -12,6 +12,10 @@ env TMUX_TMPDIR=$SHORT_TMPDIR
 # but no matching pane.
 exec tmux new-session -d -s preflight 'sleep 60'
 
+# Tripwire: confirm the server we created is on the isolated socket.
+exec tmux display-message -p '#{socket_path}'
+stdout $SHORT_TMPDIR
+
 mkdir prompts state
 tprompt daemon start --config config.toml &
 

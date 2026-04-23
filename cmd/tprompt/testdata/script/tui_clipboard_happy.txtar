@@ -14,6 +14,12 @@ env TPROMPT_TEST_RENDERER=clipboard:hello-from-the-test-clipboard
 # Fresh tmux server; the first session's first pane is assigned %0.
 exec tmux new-session -d -s tuiclip 'sleep 60'
 
+# Tripwire: if TMUX_TMPDIR is ever silently dropped, the server we just
+# created would live on the host's real tmux socket. Assert the socket path
+# the test is talking to is under $SHORT_TMPDIR before any kill-server runs.
+exec tmux display-message -p '#{socket_path}'
+stdout $SHORT_TMPDIR
+
 mkdir prompts state
 tprompt daemon start --config config.toml &
 
