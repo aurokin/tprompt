@@ -698,6 +698,56 @@ func TestView_InlineErrorPrependedToFooter(t *testing.T) {
 	}
 }
 
+func TestUpdate_PromptKeyIgnoredWhileSubmitPending(t *testing.T) {
+	// Codex P1: a slow Submitter plus key repeat must not enqueue duplicate
+	// submit commands. After the first prompt-key press, further prompt
+	// keypresses are no-ops until submitResultMsg clears pendingSubmit.
+	deps, sub, _ := promptDeps(map[string]string{"code-review": "ok"}, nil, nil)
+	m := NewModel(sampleState(), deps)
+
+	next, cmd := m.Update(keyMsg("c"))
+	got := next.(Model)
+	if cmd == nil {
+		t.Fatal("first press should fire submit cmd")
+	}
+	if !got.pendingSubmit {
+		t.Fatal("first press must set pendingSubmit")
+	}
+
+	next2, cmd2 := got.Update(keyMsg("c"))
+	got2 := next2.(Model)
+	if cmd2 != nil {
+		t.Fatalf("second press while pending must be a no-op, got cmd %T", cmd2())
+	}
+	if !got2.pendingSubmit {
+		t.Fatal("pendingSubmit must remain true after gated keypress")
+	}
+
+	// The first cmd is still the only submit — running it confirms exactly
+	// one Submitter.Submit call.
+	if msg := runCmd(cmd); msg == nil {
+		t.Fatal("first cmd should emit a submitResultMsg")
+	}
+	if len(sub.calls) != 1 {
+		t.Fatalf("Submitter.Submit calls = %d, want 1", len(sub.calls))
+	}
+}
+
+func TestUpdate_SubmitResultMsgClearsPendingSubmit(t *testing.T) {
+	deps, _, _ := promptDeps(nil, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.pendingSubmit = true
+
+	next, _ := m.Update(submitResultMsg{
+		result: Result{Action: ActionPrompt, PromptID: "code-review"},
+		err:    nil,
+	})
+	got := next.(Model)
+	if got.pendingSubmit {
+		t.Fatal("submitResultMsg must clear pendingSubmit")
+	}
+}
+
 func TestRenderer_RunSurfacesSubmitErrFromFinalModel(t *testing.T) {
 	boom := errors.New("daemon down")
 	sub := &fakeSubmitter{err: boom}

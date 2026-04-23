@@ -59,15 +59,16 @@ const (
 
 // Model is the single bubbletea model for the TUI.
 type Model struct {
-	state       State
-	deps        ModelDeps
-	mode        mode
-	cursor      int
-	width       int
-	height      int
-	result      Result
-	inlineError string
-	submitErr   error
+	state         State
+	deps          ModelDeps
+	mode          mode
+	cursor        int
+	width         int
+	height        int
+	result        Result
+	inlineError   string
+	submitErr     error
+	pendingSubmit bool
 }
 
 // NewModel constructs a Model seeded with the rendered state and deps.
@@ -96,6 +97,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case submitResultMsg:
+		m.pendingSubmit = false
 		m.result = msg.result
 		m.submitErr = msg.err
 		return m, tea.Quit
@@ -145,6 +147,12 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // assigned row keys and dispatches prompt selection. Returns the model and
 // any cmd; unassigned keypresses are no-ops that preserve inlineError.
 func (m Model) tryPromptSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Gate prompt selection while a submit is in flight. Without this a slow
+	// Submitter combined with key repeat could enqueue multiple submitCmds
+	// and produce duplicate daemon submissions from one interaction.
+	if m.pendingSubmit {
+		return m, nil
+	}
 	if msg.Type != tea.KeyRunes || len(msg.Runes) != 1 {
 		return m, nil
 	}
@@ -182,6 +190,7 @@ func (m Model) selectPrompt(id string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.inlineError = ""
+	m.pendingSubmit = true
 	return m, submitCmd(m.deps.Submitter, Result{Action: ActionPrompt, PromptID: id})
 }
 
