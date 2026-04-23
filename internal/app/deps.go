@@ -86,9 +86,18 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 			if spec := lookupEnv("TPROMPT_TEST_RENDERER"); spec != "" {
 				return parseTestRenderer(spec, sub)
 			}
-			clip, err := newClipboardReader(cfg, lookupEnv)
-			if err != nil {
-				return nil, err
+			// Also skip when the clipboard binding is disabled in config:
+			// no clipboard row is pinned, no keypress will match the
+			// clipboard key (matchesReserved short-circuits on Disabled),
+			// and forcing users in minimal environments through an
+			// autodetect failure would block valid non-clipboard TUI usage.
+			var clip clipboard.Reader
+			if !reservedBinding("clipboard", cfg).Disabled {
+				var err error
+				clip, err = newClipboardReader(cfg, lookupEnv)
+				if err != nil {
+					return nil, err
+				}
 			}
 			return tui.NewRenderer(tui.ModelDeps{
 				Submitter:     sub,
