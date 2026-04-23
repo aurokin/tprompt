@@ -597,8 +597,13 @@ func clipboardRow(rows []Row) (Row, bool) {
 }
 
 // displayKey formats a keybind for the [key] column: letters render lowercase,
-// digits and symbols render as declared.
+// digits and symbols render as declared. Keyless rows (Key == 0, which is
+// how overflow prompts surface in search results) render as a space so the
+// column stays fixed-width and no NUL byte reaches the terminal.
 func displayKey(r rune) string {
+	if r == 0 {
+		return " "
+	}
 	if unicode.IsLetter(r) {
 		return string(unicode.ToLower(r))
 	}

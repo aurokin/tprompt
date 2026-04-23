@@ -477,6 +477,26 @@ func TestUpdate_ClipboardReadMsgOnSuccessFiresSubmitCmd(t *testing.T) {
 	}
 }
 
+func TestView_SearchRendersOverflowRowWithoutNUL(t *testing.T) {
+	// Overflow rows have Key == 0 by design. When they surface in search
+	// results they must not leak a NUL byte into the rendered [key] column.
+	board := []Row{{Key: '1', PromptID: "alpha"}}
+	overflow := []Row{{PromptID: "hidden-gem", Description: "an overflow prompt"}}
+	m := NewModel(searchStateWithRows(board, overflow), ModelDeps{})
+	m.width = 80
+	m = enterSearchViaSlash(t, m)
+
+	out := m.View()
+	if strings.Contains(out, "\x00") {
+		t.Fatalf("search view must not contain NUL bytes; got %q", out)
+	}
+	// The keyless row must still render something in the key column — a
+	// space keeps the column width fixed.
+	if !strings.Contains(out, "[ ]  hidden-gem") {
+		t.Fatalf("expected overflow row to render with blank key column, got:\n%s", out)
+	}
+}
+
 func TestUpdate_SearchSlashEntryIgnoredWhilePending(t *testing.T) {
 	// Belt-and-suspenders: / in board mode must also be gated on pendingSubmit,
 	// since entering search could let the user Enter-select mid-flight.
