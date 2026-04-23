@@ -81,11 +81,13 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 		NewDaemonClient: func(cfg config.Resolved) (daemon.Client, error) {
 			return daemon.NewSocketClient(cfg.SocketPath), nil
 		},
-		NewRenderer: func(config.Resolved) (tui.Renderer, error) {
+		NewRenderer: func(cfg config.Resolved) (tui.Renderer, error) {
 			if spec := lookupEnv("TPROMPT_TEST_RENDERER"); spec != "" {
 				return parseTestRenderer(spec)
 			}
-			return cancelStubRenderer{}, nil
+			return tui.NewRenderer(tui.ModelDeps{
+				MaxPasteBytes: cfg.MaxPasteBytes,
+			}), nil
 		},
 		NewSubmitter: func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter {
 			return submitter.New(prompts, client, cfg, target)
@@ -93,9 +95,8 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 	}
 }
 
-// cancelStubRenderer is the Phase 5a production Renderer. It never draws — it
-// immediately yields ActionCancel so the orchestrator exits cleanly. Phase 5b
-// replaces the factory with the real bubbletea implementation.
+// cancelStubRenderer is retained for TPROMPT_TEST_RENDERER=cancel; production
+// now uses tui.NewRenderer.
 type cancelStubRenderer struct{}
 
 func (cancelStubRenderer) Run(tui.State) (tui.Result, error) {
