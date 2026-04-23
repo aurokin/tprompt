@@ -55,7 +55,7 @@ func tuiDeps(t *testing.T, fs *fakeStore, rend tui.Renderer, cfgOverride ...func
 	deps.NewTmux = func() (tmux.Adapter, error) {
 		return &fakeAdapter{paneExists: true}, nil
 	}
-	deps.NewRenderer = func(config.Resolved) (tui.Renderer, error) {
+	deps.NewRenderer = func(config.Resolved, store.Store, submitter.Submitter) (tui.Renderer, error) {
 		return rend, nil
 	}
 	return deps
@@ -400,7 +400,11 @@ func (r *recordingSubmitter) Submit(result tui.Result) error {
 	return r.err
 }
 
-func TestTUI_PromptSelectionInvokesSubmitterWithDeps(t *testing.T) {
+func TestTUI_PromptSelectionThreadsDepsIntoSubmitterFactory(t *testing.T) {
+	// After AUR-24, Submitter is invoked inside the Model via tea.Cmd; runTUI
+	// no longer calls Submit directly for ActionPrompt. This test now covers
+	// the factory plumbing: runTUI must build the Submitter with the right
+	// deps before handing it to the Renderer.
 	fs := &fakeStore{
 		summaries: []store.Summary{{ID: "demo", Key: "1"}},
 		prompts:   map[string]store.Prompt{"demo": {Summary: store.Summary{ID: "demo"}, Body: "x"}},
@@ -420,12 +424,6 @@ func TestTUI_PromptSelectionInvokesSubmitterWithDeps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit happy path: want nil, got %v", err)
 	}
-	if !rec.called {
-		t.Fatal("submitter should have been called for ActionPrompt")
-	}
-	if rec.result.Action != tui.ActionPrompt || rec.result.PromptID != "demo" {
-		t.Errorf("Submit got %+v, want ActionPrompt/demo", rec.result)
-	}
 	if rec.target.PaneID != "%9" || rec.target.ClientTTY != "/dev/pts/4" || rec.target.Session != "$2" {
 		t.Errorf("target threaded into submitter = %+v", rec.target)
 	}
@@ -438,14 +436,18 @@ func TestTUI_PromptSelectionInvokesSubmitterWithDeps(t *testing.T) {
 }
 
 func TestTUI_OversizePromptExitsExitPrompt(t *testing.T) {
+	// AUR-24 bubbles submit failure through Renderer.Run so the Model can call
+	// Submitter via tea.Cmd. The recordingRenderer used here returns the error
+	// directly, exercising the same err-bubble contract.
 	fs := &fakeStore{
 		summaries: []store.Summary{{ID: "demo", Key: "1"}},
 	}
-	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionPrompt, PromptID: "demo"}}
-	deps := tuiDeps(t, fs, rend)
-	deps.NewSubmitter = func(config.Resolved, store.Store, daemon.Client, tmux.TargetContext) submitter.Submitter {
-		return &recordingSubmitter{err: &submitter.BodyTooLargeError{Bytes: 99, Limit: 10}}
+	tooLargeErr := &submitter.BodyTooLargeError{Bytes: 99, Limit: 10}
+	rend := &recordingRenderer{
+		result: tui.Result{Action: tui.ActionPrompt, PromptID: "demo"},
+		err:    tooLargeErr,
 	}
+	deps := tuiDeps(t, fs, rend)
 
 	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
 	var tooLarge *submitter.BodyTooLargeError
@@ -461,12 +463,12 @@ func TestTUI_DaemonSubmitFailureExitsExitDaemon(t *testing.T) {
 	fs := &fakeStore{
 		summaries: []store.Summary{{ID: "demo", Key: "1"}},
 	}
-	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionPrompt, PromptID: "demo"}}
-	deps := tuiDeps(t, fs, rend)
 	dialErr := &daemon.SocketUnavailableError{Path: "/tmp/x.sock", Reason: "broken pipe mid-submit"}
-	deps.NewSubmitter = func(config.Resolved, store.Store, daemon.Client, tmux.TargetContext) submitter.Submitter {
-		return &recordingSubmitter{err: dialErr}
+	rend := &recordingRenderer{
+		result: tui.Result{Action: tui.ActionPrompt, PromptID: "demo"},
+		err:    dialErr,
 	}
+	deps := tuiDeps(t, fs, rend)
 
 	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
 	if !errors.Is(err, dialErr) {

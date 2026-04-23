@@ -19,6 +19,23 @@ type Submitter interface {
 	Submit(Result) error
 }
 
+// submitResultMsg carries the outcome of an async Submitter.Submit call back
+// into Update so the Model can transition to tea.Quit with the captured
+// Result and error.
+type submitResultMsg struct {
+	result Result
+	err    error
+}
+
+// submitCmd returns a tea.Cmd that invokes the injected Submitter and reports
+// the outcome via submitResultMsg. The result is echoed back on the message so
+// Update doesn't have to stash pending selections on the Model.
+func submitCmd(sub Submitter, result Result) tea.Cmd {
+	return func() tea.Msg {
+		return submitResultMsg{result: result, err: sub.Submit(result)}
+	}
+}
+
 // ModelDeps are the capabilities the Model reaches into during event handling.
 // Phase 5b slices beyond the tracer bullet (AUR-24, AUR-25) populate these;
 // the tracer bullet leaves the Submitter/Clip/Store fields zero-valued because
@@ -42,13 +59,16 @@ const (
 
 // Model is the single bubbletea model for the TUI.
 type Model struct {
-	state  State
-	deps   ModelDeps
-	mode   mode
-	cursor int
-	width  int
-	height int
-	result Result
+	state         State
+	deps          ModelDeps
+	mode          mode
+	cursor        int
+	width         int
+	height        int
+	result        Result
+	inlineError   string
+	submitErr     error
+	pendingSubmit bool
 }
 
 // NewModel constructs a Model seeded with the rendered state and deps.
@@ -59,6 +79,11 @@ func NewModel(state State, deps ModelDeps) Model {
 // Result returns the Result captured at the moment the Model issued tea.Quit.
 // The Renderer wrapper reads this after bubbletea returns.
 func (m Model) Result() Result { return m.result }
+
+// SubmitErr returns any error returned by the injected Submitter during the
+// session. The Renderer wrapper surfaces this up from Run so runTUI can map
+// it to the appropriate exit code.
+func (m Model) SubmitErr() error { return m.submitErr }
 
 // Init satisfies tea.Model. No startup command yet.
 func (m Model) Init() tea.Cmd { return nil }
@@ -71,6 +96,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
+	case submitResultMsg:
+		m.pendingSubmit = false
+		m.result = msg.result
+		m.submitErr = msg.err
+		return m, tea.Quit
 	case tea.KeyMsg:
 		switch m.mode {
 		case modeBoard:
@@ -87,20 +117,96 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// cancel Result is captured instead of surfacing as ErrProgramKilled.
 	switch {
 	case msg.Type == tea.KeyCtrlC, matchesReserved(msg, m.state.Reserved.Cancel):
+		if m.pendingSubmit {
+			// A submit is in flight; cancelling here would exit 0 and drop
+			// any error the daemon returns, silently losing the outcome.
+			// Wait for submitResultMsg to decide the exit code.
+			return m, nil
+		}
+		m.inlineError = ""
 		m.result = Result{Action: ActionCancel}
 		return m, tea.Quit
 	case msg.Type == tea.KeyUp:
 		if m.cursor > 0 {
 			m.cursor--
 		}
+		// ↑/↓ preserve inlineError per §19.
 		return m, nil
 	case msg.Type == tea.KeyDown:
 		if m.cursor < len(m.state.Rows)-1 {
 			m.cursor++
 		}
 		return m, nil
+	case matchesReserved(msg, m.state.Reserved.Search),
+		matchesReserved(msg, m.state.Reserved.Clipboard):
+		// AUR-25/26 will wire these keys to actual behavior. For AUR-24 they
+		// are real actions in the §19 sense and must clear inlineError so the
+		// error-lifecycle contract holds now rather than later.
+		m.inlineError = ""
+		return m, nil
+	}
+
+	return m.tryPromptSelect(msg)
+}
+
+// tryPromptSelect matches a single-rune printable keypress against the
+// assigned row keys and dispatches prompt selection. Returns the model and
+// any cmd; unassigned keypresses are no-ops that preserve inlineError.
+func (m Model) tryPromptSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Gate prompt selection while a submit is in flight. Without this a slow
+	// Submitter combined with key repeat could enqueue multiple submitCmds
+	// and produce duplicate daemon submissions from one interaction.
+	if m.pendingSubmit {
+		return m, nil
+	}
+	if msg.Type != tea.KeyRunes || len(msg.Runes) != 1 {
+		return m, nil
+	}
+	got := msg.Runes[0]
+
+	for _, row := range m.state.Rows {
+		if row.PromptID == "" {
+			// Pinned clipboard row — its key is handled via the Reserved.Clipboard
+			// case above, so skip it here to avoid a double match.
+			continue
+		}
+		if !promptKeyMatches(got, row.Key) {
+			continue
+		}
+		return m.selectPrompt(row.PromptID)
 	}
 	return m, nil
+}
+
+// selectPrompt resolves the prompt body, enforces MaxPasteBytes inline, and
+// fires the submit cmd when the body is within limits. Store or resolve
+// failures propagate through submitErr so the Renderer wrapper surfaces them.
+func (m Model) selectPrompt(id string) (tea.Model, tea.Cmd) {
+	prompt, err := m.deps.Store.Resolve(id)
+	if err != nil {
+		// The pre-flight validated the store, but a prompt file can still be
+		// removed between List and Resolve. Bubble as a submit failure so the
+		// exit-code mapping in runTUI handles it like any other store error.
+		m.result = Result{Action: ActionPrompt, PromptID: id}
+		m.submitErr = err
+		return m, tea.Quit
+	}
+	if m.deps.MaxPasteBytes > 0 && int64(len(prompt.Body)) > m.deps.MaxPasteBytes {
+		m.inlineError = "prompt body exceeds max_paste_bytes — choose another prompt"
+		return m, nil
+	}
+	m.inlineError = ""
+	m.pendingSubmit = true
+	return m, submitCmd(m.deps.Submitter, Result{Action: ActionPrompt, PromptID: id})
+}
+
+// promptKeyMatches implements the case-insensitive keybind contract: letters
+// fold to lowercase on both sides, non-letters must match literally.
+func promptKeyMatches(got, bound rune) bool {
+	if unicode.IsLetter(bound) && unicode.IsLetter(got) {
+		return unicode.ToLower(got) == unicode.ToLower(bound)
+	}
+	return got == bound
 }
 
 // View renders the three-column board and footer hint.
@@ -179,6 +285,17 @@ func truncateToWidth(s string, maxWidth int) string {
 }
 
 func (m Model) footer() string {
+	base := m.footerHints()
+	if m.inlineError == "" {
+		return base
+	}
+	if base == "" {
+		return m.inlineError
+	}
+	return m.inlineError + "  " + base
+}
+
+func (m Model) footerHints() string {
 	if m.isEmptyStore() {
 		return m.emptyStoreFooter()
 	}
