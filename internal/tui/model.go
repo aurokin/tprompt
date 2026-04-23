@@ -130,6 +130,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case submitResultMsg:
 		m.pendingSubmit = false
 		m.result = msg.result
+		m.result.SubmittedByModel = true
 		m.submitErr = msg.err
 		return m, tea.Quit
 	case clipboardReadMsg:

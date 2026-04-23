@@ -519,6 +519,31 @@ func TestTUI_ClipboardSelectionInvokesSubmitterWithDeps(t *testing.T) {
 	}
 }
 
+// When the Model has already submitted the clipboard action via tea.Cmd
+// (AUR-26 search Enter on clip row, AUR-25 board P), the Result carries
+// SubmittedByModel=true and runTUI must not re-submit — otherwise the same
+// clipboard bytes would be delivered twice for one user action.
+func TestTUI_ClipboardModelSubmittedDoesNotReSubmit(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{
+		Action:           tui.ActionClipboard,
+		ClipboardBody:    []byte("clip body"),
+		SubmittedByModel: true,
+	}}
+	rec := &recordingSubmitter{}
+	deps := tuiDeps(t, &fakeStore{}, rend)
+	deps.NewSubmitter = func(config.Resolved, store.Store, daemon.Client, tmux.TargetContext) submitter.Submitter {
+		return rec
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%9")
+	if err != nil {
+		t.Fatalf("Model-submitted clipboard: want nil err, got %v", err)
+	}
+	if rec.called {
+		t.Fatal("runTUI must not call Submitter when Result.SubmittedByModel=true")
+	}
+}
+
 func TestTUI_ClipboardOversizeExitsExitPrompt(t *testing.T) {
 	rend := &recordingRenderer{result: tui.Result{
 		Action:        tui.ActionClipboard,

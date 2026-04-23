@@ -102,9 +102,16 @@ func runTUI(deps Deps, f tuiFlags) error {
 		// required here.
 		return nil
 	case tui.ActionClipboard:
-		// AUR-25 will move this into the Model alongside the P keypress; for
-		// now the stub Renderer (staticClipboardRenderer) still returns
-		// ActionClipboard directly and we submit on its behalf.
+		if result.SubmittedByModel {
+			// The Model already invoked Submit via tea.Cmd (AUR-26 search
+			// Enter on clip row, AUR-25 board P). Any error has surfaced
+			// via renderer.Run above — submitting again here would produce
+			// a duplicate delivery for one user action.
+			return nil
+		}
+		// Stub Renderer (staticClipboardRenderer / TPROMPT_TEST_RENDERER)
+		// returns ActionClipboard directly without going through the Model;
+		// submit on its behalf.
 		return sub.Submit(result)
 	default:
 		return fmt.Errorf("tui: unknown renderer action %q", result.Action)

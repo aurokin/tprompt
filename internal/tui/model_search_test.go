@@ -505,6 +505,26 @@ func TestUpdate_ClipboardReadMsgOnSuccessFiresSubmitCmd(t *testing.T) {
 	}
 }
 
+func TestUpdate_SubmitResultMsgMarksResultSubmittedByModel(t *testing.T) {
+	// runTUI uses Result.SubmittedByModel to skip its post-Run submit for
+	// paths that the Model already drove — without it, a clipboard selection
+	// in search would deliver twice.
+	m := NewModel(searchStateWithRows(nil, nil), ModelDeps{})
+	m.pendingSubmit = true
+
+	next, _ := m.Update(submitResultMsg{
+		result: Result{Action: ActionClipboard, ClipboardBody: []byte("x")},
+	})
+	got := next.(Model)
+
+	if !got.result.SubmittedByModel {
+		t.Fatal("submitResultMsg must mark Result.SubmittedByModel=true")
+	}
+	if got.result.Action != ActionClipboard {
+		t.Fatalf("Action = %q, want preserved ActionClipboard", got.result.Action)
+	}
+}
+
 func TestView_SearchRendersOverflowRowWithoutNUL(t *testing.T) {
 	// Overflow rows have Key == 0 by design. When they surface in search
 	// results they must not leak a NUL byte into the rendered [key] column.

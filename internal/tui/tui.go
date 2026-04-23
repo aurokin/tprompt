@@ -20,6 +20,13 @@ type Result struct {
 	// ClipboardBody is captured by the Renderer at the moment of intent so the
 	// daemon never re-reads the clipboard. Populated when Action == ActionClipboard.
 	ClipboardBody []byte
+	// SubmittedByModel reports whether the Bubble Tea Model already invoked
+	// the injected Submitter for this Result via tea.Cmd. runTUI gates its
+	// post-Run submit on this flag so Model-driven paths (AUR-26 search Enter
+	// on the clipboard row, AUR-25's board P) are not double-delivered while
+	// test-only stub Renderers that return a Result directly still submit
+	// through runTUI.
+	SubmittedByModel bool
 }
 
 // State holds everything the TUI needs to render without importing store or
