@@ -32,7 +32,7 @@ type Deps struct {
 	NewTmux          func() (tmux.Adapter, error)
 	NewClip          func(cfg config.Resolved) (clipboard.Reader, error)
 	NewDaemonClient  func(cfg config.Resolved) (daemon.Client, error)
-	NewRenderer      func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error)
+	NewRenderer      func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter, clip clipboard.Reader) (tui.Renderer, error)
 	NewSubmitter     func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter
 }
 
@@ -81,12 +81,13 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 		NewDaemonClient: func(cfg config.Resolved) (daemon.Client, error) {
 			return daemon.NewSocketClient(cfg.SocketPath), nil
 		},
-		NewRenderer: func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error) {
+		NewRenderer: func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter, clip clipboard.Reader) (tui.Renderer, error) {
 			if spec := lookupEnv("TPROMPT_TEST_RENDERER"); spec != "" {
-				return parseTestRenderer(spec)
+				return parseTestRenderer(spec, sub)
 			}
 			return tui.NewRenderer(tui.ModelDeps{
 				Submitter:     sub,
+				Clip:          clip,
 				Store:         prompts,
 				MaxPasteBytes: cfg.MaxPasteBytes,
 			}, tui.ProgramIO{
@@ -115,20 +116,31 @@ func (cancelStubRenderer) Run(tui.State) (tui.Result, error) {
 //
 //	cancel              → ActionCancel
 //	clipboard:<body>    → ActionClipboard with ClipboardBody = <body>
-func parseTestRenderer(spec string) (tui.Renderer, error) {
+//
+// The clipboard stub performs its own Submit so runTUI's ActionClipboard
+// branch can mirror the real-renderer path (no direct submit), matching the
+// AUR-24 ActionPrompt pattern where the Model owns submission.
+func parseTestRenderer(spec string, sub submitter.Submitter) (tui.Renderer, error) {
 	switch {
 	case spec == "cancel":
 		return cancelStubRenderer{}, nil
 	case strings.HasPrefix(spec, "clipboard:"):
 		body := spec[len("clipboard:"):]
-		return staticClipboardRenderer{body: []byte(body)}, nil
+		return staticClipboardRenderer{body: []byte(body), sub: sub}, nil
 	default:
 		return nil, fmt.Errorf("TPROMPT_TEST_RENDERER: unsupported spec %q", spec)
 	}
 }
 
-type staticClipboardRenderer struct{ body []byte }
+type staticClipboardRenderer struct {
+	body []byte
+	sub  submitter.Submitter
+}
 
 func (r staticClipboardRenderer) Run(tui.State) (tui.Result, error) {
-	return tui.Result{Action: tui.ActionClipboard, ClipboardBody: r.body}, nil
+	result := tui.Result{Action: tui.ActionClipboard, ClipboardBody: r.body}
+	if r.sub == nil {
+		return result, nil
+	}
+	return result, r.sub.Submit(result)
 }

@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/store"
 )
 
@@ -795,6 +796,313 @@ func TestRenderer_RunSurfacesSubmitErrFromFinalModel(t *testing.T) {
 	}
 	if result.Action != ActionPrompt || result.PromptID != "code-review" {
 		t.Fatalf("Run() result = %+v, want ActionPrompt/code-review", result)
+	}
+	if len(sub.calls) != 1 {
+		t.Fatalf("Submitter.Submit calls = %d, want 1", len(sub.calls))
+	}
+}
+
+// --- AUR-25: clipboard P flow via tea.Cmd --- //
+
+type fakeClip struct {
+	body  []byte
+	err   error
+	calls int
+}
+
+func (f *fakeClip) Read() ([]byte, error) {
+	f.calls++
+	return f.body, f.err
+}
+
+func clipboardDeps(body []byte, readErr, subErr error) (ModelDeps, *fakeSubmitter, *fakeClip) {
+	sub := &fakeSubmitter{err: subErr}
+	clip := &fakeClip{body: body, err: readErr}
+	return ModelDeps{
+		Submitter:     sub,
+		Clip:          clip,
+		MaxPasteBytes: 1 << 20,
+	}, sub, clip
+}
+
+func TestUpdate_ClipboardKeySetsPendingAndFiresReadCmd(t *testing.T) {
+	deps, _, clip := clipboardDeps([]byte("ok"), nil, nil)
+	m := NewModel(sampleState(), deps)
+
+	next, cmd := m.Update(keyMsg("p"))
+	got := next.(Model)
+
+	if !got.pendingClipboard {
+		t.Fatal("clipboard key must set pendingClipboard")
+	}
+	if cmd == nil {
+		t.Fatal("clipboard key must return a read cmd")
+	}
+	msg := runCmd(cmd)
+	rm, ok := msg.(clipboardReadMsg)
+	if !ok {
+		t.Fatalf("cmd emitted %T, want clipboardReadMsg", msg)
+	}
+	if rm.err != nil {
+		t.Fatalf("clipboardReadMsg.err = %v, want nil", rm.err)
+	}
+	if string(rm.body) != "ok" {
+		t.Fatalf("clipboardReadMsg.body = %q, want %q", rm.body, "ok")
+	}
+	if clip.calls != 1 {
+		t.Fatalf("clip.Read calls = %d, want 1", clip.calls)
+	}
+}
+
+func TestUpdate_ClipboardKeyCaseInsensitive(t *testing.T) {
+	// sampleState binds clipboard to 'p'; pressing 'P' must also trigger.
+	deps, _, clip := clipboardDeps([]byte("ok"), nil, nil)
+	m := NewModel(sampleState(), deps)
+
+	_, cmd := m.Update(keyMsg("P"))
+	if cmd == nil {
+		t.Fatal("uppercase clipboard key must return a read cmd")
+	}
+	if msg := runCmd(cmd); msg == nil {
+		t.Fatal("cmd should emit a clipboardReadMsg")
+	}
+	if clip.calls != 1 {
+		t.Fatalf("clip.Read calls = %d, want 1", clip.calls)
+	}
+}
+
+func TestUpdate_ClipboardReadMsgSuccessFiresSubmitCmd(t *testing.T) {
+	deps, sub, _ := clipboardDeps(nil, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.pendingClipboard = true // simulate post-keypress state
+
+	next, cmd := m.Update(clipboardReadMsg{body: []byte("ok")})
+	got := next.(Model)
+
+	if got.pendingClipboard {
+		t.Fatal("pendingClipboard must be cleared after read msg")
+	}
+	if !got.pendingSubmit {
+		t.Fatal("successful read must set pendingSubmit before submit completes")
+	}
+	if got.inlineError != "" {
+		t.Fatalf("inlineError = %q, want empty on success", got.inlineError)
+	}
+	if cmd == nil {
+		t.Fatal("successful read must fire submit cmd")
+	}
+	msg := runCmd(cmd)
+	sr, ok := msg.(submitResultMsg)
+	if !ok {
+		t.Fatalf("cmd emitted %T, want submitResultMsg", msg)
+	}
+	if sr.result.Action != ActionClipboard || string(sr.result.ClipboardBody) != "ok" {
+		t.Fatalf("submit result = %+v, want ActionClipboard/ok", sr.result)
+	}
+	if len(sub.calls) != 1 {
+		t.Fatalf("Submitter.Submit calls = %d, want 1", len(sub.calls))
+	}
+}
+
+func TestUpdate_ClipboardReadMsgEmptyError_SetsInlineErrorAndStaysOpen(t *testing.T) {
+	deps, sub, _ := clipboardDeps(nil, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.pendingClipboard = true
+
+	next, cmd := m.Update(clipboardReadMsg{err: &clipboard.EmptyClipboardError{}})
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("empty-clipboard error must not fire a cmd, got %T", cmd())
+	}
+	if got.pendingClipboard {
+		t.Fatal("pendingClipboard must be cleared on error")
+	}
+	if got.pendingSubmit {
+		t.Fatal("pendingSubmit must not be set on error")
+	}
+	want := "clipboard is empty — choose another option"
+	if got.inlineError != want {
+		t.Fatalf("inlineError = %q, want %q", got.inlineError, want)
+	}
+	if len(sub.calls) != 0 {
+		t.Fatalf("Submitter.Submit must not be called on error, got %d calls", len(sub.calls))
+	}
+}
+
+func TestUpdate_ClipboardReadMsgInvalidUTF8_SetsInlineError(t *testing.T) {
+	deps, _, _ := clipboardDeps(nil, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.pendingClipboard = true
+
+	next, cmd := m.Update(clipboardReadMsg{err: &clipboard.InvalidUTF8Error{}})
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("utf-8 error must not fire a cmd, got %T", cmd())
+	}
+	if !strings.Contains(got.inlineError, "non-UTF-8") {
+		t.Fatalf("inlineError = %q, want mention of non-UTF-8", got.inlineError)
+	}
+	if !strings.Contains(got.inlineError, "choose another option") {
+		t.Fatalf("inlineError = %q, want — choose another option suffix", got.inlineError)
+	}
+}
+
+func TestUpdate_ClipboardReadMsgOversize_SetsInlineError(t *testing.T) {
+	deps, _, _ := clipboardDeps(nil, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.pendingClipboard = true
+
+	next, cmd := m.Update(clipboardReadMsg{err: &clipboard.OversizeError{Bytes: 42, Limit: 10}})
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("oversize error must not fire a cmd, got %T", cmd())
+	}
+	if !strings.Contains(got.inlineError, "max_paste_bytes") {
+		t.Fatalf("inlineError = %q, want mention of max_paste_bytes", got.inlineError)
+	}
+	if !strings.Contains(got.inlineError, "42") || !strings.Contains(got.inlineError, "10") {
+		t.Fatalf("inlineError = %q, want Bytes/Limit figures", got.inlineError)
+	}
+}
+
+func TestUpdate_ClipboardKeyRetryClearsPriorError(t *testing.T) {
+	deps, _, clip := clipboardDeps([]byte("ok"), nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.inlineError = "clipboard is empty — choose another option"
+
+	next, cmd := m.Update(keyMsg("p"))
+	got := next.(Model)
+
+	if got.inlineError != "" {
+		t.Fatalf("retry must clear inlineError, got %q", got.inlineError)
+	}
+	if !got.pendingClipboard {
+		t.Fatal("retry must set pendingClipboard")
+	}
+	if cmd == nil {
+		t.Fatal("retry must fire a fresh read cmd")
+	}
+	if msg := runCmd(cmd); msg == nil {
+		t.Fatal("fresh read cmd should emit a clipboardReadMsg")
+	}
+	if clip.calls != 1 {
+		t.Fatalf("clip.Read calls = %d, want 1 fresh read", clip.calls)
+	}
+}
+
+func TestUpdate_ClipboardKeyIgnoredWhilePendingClipboard(t *testing.T) {
+	// Key repeat during the ~20ms read window must not enqueue duplicate read
+	// commands or reset state mid-flight.
+	deps, _, clip := clipboardDeps([]byte("ok"), nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.pendingClipboard = true
+
+	next, cmd := m.Update(keyMsg("p"))
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("clipboard key while pending must not return a cmd, got %T", cmd())
+	}
+	if !got.pendingClipboard {
+		t.Fatal("pendingClipboard must remain true")
+	}
+	if clip.calls != 0 {
+		t.Fatalf("clip.Read must not be invoked while pending, got %d calls", clip.calls)
+	}
+}
+
+func TestUpdate_ClipboardKeyIgnoredWhilePendingSubmit(t *testing.T) {
+	// A prompt or clipboard submit already dialing the daemon must not be
+	// preempted by a clipboard retry — the submit outcome is still pending.
+	deps, _, clip := clipboardDeps([]byte("ok"), nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.pendingSubmit = true
+
+	next, cmd := m.Update(keyMsg("p"))
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("clipboard key while submit pending must not return a cmd, got %T", cmd())
+	}
+	if got.pendingClipboard {
+		t.Fatal("clipboard key while submit pending must not set pendingClipboard")
+	}
+	if clip.calls != 0 {
+		t.Fatalf("clip.Read must not be invoked while submit pending, got %d calls", clip.calls)
+	}
+}
+
+func TestUpdate_PromptKeyIgnoredWhilePendingClipboard(t *testing.T) {
+	// A prompt keypress arriving between clipboard-key press and
+	// clipboardReadMsg would race the submit that follows a successful read.
+	deps, sub, _ := promptDeps(map[string]string{"code-review": "body"}, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.pendingClipboard = true
+
+	next, cmd := m.Update(keyMsg("c"))
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("prompt key while clipboard pending must not return a cmd, got %T", cmd())
+	}
+	if !got.pendingClipboard {
+		t.Fatal("pendingClipboard must remain true through gated prompt keypress")
+	}
+	if len(sub.calls) != 0 {
+		t.Fatalf("Submitter.Submit must not be called while clipboard pending, got %d", len(sub.calls))
+	}
+}
+
+func TestUpdate_NavKeysPreserveInlineErrorAfterClipboardError(t *testing.T) {
+	// §19: ↑/↓ preserve inlineError across clipboard validation failures.
+	deps, _, _ := clipboardDeps(nil, nil, nil)
+	m := NewModel(sampleState(), deps)
+
+	next, _ := m.Update(clipboardReadMsg{err: &clipboard.EmptyClipboardError{}})
+	m = next.(Model)
+	before := m.inlineError
+	if before == "" {
+		t.Fatal("precondition: inlineError should be set after empty-clipboard error")
+	}
+
+	for _, k := range []string{"down", "up"} {
+		next, _ := m.Update(keyMsg(k))
+		m = next.(Model)
+		if m.inlineError != before {
+			t.Fatalf("after %s: inlineError = %q, want preserved %q", k, m.inlineError, before)
+		}
+	}
+}
+
+func TestRenderer_RunSubmitsClipboardAndSurfacesErr(t *testing.T) {
+	boom := errors.New("daemon down")
+	sub := &fakeSubmitter{err: boom}
+	clip := &fakeClip{body: []byte("ok")}
+	deps := ModelDeps{
+		Submitter:     sub,
+		Clip:          clip,
+		MaxPasteBytes: 1 << 20,
+	}
+	// "p" triggers the clipboard read; readClipboardCmd emits clipboardReadMsg,
+	// the Model fires submitCmd against the fake Submitter which returns boom,
+	// submitResultMsg captures the err and Quits, Run surfaces it.
+	r := NewRenderer(deps, ProgramIO{
+		Input:  strings.NewReader("p"),
+		Output: io.Discard,
+	})
+
+	result, err := r.Run(sampleState())
+	if !errors.Is(err, boom) {
+		t.Fatalf("Run() err = %v, want %v", err, boom)
+	}
+	if result.Action != ActionClipboard || string(result.ClipboardBody) != "ok" {
+		t.Fatalf("Run() result = %+v, want ActionClipboard/ok", result)
+	}
+	if clip.calls != 1 {
+		t.Fatalf("clip.Read calls = %d, want 1", clip.calls)
 	}
 	if len(sub.calls) != 1 {
 		t.Fatalf("Submitter.Submit calls = %d, want 1", len(sub.calls))

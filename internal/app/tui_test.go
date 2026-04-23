@@ -19,12 +19,28 @@ type recordingRenderer struct {
 	called bool
 	result tui.Result
 	err    error
+	sub    submitter.Submitter
 }
 
+// Run mirrors the real bubbleRenderer: for prompt/clipboard actions it
+// invokes the injected Submitter and propagates any error, so the runTUI
+// tests can observe the submit-wiring contract after AUR-25 moved the
+// Submit call out of runTUI itself.
 func (r *recordingRenderer) Run(s tui.State) (tui.Result, error) {
 	r.called = true
 	r.state = s
-	return r.result, r.err
+	if r.err != nil {
+		return r.result, r.err
+	}
+	if r.sub != nil {
+		switch r.result.Action {
+		case tui.ActionPrompt, tui.ActionClipboard:
+			if err := r.sub.Submit(r.result); err != nil {
+				return r.result, err
+			}
+		}
+	}
+	return r.result, nil
 }
 
 func tuiDeps(t *testing.T, fs *fakeStore, rend tui.Renderer, cfgOverride ...func(*config.Resolved)) Deps {
@@ -55,7 +71,17 @@ func tuiDeps(t *testing.T, fs *fakeStore, rend tui.Renderer, cfgOverride ...func
 	deps.NewTmux = func() (tmux.Adapter, error) {
 		return &fakeAdapter{paneExists: true}, nil
 	}
-	deps.NewRenderer = func(config.Resolved, store.Store, submitter.Submitter) (tui.Renderer, error) {
+	deps.NewClip = func(config.Resolved) (clipboard.Reader, error) {
+		// runTUI builds a Reader when the clipboard binding is enabled; the
+		// recordingRenderer never invokes it, so a nil Reader is sufficient.
+		return nil, nil
+	}
+	deps.NewRenderer = func(_ config.Resolved, _ store.Store, sub submitter.Submitter, _ clipboard.Reader) (tui.Renderer, error) {
+		// Inject the real Submitter so recordingRenderer.Run can call Submit
+		// the same way the production bubbleRenderer does via tea.Cmd.
+		if rr, ok := rend.(*recordingRenderer); ok {
+			rr.sub = sub
+		}
 		return rend, nil
 	}
 	return deps

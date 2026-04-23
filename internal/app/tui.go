@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
@@ -78,12 +79,24 @@ func runTUI(deps Deps, f tuiFlags) error {
 
 	state := buildTUIState(summaries, cfg)
 
+	// Only build the clipboard Reader when the clipboard key is enabled —
+	// users without pbpaste/xclip but clipboard disabled in config shouldn't
+	// be blocked at startup by a clipboard autodetect failure.
+	var clip clipboard.Reader
+	if !reservedBinding("clipboard", cfg).Disabled {
+		clip, err = deps.NewClip(cfg)
+		if err != nil {
+			return err
+		}
+	}
+
 	// Build the Submitter up front so it can be injected into the Renderer.
-	// The real Model invokes Submit via a tea.Cmd for ActionPrompt; the stub
-	// Renderer paths used by TPROMPT_TEST_RENDERER fall back to the direct
-	// sub.Submit below.
+	// The real Model invokes Submit via a tea.Cmd for ActionPrompt and
+	// ActionClipboard alike; the stub clipboard Renderer (used by
+	// TPROMPT_TEST_RENDERER) also calls Submit itself, so runTUI never
+	// re-submits here regardless of which Renderer ran.
 	sub := deps.NewSubmitter(cfg, s, client, target)
-	renderer, err := deps.NewRenderer(cfg, s, sub)
+	renderer, err := deps.NewRenderer(cfg, s, sub, clip)
 	if err != nil {
 		return err
 	}
@@ -95,17 +108,11 @@ func runTUI(deps Deps, f tuiFlags) error {
 	switch result.Action {
 	case tui.ActionCancel:
 		return nil
-	case tui.ActionPrompt:
-		// The real Renderer invokes Submitter inside the Model via tea.Cmd;
-		// any error has already surfaced via renderer.Run above. Stub
-		// renderers do not emit ActionPrompt today, so no direct submit is
-		// required here.
+	case tui.ActionPrompt, tui.ActionClipboard:
+		// Submit was performed inside the Renderer (real Model via tea.Cmd,
+		// or the staticClipboardRenderer stub). Any error already surfaced
+		// via renderer.Run above, so nothing to do here.
 		return nil
-	case tui.ActionClipboard:
-		// AUR-25 will move this into the Model alongside the P keypress; for
-		// now the stub Renderer (staticClipboardRenderer) still returns
-		// ActionClipboard directly and we submit on its behalf.
-		return sub.Submit(result)
 	default:
 		return fmt.Errorf("tui: unknown renderer action %q", result.Action)
 	}
