@@ -733,6 +733,30 @@ func TestUpdate_PromptKeyIgnoredWhileSubmitPending(t *testing.T) {
 	}
 }
 
+func TestUpdate_CancelIgnoredWhileSubmitPending(t *testing.T) {
+	// Codex P1: after a prompt select, the submit is already in flight against
+	// the daemon. Esc/Ctrl+C before submitResultMsg arrives must not exit 0 —
+	// that would drop the submit outcome and hide failures behind a fake
+	// cancel success.
+	deps, _, _ := promptDeps(nil, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.pendingSubmit = true
+
+	for _, k := range []string{"esc", "ctrl+c"} {
+		next, cmd := m.Update(keyMsg(k))
+		got := next.(Model)
+		if cmd != nil {
+			t.Fatalf("%s while pending must not return a cmd, got %T", k, cmd())
+		}
+		if got.result.Action == ActionCancel {
+			t.Fatalf("%s while pending must not set ActionCancel", k)
+		}
+		if !got.pendingSubmit {
+			t.Fatalf("%s while pending must preserve pendingSubmit", k)
+		}
+	}
+}
+
 func TestUpdate_SubmitResultMsgClearsPendingSubmit(t *testing.T) {
 	deps, _, _ := promptDeps(nil, nil, nil)
 	m := NewModel(sampleState(), deps)

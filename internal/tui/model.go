@@ -117,6 +117,12 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// cancel Result is captured instead of surfacing as ErrProgramKilled.
 	switch {
 	case msg.Type == tea.KeyCtrlC, matchesReserved(msg, m.state.Reserved.Cancel):
+		if m.pendingSubmit {
+			// A submit is in flight; cancelling here would exit 0 and drop
+			// any error the daemon returns, silently losing the outcome.
+			// Wait for submitResultMsg to decide the exit code.
+			return m, nil
+		}
 		m.inlineError = ""
 		m.result = Result{Action: ActionCancel}
 		return m, tea.Quit
