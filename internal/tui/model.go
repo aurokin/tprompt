@@ -382,6 +382,15 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Any other single-rune keypress (no Alt modifier): append to query.
+	// Bubble Tea can emit a standalone space as either tea.KeySpace or a
+	// tea.KeyRunes with Runes[0] == ' ', so accept both forms — otherwise
+	// multi-word queries like "code review" would drop the space.
+	if msg.Type == tea.KeySpace && !msg.Alt {
+		m.query += " "
+		m = m.refilter()
+		m.inlineError = ""
+		return m, nil
+	}
 	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && !msg.Alt {
 		m.query += string(msg.Runes[0])
 		m = m.refilter()

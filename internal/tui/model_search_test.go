@@ -114,6 +114,34 @@ func TestUpdate_SearchPAndSlashGoIntoQuery(t *testing.T) {
 	}
 }
 
+func TestUpdate_SearchSpaceAppendsToQuery(t *testing.T) {
+	// Bubble Tea emits a standalone space as tea.KeySpace; the search input
+	// path must accept it so multi-word queries like "code review" work.
+	board := []Row{
+		{Key: '1', PromptID: "code-review"},
+		{Key: '2', PromptID: "unrelated"},
+	}
+	m := NewModel(searchStateWithRows(board, nil), ModelDeps{})
+	m = enterSearchViaSlash(t, m)
+
+	for _, r := range []string{"c", "o", "d", "e"} {
+		next, _ := m.Update(keyMsg(r))
+		m = next.(Model)
+	}
+	next, _ := m.Update(keyMsg("space"))
+	m = next.(Model)
+	if m.query != "code " {
+		t.Fatalf("query = %q, want %q (KeySpace must append a space)", m.query, "code ")
+	}
+
+	// And as a sanity check, a space emitted as KeyRunes works too.
+	next2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m = next2.(Model)
+	if m.query != "code  " {
+		t.Fatalf("query = %q, want %q (KeyRunes space must also append)", m.query, "code  ")
+	}
+}
+
 func TestUpdate_SearchBackspacePopsLastRune(t *testing.T) {
 	m := NewModel(searchStateWithRows([]Row{{Key: '1', PromptID: "alpha"}}, nil), ModelDeps{})
 	m = enterSearchViaSlash(t, m)
