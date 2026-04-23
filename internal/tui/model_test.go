@@ -143,6 +143,22 @@ func TestView_EmptyStoreHintUsesResolvedClipboardKey(t *testing.T) {
 	}
 }
 
+func TestView_EmptyStoreAndClipboardDisabledOmitsClipboardHint(t *testing.T) {
+	// With clipboard disabled in config, buildTUIState omits the pinned
+	// clipboard row entirely. The footer must not advertise a clipboard
+	// shortcut that does not exist.
+	m := NewModel(State{Rows: nil}, ModelDeps{})
+	m.width = 80
+
+	out := m.View()
+	if strings.Contains(out, "for clipboard") {
+		t.Fatalf("clipboard-disabled hint must not mention clipboard. Got:\n%s", out)
+	}
+	if !strings.Contains(out, "no prompts found — press Esc to exit") {
+		t.Fatalf("clipboard-disabled hint missing. Got:\n%s", out)
+	}
+}
+
 func TestView_NonEmptyShowsBoardFooter(t *testing.T) {
 	m := NewModel(sampleState(), ModelDeps{})
 	m.width = 80

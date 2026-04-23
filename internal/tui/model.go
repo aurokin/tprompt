@@ -180,11 +180,10 @@ func truncateToWidth(s string, maxWidth int) string {
 
 func (m Model) footer() string {
 	if m.isEmptyStore() {
-		key := "P"
 		if clip, ok := clipboardRow(m.state.Rows); ok {
-			key = string(clip.Key)
+			return fmt.Sprintf("no prompts found — press %s for clipboard or Esc to exit", string(clip.Key))
 		}
-		return fmt.Sprintf("no prompts found — press %s for clipboard or Esc to exit", key)
+		return "no prompts found — press Esc to exit"
 	}
 	return "[/ search]  [Esc cancel]"
 }
