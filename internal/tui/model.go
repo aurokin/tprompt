@@ -36,6 +36,30 @@ func submitCmd(sub Submitter, result Result) tea.Cmd {
 	}
 }
 
+// clipboardReadMsg carries the outcome of an async clipboard read: body is
+// the validated bytes on success; err is the first failure from Read or
+// Validate. AUR-25 will wire board-mode P to the same helper.
+type clipboardReadMsg struct {
+	body []byte
+	err  error
+}
+
+// clipboardReadCmd returns a tea.Cmd that reads the host clipboard and
+// validates it against MaxPasteBytes, reporting the outcome via
+// clipboardReadMsg.
+func clipboardReadCmd(reader clipboard.Reader, maxBytes int64) tea.Cmd {
+	return func() tea.Msg {
+		body, err := reader.Read()
+		if err != nil {
+			return clipboardReadMsg{err: err}
+		}
+		if verr := clipboard.Validate(body, maxBytes); verr != nil {
+			return clipboardReadMsg{err: verr}
+		}
+		return clipboardReadMsg{body: body}
+	}
+}
+
 // ModelDeps are the capabilities the Model reaches into during event handling.
 // Phase 5b slices beyond the tracer bullet (AUR-24, AUR-25) populate these;
 // the tracer bullet leaves the Submitter/Clip/Store fields zero-valued because
@@ -69,6 +93,13 @@ type Model struct {
 	inlineError   string
 	submitErr     error
 	pendingSubmit bool
+
+	// Search-mode state.
+	query               string
+	searchCursor        int
+	highlightedPromptID string
+	results             []MatchedRow
+	index               *SearchIndex
 }
 
 // NewModel constructs a Model seeded with the rendered state and deps.
@@ -88,8 +119,8 @@ func (m Model) SubmitErr() error { return m.submitErr }
 // Init satisfies tea.Model. No startup command yet.
 func (m Model) Init() tea.Cmd { return nil }
 
-// Update handles inbound messages. Keypress handling forks by mode so later
-// slices can add modeSearch without disturbing board handling.
+// Update handles inbound messages. Keypress handling forks by mode so search
+// can layer in without disturbing board handling.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -101,12 +132,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.result = msg.result
 		m.submitErr = msg.err
 		return m, tea.Quit
+	case clipboardReadMsg:
+		if msg.err != nil {
+			m.pendingSubmit = false
+			m.inlineError = msg.err.Error()
+			return m, nil
+		}
+		// Hand off to submitCmd; pendingSubmit stays true until submitResultMsg.
+		return m, submitCmd(m.deps.Submitter, Result{
+			Action:        ActionClipboard,
+			ClipboardBody: msg.body,
+		})
 	case tea.KeyMsg:
 		switch m.mode {
 		case modeBoard:
 			return m.updateBoard(msg)
 		case modeSearch:
-			return m, nil
+			return m.updateSearch(msg)
 		}
 	}
 	return m, nil
@@ -137,11 +179,15 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor++
 		}
 		return m, nil
-	case matchesReserved(msg, m.state.Reserved.Search),
-		matchesReserved(msg, m.state.Reserved.Clipboard):
-		// AUR-25/26 will wire these keys to actual behavior. For AUR-24 they
-		// are real actions in the §19 sense and must clear inlineError so the
-		// error-lifecycle contract holds now rather than later.
+	case matchesReserved(msg, m.state.Reserved.Search):
+		if m.pendingSubmit {
+			return m, nil
+		}
+		m.inlineError = ""
+		return m.enterSearch(), nil
+	case matchesReserved(msg, m.state.Reserved.Clipboard):
+		// AUR-25 wires this to selectClipboard(). Clearing inlineError here
+		// keeps the §19 contract satisfied until then.
 		m.inlineError = ""
 		return m, nil
 	}
@@ -209,31 +255,203 @@ func promptKeyMatches(got, bound rune) bool {
 	return got == bound
 }
 
-// View renders the three-column board and footer hint.
+// enterSearch transitions from board to search mode. It builds the index on
+// first use, seeds results with the empty-query catalog, and anchors the
+// search cursor at the first entry.
+func (m Model) enterSearch() Model {
+	m.mode = modeSearch
+	m.query = ""
+	if m.index == nil {
+		clip, hasClip := clipboardRow(m.state.Rows)
+		boardRows := m.state.Rows
+		if hasClip {
+			boardRows = boardRows[1:]
+		}
+		if !hasClip {
+			clip = Row{}
+		}
+		m.index = newSearchIndex(boardRows, m.state.Overflow, clip)
+	}
+	m.results = m.index.Query("")
+	m.searchCursor = 0
+	if len(m.results) > 0 {
+		m.highlightedPromptID = m.results[0].Row.PromptID
+	} else {
+		m.highlightedPromptID = ""
+	}
+	return m
+}
+
+// refilter rebuilds results from the current query and relocates the cursor
+// to the prior highlighted PromptID if it still appears in the new result set;
+// otherwise the cursor lands at index 0.
+func (m Model) refilter() Model {
+	anchorID := m.highlightedPromptID
+	m.results = m.index.Query(m.query)
+	m.searchCursor = 0
+	if anchorID != "" {
+		for i, r := range m.results {
+			if r.Row.PromptID == anchorID {
+				m.searchCursor = i
+				break
+			}
+		}
+	}
+	if m.searchCursor < len(m.results) {
+		m.highlightedPromptID = m.results[m.searchCursor].Row.PromptID
+	} else {
+		m.highlightedPromptID = ""
+	}
+	return m
+}
+
+// updateSearch routes search-mode keypresses. Reserved semantics (docs
+// §Search mode): Esc returns to board (never quits); Ctrl+C cancels; Enter
+// selects; ↑/↓ navigate; Backspace pops one rune; any other single-rune
+// keypress appends to the query.
+func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Esc always exits search mode back to the board — even if Cancel is
+	// bound to Esc at the config level. Per ticket: "Esc does NOT exit the
+	// TUI in search mode".
+	if msg.Type == tea.KeyEsc {
+		if m.pendingSubmit {
+			return m, nil
+		}
+		m.mode = modeBoard
+		m.query = ""
+		m.results = nil
+		m.highlightedPromptID = ""
+		m.searchCursor = 0
+		m.inlineError = ""
+		return m, nil
+	}
+
+	// Ctrl+C: cancel + Quit. Literal Ctrl+C only — remapped printable Cancel
+	// bindings go into the search query like any other printable rune so the
+	// user can actually search for that character.
+	if msg.Type == tea.KeyCtrlC {
+		if m.pendingSubmit {
+			return m, nil
+		}
+		m.inlineError = ""
+		m.result = Result{Action: ActionCancel}
+		return m, tea.Quit
+	}
+
+	// Enter (or remapped Select): select the highlighted row.
+	if matchesReserved(msg, m.state.Reserved.Select) {
+		if m.pendingSubmit {
+			return m, nil
+		}
+		if m.searchCursor < 0 || m.searchCursor >= len(m.results) {
+			return m, nil
+		}
+		row := m.results[m.searchCursor].Row
+		if row.PromptID == "" {
+			return m.selectClipboard()
+		}
+		return m.selectPrompt(row.PromptID)
+	}
+
+	// ↑/↓: navigate within results. Navigation preserves inlineError (§19).
+	if msg.Type == tea.KeyUp {
+		if m.searchCursor > 0 {
+			m.searchCursor--
+			m.highlightedPromptID = m.results[m.searchCursor].Row.PromptID
+		}
+		return m, nil
+	}
+	if msg.Type == tea.KeyDown {
+		if m.searchCursor < len(m.results)-1 {
+			m.searchCursor++
+			m.highlightedPromptID = m.results[m.searchCursor].Row.PromptID
+		}
+		return m, nil
+	}
+
+	// Backspace: pop one rune and re-filter. A query edit is a real action,
+	// so inlineError clears.
+	if msg.Type == tea.KeyBackspace {
+		if len(m.query) > 0 {
+			runes := []rune(m.query)
+			m.query = string(runes[:len(runes)-1])
+			m = m.refilter()
+			m.inlineError = ""
+		}
+		return m, nil
+	}
+
+	// Any other single-rune keypress (no Alt modifier): append to query.
+	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && !msg.Alt {
+		m.query += string(msg.Runes[0])
+		m = m.refilter()
+		m.inlineError = ""
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// selectClipboard kicks off an async clipboard read via tea.Cmd. On success
+// the resulting clipboardReadMsg hands off to submitCmd in Update; on error
+// it populates inlineError and stays open. AUR-25 will call this from
+// board-mode P.
+func (m Model) selectClipboard() (tea.Model, tea.Cmd) {
+	if m.pendingSubmit {
+		return m, nil
+	}
+	if m.deps.Clip == nil {
+		m.inlineError = "clipboard reader not configured"
+		return m, nil
+	}
+	m.inlineError = ""
+	m.pendingSubmit = true
+	return m, clipboardReadCmd(m.deps.Clip, m.deps.MaxPasteBytes)
+}
+
+// View renders the mode-appropriate body and footer hint.
 func (m Model) View() string {
 	width := m.width
 	if width <= 0 {
 		width = 80
 	}
+	if m.mode == modeSearch {
+		return m.viewSearch(width)
+	}
+	return m.viewBoard(width)
+}
 
+func (m Model) viewBoard(width int) string {
+	return renderRowList(m.state.Rows, m.cursor, width) + m.footer()
+}
+
+func (m Model) viewSearch(width int) string {
+	rows := make([]Row, len(m.results))
+	for i, r := range m.results {
+		rows[i] = r.Row
+	}
+	return renderRowList(rows, m.searchCursor, width) + m.footer()
+}
+
+// renderRowList formats rows as the three-column keybind board, highlighting
+// the row at cursor. Shared between board and search views.
+func renderRowList(rows []Row, cursor, width int) string {
 	var sb strings.Builder
-	idWidth := maxIDWidth(m.state.Rows)
+	idWidth := maxIDWidth(rows)
 	const keyCol = 3 // "[X]"
 	const padding = 2
 	descCol := width - keyCol - idWidth - padding*2
 	if descCol < 0 {
 		descCol = 0
 	}
-
-	for i, row := range m.state.Rows {
+	for i, row := range rows {
 		line := renderRow(row, idWidth, descCol)
-		if i == m.cursor {
+		if i == cursor {
 			line = selectedStyle.Render(line)
 		}
 		sb.WriteString(line)
 		sb.WriteString("\n")
 	}
-	sb.WriteString(m.footer())
 	return sb.String()
 }
 
@@ -296,16 +514,42 @@ func (m Model) footer() string {
 }
 
 func (m Model) footerHints() string {
+	if m.mode == modeSearch {
+		return m.searchFooterHints()
+	}
 	if m.isEmptyStore() {
 		return m.emptyStoreFooter()
 	}
 	var parts []string
-	if search := footerHint(m.state.Reserved.Search, "search"); search != "" {
+	if search := m.boardSearchHint(); search != "" {
 		parts = append(parts, search)
 	}
 	if cancel := footerHint(m.state.Reserved.Cancel, "cancel"); cancel != "" {
 		parts = append(parts, cancel)
 	}
+	return strings.Join(parts, "  ")
+}
+
+// boardSearchHint returns the `[/ search]` hint with ` (N more)` suffixed
+// inside the brackets when overflow rows exist. Returns empty when search is
+// disabled.
+func (m Model) boardSearchHint() string {
+	label := footerHint(m.state.Reserved.Search, "search")
+	if label == "" || len(m.state.Overflow) == 0 {
+		return label
+	}
+	return strings.TrimSuffix(label, "]") + fmt.Sprintf(" (%d more)]", len(m.state.Overflow))
+}
+
+// searchFooterHints renders the search-mode footer:
+// `/query  [Esc exit search]  [Enter select]  [N matches]`.
+func (m Model) searchFooterHints() string {
+	parts := []string{"/" + m.query}
+	parts = append(parts, "[Esc exit search]")
+	if sel := footerHint(m.state.Reserved.Select, "select"); sel != "" {
+		parts = append(parts, sel)
+	}
+	parts = append(parts, fmt.Sprintf("[%d matches]", len(m.results)))
 	return strings.Join(parts, "  ")
 }
 
