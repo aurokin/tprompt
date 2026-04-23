@@ -10,6 +10,7 @@ import (
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/store"
+	"github.com/hsadler/tprompt/internal/submitter"
 	"github.com/hsadler/tprompt/internal/tmux"
 	"github.com/hsadler/tprompt/internal/tui"
 )
@@ -154,8 +155,11 @@ func workingDeps(t *testing.T, fs *fakeStore) Deps {
 		NewDaemonClient: func(config.Resolved) (daemon.Client, error) {
 			return nil, ErrNotImplemented
 		},
-		NewRenderer: func(config.Resolved) (tui.Renderer, error) {
+		NewRenderer: func(config.Resolved, store.Store, submitter.Submitter) (tui.Renderer, error) {
 			return cancelRenderer{}, nil
+		},
+		NewSubmitter: func(config.Resolved, store.Store, daemon.Client, tmux.TargetContext) submitter.Submitter {
+			return noopSubmitter{}
 		},
 	}
 }
@@ -166,6 +170,13 @@ type cancelRenderer struct{}
 func (cancelRenderer) Run(tui.State) (tui.Result, error) {
 	return tui.Result{Action: tui.ActionCancel}, nil
 }
+
+// noopSubmitter is the default Submitter for test deps that never exercise a
+// submission. runTUI builds a Submitter before rendering (AUR-24), so cancel-
+// path tests still dereference NewSubmitter even though Submit is never called.
+type noopSubmitter struct{}
+
+func (noopSubmitter) Submit(tui.Result) error { return nil }
 
 func TestListPrintsIDsAlphabetically(t *testing.T) {
 	fs := &fakeStore{

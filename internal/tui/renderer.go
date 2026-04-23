@@ -43,5 +43,8 @@ func (r *bubbleRenderer) Run(state State) (Result, error) {
 	if !ok {
 		return Result{}, fmt.Errorf("tui: final model has unexpected type %T", final)
 	}
+	if err := fm.SubmitErr(); err != nil {
+		return fm.Result(), err
+	}
 	return fm.Result(), nil
 }

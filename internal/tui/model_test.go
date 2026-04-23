@@ -2,12 +2,15 @@ package tui
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"reflect"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/hsadler/tprompt/internal/store"
 )
 
 func sampleState() State {
@@ -397,5 +400,329 @@ func TestRenderer_RunUsesInjectedOutput(t *testing.T) {
 	}
 	if out.Len() == 0 {
 		t.Fatal("expected Bubble Tea to write to the injected output stream")
+	}
+}
+
+// --- AUR-24: prompt selection + oversize inline error --- //
+
+type fakeSubmitter struct {
+	calls []Result
+	err   error
+}
+
+func (f *fakeSubmitter) Submit(r Result) error {
+	f.calls = append(f.calls, r)
+	return f.err
+}
+
+type fakeStore struct {
+	bodies map[string]string
+	err    error
+}
+
+func (f *fakeStore) Discover() error                { return nil }
+func (f *fakeStore) List() ([]store.Summary, error) { return nil, nil }
+func (f *fakeStore) Resolve(id string) (store.Prompt, error) {
+	if f.err != nil {
+		return store.Prompt{}, f.err
+	}
+	body, ok := f.bodies[id]
+	if !ok {
+		return store.Prompt{}, &store.NotFoundError{ID: id}
+	}
+	return store.Prompt{Summary: store.Summary{ID: id}, Body: body}, nil
+}
+
+// runCmd drives the returned tea.Cmd to completion and returns the emitted msg.
+// Test-only shortcut for assertions against submitResultMsg.
+func runCmd(cmd tea.Cmd) tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	return cmd()
+}
+
+func promptDeps(bodies map[string]string, storeErr error, subErr error) (ModelDeps, *fakeSubmitter, *fakeStore) {
+	sub := &fakeSubmitter{err: subErr}
+	st := &fakeStore{bodies: bodies, err: storeErr}
+	return ModelDeps{
+		Submitter:     sub,
+		Store:         st,
+		MaxPasteBytes: 1 << 20,
+	}, sub, st
+}
+
+func TestUpdate_BoundKeySubmitsPromptAndQuits(t *testing.T) {
+	deps, sub, _ := promptDeps(map[string]string{"code-review": "body"}, nil, nil)
+	m := NewModel(sampleState(), deps)
+
+	next, cmd := m.Update(keyMsg("c"))
+	got := next.(Model)
+
+	// At this point we've fired the submit cmd but not yet received the
+	// submitResultMsg — result is still zero, inlineError cleared.
+	if got.inlineError != "" {
+		t.Fatalf("inlineError should be empty, got %q", got.inlineError)
+	}
+	if cmd == nil {
+		t.Fatal("expected submit cmd, got nil")
+	}
+
+	// Running the cmd should produce a submitResultMsg carrying ActionPrompt.
+	msg := runCmd(cmd)
+	sr, ok := msg.(submitResultMsg)
+	if !ok {
+		t.Fatalf("cmd emitted %T, want submitResultMsg", msg)
+	}
+	if sr.err != nil {
+		t.Fatalf("submitResultMsg.err = %v, want nil", sr.err)
+	}
+	if sr.result.Action != ActionPrompt || sr.result.PromptID != "code-review" {
+		t.Fatalf("submitResultMsg.result = %+v, want ActionPrompt/code-review", sr.result)
+	}
+	if len(sub.calls) != 1 {
+		t.Fatalf("Submitter.Submit called %d times, want 1", len(sub.calls))
+	}
+
+	// Feeding the msg back into Update sets Result and returns tea.Quit.
+	next2, cmd2 := got.Update(sr)
+	final := next2.(Model)
+	if final.result.Action != ActionPrompt || final.result.PromptID != "code-review" {
+		t.Fatalf("final result = %+v, want ActionPrompt/code-review", final.result)
+	}
+	if final.submitErr != nil {
+		t.Fatalf("submitErr = %v, want nil", final.submitErr)
+	}
+	if !cmdIsQuit(cmd2) {
+		t.Fatal("submitResultMsg must return tea.Quit")
+	}
+}
+
+func TestUpdate_BoundKeyUppercaseAlsoSubmits(t *testing.T) {
+	deps, sub, _ := promptDeps(map[string]string{"code-review": "body"}, nil, nil)
+	m := NewModel(sampleState(), deps)
+
+	_, cmd := m.Update(keyMsg("C")) // uppercase should fold to 'c'
+	if cmd == nil {
+		t.Fatal("uppercase bound key should fire submit cmd")
+	}
+	if msg := runCmd(cmd); msg == nil {
+		t.Fatal("cmd should emit a submitResultMsg")
+	}
+	if len(sub.calls) != 1 || sub.calls[0].PromptID != "code-review" {
+		t.Fatalf("Submitter.Submit calls = %+v, want one call for code-review", sub.calls)
+	}
+}
+
+func TestUpdate_UnassignedKeyPreservesInlineError(t *testing.T) {
+	deps, sub, _ := promptDeps(nil, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.inlineError = "prior error"
+
+	next, cmd := m.Update(keyMsg("z")) // not assigned to any row
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("expected nil cmd on unassigned key, got %T", cmd())
+	}
+	if got.inlineError != "prior error" {
+		t.Fatalf("inlineError = %q, want %q", got.inlineError, "prior error")
+	}
+	if len(sub.calls) != 0 {
+		t.Fatalf("Submitter.Submit must not be called on unassigned key, got %d calls", len(sub.calls))
+	}
+}
+
+func TestUpdate_OversizePromptSetsInlineErrorAndStaysOpen(t *testing.T) {
+	deps, sub, _ := promptDeps(map[string]string{"code-review": "xxxxxxxxxx"}, nil, nil)
+	deps.MaxPasteBytes = 4 // body length 10 > 4 triggers oversize
+	m := NewModel(sampleState(), deps)
+
+	next, cmd := m.Update(keyMsg("c"))
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("oversize path must not fire a cmd, got %T", cmd())
+	}
+	if got.inlineError == "" {
+		t.Fatal("oversize path must set inlineError")
+	}
+	if !strings.Contains(got.inlineError, "max_paste_bytes") {
+		t.Fatalf("inlineError should mention max_paste_bytes, got %q", got.inlineError)
+	}
+	if got.result.Action != "" {
+		t.Fatalf("result should not be set on oversize path, got %+v", got.result)
+	}
+	if len(sub.calls) != 0 {
+		t.Fatalf("Submitter.Submit must not be called on oversize path, got %d calls", len(sub.calls))
+	}
+}
+
+func TestUpdate_NavKeysPreserveInlineError(t *testing.T) {
+	deps, _, _ := promptDeps(nil, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.inlineError = "stale error"
+
+	for _, k := range []string{"down", "up"} {
+		next, _ := m.Update(keyMsg(k))
+		got := next.(Model)
+		if got.inlineError != "stale error" {
+			t.Fatalf("after %s: inlineError = %q, want stale error preserved", k, got.inlineError)
+		}
+		m = got
+	}
+}
+
+func TestUpdate_SearchKeyClearsInlineError(t *testing.T) {
+	deps, _, _ := promptDeps(nil, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.inlineError = "some error"
+
+	next, _ := m.Update(keyMsg("/"))
+	got := next.(Model)
+	if got.inlineError != "" {
+		t.Fatalf("search key must clear inlineError, got %q", got.inlineError)
+	}
+}
+
+func TestUpdate_ClipboardKeyClearsInlineError(t *testing.T) {
+	deps, _, _ := promptDeps(nil, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.inlineError = "some error"
+
+	next, _ := m.Update(keyMsg("p"))
+	got := next.(Model)
+	if got.inlineError != "" {
+		t.Fatalf("clipboard key must clear inlineError, got %q", got.inlineError)
+	}
+}
+
+func TestUpdate_CancelClearsInlineErrorAndQuits(t *testing.T) {
+	deps, _, _ := promptDeps(nil, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.inlineError = "some error"
+
+	next, cmd := m.Update(keyMsg("esc"))
+	got := next.(Model)
+	if got.inlineError != "" {
+		t.Fatalf("cancel must clear inlineError, got %q", got.inlineError)
+	}
+	if got.result.Action != ActionCancel {
+		t.Fatalf("Action = %q, want ActionCancel", got.result.Action)
+	}
+	if !cmdIsQuit(cmd) {
+		t.Fatal("Esc must return tea.Quit")
+	}
+}
+
+func TestUpdate_ValidSelectClearsExistingInlineError(t *testing.T) {
+	deps, sub, _ := promptDeps(map[string]string{"code-review": "ok"}, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.inlineError = "prior oversize error"
+
+	next, cmd := m.Update(keyMsg("c"))
+	got := next.(Model)
+	if got.inlineError != "" {
+		t.Fatalf("valid select must clear inlineError, got %q", got.inlineError)
+	}
+	if cmd == nil {
+		t.Fatal("valid select must fire submit cmd")
+	}
+	if msg := runCmd(cmd); msg == nil {
+		t.Fatal("submit cmd should emit a msg")
+	}
+	if len(sub.calls) != 1 {
+		t.Fatalf("Submitter.Submit calls = %d, want 1", len(sub.calls))
+	}
+}
+
+func TestUpdate_SubmitResultMsgSetsResultAndErrAndQuits(t *testing.T) {
+	deps, _, _ := promptDeps(nil, nil, nil)
+	m := NewModel(sampleState(), deps)
+
+	boom := errors.New("daemon down")
+	next, cmd := m.Update(submitResultMsg{
+		result: Result{Action: ActionPrompt, PromptID: "code-review"},
+		err:    boom,
+	})
+	got := next.(Model)
+
+	if got.result.Action != ActionPrompt || got.result.PromptID != "code-review" {
+		t.Fatalf("result = %+v, want ActionPrompt/code-review", got.result)
+	}
+	if !errors.Is(got.submitErr, boom) {
+		t.Fatalf("submitErr = %v, want %v", got.submitErr, boom)
+	}
+	if !cmdIsQuit(cmd) {
+		t.Fatal("submitResultMsg must return tea.Quit")
+	}
+}
+
+func TestUpdate_StoreResolveErrorBubblesViaSubmitErr(t *testing.T) {
+	notFound := &store.NotFoundError{ID: "code-review"}
+	deps, sub, _ := promptDeps(nil, notFound, nil)
+	m := NewModel(sampleState(), deps)
+
+	next, cmd := m.Update(keyMsg("c"))
+	got := next.(Model)
+
+	if !errors.Is(got.submitErr, notFound) {
+		t.Fatalf("submitErr = %v, want %v", got.submitErr, notFound)
+	}
+	if got.result.Action != ActionPrompt || got.result.PromptID != "code-review" {
+		t.Fatalf("result = %+v, want ActionPrompt/code-review", got.result)
+	}
+	if !cmdIsQuit(cmd) {
+		t.Fatal("Store.Resolve failure must return tea.Quit")
+	}
+	if len(sub.calls) != 0 {
+		t.Fatalf("Submitter.Submit must not be called when Resolve fails, got %d calls", len(sub.calls))
+	}
+}
+
+func TestView_InlineErrorPrependedToFooter(t *testing.T) {
+	deps, _, _ := promptDeps(nil, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.width = 80
+	m.inlineError = "body too large"
+
+	out := m.View()
+	if !strings.Contains(out, "body too large") {
+		t.Fatalf("view should include inline error. Got:\n%s", out)
+	}
+	// Assert ordering: error text precedes the mode-hint label in the footer.
+	errIdx := strings.Index(out, "body too large")
+	hintIdx := strings.Index(out, "[Esc cancel]")
+	if errIdx < 0 || hintIdx < 0 || errIdx >= hintIdx {
+		t.Fatalf("inline error must be prepended to hints (err=%d, hint=%d). Got:\n%s", errIdx, hintIdx, out)
+	}
+}
+
+func TestRenderer_RunSurfacesSubmitErrFromFinalModel(t *testing.T) {
+	boom := errors.New("daemon down")
+	sub := &fakeSubmitter{err: boom}
+	st := &fakeStore{bodies: map[string]string{"code-review": "ok"}}
+	deps := ModelDeps{
+		Submitter:     sub,
+		Store:         st,
+		MaxPasteBytes: 1 << 20,
+	}
+	// "c" selects the code-review row; the Model invokes fakeSubmitter.Submit
+	// which returns boom. The Model then transitions to tea.Quit with
+	// submitErr set, which Renderer.Run must surface.
+	r := NewRenderer(deps, ProgramIO{
+		Input:  strings.NewReader("c"),
+		Output: io.Discard,
+	})
+
+	result, err := r.Run(sampleState())
+	if !errors.Is(err, boom) {
+		t.Fatalf("Run() err = %v, want %v", err, boom)
+	}
+	if result.Action != ActionPrompt || result.PromptID != "code-review" {
+		t.Fatalf("Run() result = %+v, want ActionPrompt/code-review", result)
+	}
+	if len(sub.calls) != 1 {
+		t.Fatalf("Submitter.Submit calls = %d, want 1", len(sub.calls))
 	}
 }

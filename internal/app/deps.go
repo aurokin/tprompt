@@ -32,7 +32,7 @@ type Deps struct {
 	NewTmux          func() (tmux.Adapter, error)
 	NewClip          func(cfg config.Resolved) (clipboard.Reader, error)
 	NewDaemonClient  func(cfg config.Resolved) (daemon.Client, error)
-	NewRenderer      func(cfg config.Resolved) (tui.Renderer, error)
+	NewRenderer      func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error)
 	NewSubmitter     func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter
 }
 
@@ -81,11 +81,13 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 		NewDaemonClient: func(cfg config.Resolved) (daemon.Client, error) {
 			return daemon.NewSocketClient(cfg.SocketPath), nil
 		},
-		NewRenderer: func(cfg config.Resolved) (tui.Renderer, error) {
+		NewRenderer: func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error) {
 			if spec := lookupEnv("TPROMPT_TEST_RENDERER"); spec != "" {
 				return parseTestRenderer(spec)
 			}
 			return tui.NewRenderer(tui.ModelDeps{
+				Submitter:     sub,
+				Store:         prompts,
 				MaxPasteBytes: cfg.MaxPasteBytes,
 			}, tui.ProgramIO{
 				Input:  stdin,
