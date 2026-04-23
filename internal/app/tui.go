@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
@@ -79,24 +78,16 @@ func runTUI(deps Deps, f tuiFlags) error {
 
 	state := buildTUIState(summaries, cfg)
 
-	// Only build the clipboard Reader when the clipboard key is enabled —
-	// users without pbpaste/xclip but clipboard disabled in config shouldn't
-	// be blocked at startup by a clipboard autodetect failure.
-	var clip clipboard.Reader
-	if !reservedBinding("clipboard", cfg).Disabled {
-		clip, err = deps.NewClip(cfg)
-		if err != nil {
-			return err
-		}
-	}
-
 	// Build the Submitter up front so it can be injected into the Renderer.
 	// The real Model invokes Submit via a tea.Cmd for ActionPrompt and
 	// ActionClipboard alike; the stub clipboard Renderer (used by
 	// TPROMPT_TEST_RENDERER) also calls Submit itself, so runTUI never
-	// re-submits here regardless of which Renderer ran.
+	// re-submits here regardless of which Renderer ran. Clipboard-reader
+	// construction is deferred to the production branch inside
+	// ProductionDeps.NewRenderer so stub-renderer testscripts don't regress
+	// on hosts without a clipboard tool.
 	sub := deps.NewSubmitter(cfg, s, client, target)
-	renderer, err := deps.NewRenderer(cfg, s, sub, clip)
+	renderer, err := deps.NewRenderer(cfg, s, sub)
 	if err != nil {
 		return err
 	}

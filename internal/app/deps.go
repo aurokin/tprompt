@@ -32,7 +32,7 @@ type Deps struct {
 	NewTmux          func() (tmux.Adapter, error)
 	NewClip          func(cfg config.Resolved) (clipboard.Reader, error)
 	NewDaemonClient  func(cfg config.Resolved) (daemon.Client, error)
-	NewRenderer      func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter, clip clipboard.Reader) (tui.Renderer, error)
+	NewRenderer      func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error)
 	NewSubmitter     func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter
 }
 
@@ -73,17 +73,22 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 			return tmux.New(tmux.NewExecRunner("")), nil
 		},
 		NewClip: func(cfg config.Resolved) (clipboard.Reader, error) {
-			if len(cfg.ClipboardArgv) > 0 {
-				return clipboard.NewCommand(cfg.ClipboardArgv), nil
-			}
-			return clipboard.NewAutoDetect(lookupEnv, exec.LookPath)
+			return newClipboardReader(cfg, lookupEnv)
 		},
 		NewDaemonClient: func(cfg config.Resolved) (daemon.Client, error) {
 			return daemon.NewSocketClient(cfg.SocketPath), nil
 		},
-		NewRenderer: func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter, clip clipboard.Reader) (tui.Renderer, error) {
+		NewRenderer: func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error) {
+			// Stub renderers (TPROMPT_TEST_RENDERER) never touch the real
+			// clipboard, so build the Reader only for the production path.
+			// Otherwise hosts without pbpaste/wl-paste/xclip/xsel would fail
+			// startup for every stub-renderer testscript.
 			if spec := lookupEnv("TPROMPT_TEST_RENDERER"); spec != "" {
 				return parseTestRenderer(spec, sub)
+			}
+			clip, err := newClipboardReader(cfg, lookupEnv)
+			if err != nil {
+				return nil, err
 			}
 			return tui.NewRenderer(tui.ModelDeps{
 				Submitter:     sub,
@@ -99,6 +104,18 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 			return submitter.New(prompts, client, cfg, target)
 		},
 	}
+}
+
+// newClipboardReader builds the clipboard.Reader used by both `Deps.NewClip`
+// (for non-TUI commands like `paste`/`doctor`) and the production TUI
+// Renderer. Extracted so the TUI factory can defer construction until after
+// the `TPROMPT_TEST_RENDERER` shortcut, sparing stub-renderer testscripts
+// from hard-failing on hosts with no pbpaste/wl-paste/xclip/xsel.
+func newClipboardReader(cfg config.Resolved, getenv func(string) string) (clipboard.Reader, error) {
+	if len(cfg.ClipboardArgv) > 0 {
+		return clipboard.NewCommand(cfg.ClipboardArgv), nil
+	}
+	return clipboard.NewAutoDetect(getenv, exec.LookPath)
 }
 
 // cancelStubRenderer is retained for TPROMPT_TEST_RENDERER=cancel; production

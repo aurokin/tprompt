@@ -71,12 +71,7 @@ func tuiDeps(t *testing.T, fs *fakeStore, rend tui.Renderer, cfgOverride ...func
 	deps.NewTmux = func() (tmux.Adapter, error) {
 		return &fakeAdapter{paneExists: true}, nil
 	}
-	deps.NewClip = func(config.Resolved) (clipboard.Reader, error) {
-		// runTUI builds a Reader when the clipboard binding is enabled; the
-		// recordingRenderer never invokes it, so a nil Reader is sufficient.
-		return nil, nil
-	}
-	deps.NewRenderer = func(_ config.Resolved, _ store.Store, sub submitter.Submitter, _ clipboard.Reader) (tui.Renderer, error) {
+	deps.NewRenderer = func(_ config.Resolved, _ store.Store, sub submitter.Submitter) (tui.Renderer, error) {
 		// Inject the real Submitter so recordingRenderer.Run can call Submit
 		// the same way the production bubbleRenderer does via tea.Cmd.
 		if rr, ok := rend.(*recordingRenderer); ok {
