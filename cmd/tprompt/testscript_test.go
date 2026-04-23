@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/hsadler/tprompt/internal/app"
@@ -32,12 +34,14 @@ func TestScript(t *testing.T) {
 			env.Vars = append(env.Vars, "SHORT_TMPDIR="+d)
 			env.Defer(func() {
 				// Belt-and-suspenders cleanup: if a script aborts before its
-				// own `exec tmux kill-server`, kill any tmux server scoped
-				// strictly to this test's TMUX_TMPDIR so it cannot leak.
-				// Errors (including "no server running") are ignored — this
-				// path only talks to the per-test socket directory.
-				kill := exec.Command("tmux", "kill-server")
-				kill.Env = append(os.Environ(), "TMUX_TMPDIR="+d)
+				// own `exec tmux kill-server`, kill any tmux server started on
+				// this test's socket. Use -S with the explicit socket path so
+				// tmux's socket resolution cannot fall back to the host's
+				// server via $TMUX, $TMUX_TMPDIR, $TMPDIR, or any other env
+				// var. Errors (including "no server running") are ignored —
+				// this is best-effort cleanup, not a test assertion.
+				sock := filepath.Join(d, fmt.Sprintf("tmux-%d", os.Getuid()), "default")
+				kill := exec.Command("tmux", "-S", sock, "kill-server")
 				_ = kill.Run()
 				_ = os.RemoveAll(d)
 			})
