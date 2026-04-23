@@ -37,6 +37,10 @@ func tuiDeps(t *testing.T, fs *fakeStore, rend tui.Renderer, cfgOverride ...func
 				'p': "clipboard",
 				'/': "search",
 			},
+			ReservedSymbolic: map[string]string{
+				"cancel": "Esc",
+				"select": "Enter",
+			},
 		}
 		for _, fn := range cfgOverride {
 			fn(&cfg)
@@ -131,8 +135,17 @@ func TestTUI_BuildsStateFromStore(t *testing.T) {
 		t.Fatalf("overflow mismatch: %+v", rend.state.Overflow)
 	}
 
-	if role := rend.state.Reserved['p']; role != "clipboard" {
-		t.Fatalf("reserved map should include clipboard, got %q", role)
+	if got := rend.state.Reserved.Clipboard.Printable; got != 'p' {
+		t.Fatalf("clipboard reserved printable = %q, want %q", got, 'p')
+	}
+	if got := rend.state.Reserved.Search.Printable; got != '/' {
+		t.Fatalf("search reserved printable = %q, want %q", got, '/')
+	}
+	if got := rend.state.Reserved.Cancel.Symbolic; got != "Esc" {
+		t.Fatalf("cancel reserved symbolic = %q, want Esc", got)
+	}
+	if got := rend.state.Reserved.Select.Symbolic; got != "Enter" {
+		t.Fatalf("select reserved symbolic = %q, want Enter", got)
 	}
 }
 
@@ -153,6 +166,37 @@ func TestTUI_StateOmitsClipboardRowWhenKeyDisabled(t *testing.T) {
 	}
 	if len(rend.state.Rows) != 1 || rend.state.Rows[0].PromptID != "alpha" {
 		t.Fatalf("want single board row alpha, got %+v", rend.state.Rows)
+	}
+}
+
+func TestTUI_StateBuildsSymbolicReservedBindings(t *testing.T) {
+	fs := &fakeStore{
+		summaries: []store.Summary{
+			{ID: "alpha", Key: "1"},
+		},
+	}
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, fs, rend, func(c *config.Resolved) {
+		c.ReservedPrintable = map[rune]string{'/': "search"}
+		c.ReservedSymbolic = map[string]string{
+			"clipboard": "Tab",
+			"cancel":    "Space",
+			"select":    "Enter",
+		}
+	})
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(rend.state.Rows) != 1 || rend.state.Rows[0].PromptID != "alpha" {
+		t.Fatalf("clipboard row must stay omitted for symbolic clipboard binding, got %+v", rend.state.Rows)
+	}
+	if got := rend.state.Reserved.Clipboard.Symbolic; got != "Tab" {
+		t.Fatalf("clipboard reserved symbolic = %q, want Tab", got)
+	}
+	if got := rend.state.Reserved.Cancel.Symbolic; got != "Space" {
+		t.Fatalf("cancel reserved symbolic = %q, want Space", got)
 	}
 }
 

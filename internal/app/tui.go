@@ -101,6 +101,7 @@ func runTUI(deps Deps, f tuiFlags) error {
 // buildTUIState assembles the State the Renderer sees: pinned clipboard row,
 // alphabetically-sorted board rows, overflow rows, and the reserved-key map.
 func buildTUIState(summaries []store.Summary, cfg config.Resolved) tui.State {
+	reserved := reservedKeys(cfg)
 	var board, overflow []tui.Row
 	for _, sum := range summaries {
 		row := tui.Row{
@@ -120,7 +121,7 @@ func buildTUIState(summaries []store.Summary, cfg config.Resolved) tui.State {
 	// that order for both slices.
 
 	rows := make([]tui.Row, 0, len(board)+1)
-	if clipKey, ok := clipboardKey(cfg.ReservedPrintable); ok {
+	if clipKey, ok := clipboardKey(reserved); ok {
 		rows = append(rows, tui.Row{
 			Key:         clipKey,
 			Description: "(read on select)",
@@ -131,19 +132,39 @@ func buildTUIState(summaries []store.Summary, cfg config.Resolved) tui.State {
 	return tui.State{
 		Rows:     rows,
 		Overflow: overflow,
-		Reserved: cfg.ReservedPrintable,
+		Reserved: reserved,
 	}
 }
 
-// clipboardKey finds the reserved printable rune assigned to the clipboard
-// action. Returns ok=false if the clipboard key is disabled in config.
-func clipboardKey(reserved map[rune]string) (rune, bool) {
-	for r, role := range reserved {
-		if role == "clipboard" {
-			return r, true
+func reservedKeys(cfg config.Resolved) tui.ReservedKeys {
+	return tui.ReservedKeys{
+		Clipboard: reservedBinding("clipboard", cfg),
+		Search:    reservedBinding("search", cfg),
+		Cancel:    reservedBinding("cancel", cfg),
+		Select:    reservedBinding("select", cfg),
+	}
+}
+
+func reservedBinding(role string, cfg config.Resolved) tui.ReservedBinding {
+	if symbolic, ok := cfg.ReservedSymbolic[role]; ok {
+		return tui.ReservedBinding{Symbolic: symbolic}
+	}
+	for r, gotRole := range cfg.ReservedPrintable {
+		if gotRole == role {
+			return tui.ReservedBinding{Printable: r}
 		}
 	}
-	return 0, false
+	return tui.ReservedBinding{Disabled: true}
+}
+
+// clipboardKey finds the reserved printable rune assigned to the clipboard
+// action. Returns ok=false if the clipboard key is disabled or symbolic in
+// config; the current board row format only supports printable clipboard keys.
+func clipboardKey(reserved tui.ReservedKeys) (rune, bool) {
+	if reserved.Clipboard.Disabled || reserved.Clipboard.Printable == 0 {
+		return 0, false
+	}
+	return reserved.Clipboard.Printable, true
 }
 
 func buildTUITarget(f tuiFlags) tmux.TargetContext {

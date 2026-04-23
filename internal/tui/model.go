@@ -85,16 +85,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Catch Ctrl+C explicitly before bubbletea's default SIGINT path so the
 	// cancel Result is captured instead of surfacing as ErrProgramKilled.
-	switch msg.String() {
-	case "ctrl+c", "esc":
+	switch {
+	case msg.Type == tea.KeyCtrlC, matchesReserved(msg, m.state.Reserved.Cancel):
 		m.result = Result{Action: ActionCancel}
 		return m, tea.Quit
-	case "up":
+	case msg.Type == tea.KeyUp:
 		if m.cursor > 0 {
 			m.cursor--
 		}
 		return m, nil
-	case "down":
+	case msg.Type == tea.KeyDown:
 		if m.cursor < len(m.state.Rows)-1 {
 			m.cursor++
 		}
@@ -180,12 +180,34 @@ func truncateToWidth(s string, maxWidth int) string {
 
 func (m Model) footer() string {
 	if m.isEmptyStore() {
-		if clip, ok := clipboardRow(m.state.Rows); ok {
-			return fmt.Sprintf("no prompts found — press %s for clipboard or Esc to exit", string(clip.Key))
-		}
-		return "no prompts found — press Esc to exit"
+		return m.emptyStoreFooter()
 	}
-	return "[/ search]  [Esc cancel]"
+	var parts []string
+	if search := footerHint(m.state.Reserved.Search, "search"); search != "" {
+		parts = append(parts, search)
+	}
+	if cancel := footerHint(m.state.Reserved.Cancel, "cancel"); cancel != "" {
+		parts = append(parts, cancel)
+	}
+	return strings.Join(parts, "  ")
+}
+
+func (m Model) emptyStoreFooter() string {
+	const prefix = "no prompts found"
+	if clip, ok := clipboardRow(m.state.Rows); ok {
+		clipHint := displayReserved(ReservedBinding{Printable: clip.Key})
+		cancelHint := displayReserved(m.state.Reserved.Cancel)
+		switch {
+		case clipHint != "" && cancelHint != "":
+			return fmt.Sprintf("%s — press %s for clipboard or %s to exit", prefix, clipHint, cancelHint)
+		case clipHint != "":
+			return fmt.Sprintf("%s — press %s for clipboard", prefix, clipHint)
+		}
+	}
+	if cancelHint := displayReserved(m.state.Reserved.Cancel); cancelHint != "" {
+		return fmt.Sprintf("%s — press %s to exit", prefix, cancelHint)
+	}
+	return prefix
 }
 
 // isEmptyStore reports whether the prompt pool is empty: either no rows at all

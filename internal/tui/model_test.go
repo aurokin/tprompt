@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"bytes"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,10 +13,16 @@ import (
 func sampleState() State {
 	return State{
 		Rows: []Row{
-			{Key: 'P', Description: "(read on select)"},
+			{Key: 'p', Description: "(read on select)"},
 			{Key: '1', PromptID: "alpha", Description: "first"},
 			{Key: '2', PromptID: "beta", Description: "second"},
 			{Key: 'c', PromptID: "code-review", Title: "Code Review"},
+		},
+		Reserved: ReservedKeys{
+			Clipboard: ReservedBinding{Printable: 'p'},
+			Search:    ReservedBinding{Printable: '/'},
+			Cancel:    ReservedBinding{Symbolic: "Esc"},
+			Select:    ReservedBinding{Symbolic: "Enter"},
 		},
 	}
 }
@@ -29,6 +37,12 @@ func keyMsg(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyUp}
 	case "down":
 		return tea.KeyMsg{Type: tea.KeyDown}
+	case "tab":
+		return tea.KeyMsg{Type: tea.KeyTab}
+	case "enter":
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	case "space":
+		return tea.KeyMsg{Type: tea.KeySpace}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 	}
@@ -66,6 +80,52 @@ func TestUpdate_CtrlCOnBoardCancelsAndQuits(t *testing.T) {
 	}
 	if !cmdIsQuit(cmd) {
 		t.Fatal("Ctrl+C must return tea.Quit")
+	}
+}
+
+func TestUpdate_RemappedPrintableCancelOnBoardCancelsAndQuits(t *testing.T) {
+	state := sampleState()
+	state.Reserved.Cancel = ReservedBinding{Printable: 'x'}
+	m := NewModel(state, ModelDeps{})
+	next, cmd := m.Update(keyMsg("x"))
+	got := next.(Model)
+
+	if got.result.Action != ActionCancel {
+		t.Fatalf("Action = %q, want %q", got.result.Action, ActionCancel)
+	}
+	if !cmdIsQuit(cmd) {
+		t.Fatal("remapped cancel must return tea.Quit")
+	}
+}
+
+func TestUpdate_SymbolicTabCancelOnBoardCancelsAndQuits(t *testing.T) {
+	state := sampleState()
+	state.Reserved.Cancel = ReservedBinding{Symbolic: "Tab"}
+	m := NewModel(state, ModelDeps{})
+	next, cmd := m.Update(keyMsg("tab"))
+	got := next.(Model)
+
+	if got.result.Action != ActionCancel {
+		t.Fatalf("Action = %q, want %q", got.result.Action, ActionCancel)
+	}
+	if !cmdIsQuit(cmd) {
+		t.Fatal("tab cancel must return tea.Quit")
+	}
+}
+
+func TestUpdate_EscDoesNotCancelWhenCancelIsRemapped(t *testing.T) {
+	state := sampleState()
+	state.Reserved.Cancel = ReservedBinding{Printable: 'x'}
+	m := NewModel(state, ModelDeps{})
+	before := m
+	next, cmd := m.Update(keyMsg("esc"))
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("expected nil cmd, got %T", cmd())
+	}
+	if !reflect.DeepEqual(got, before) {
+		t.Fatalf("Esc should be noop when cancel is remapped: got %+v want %+v", got, before)
 	}
 }
 
@@ -123,7 +183,13 @@ func TestUpdate_WindowSizeMsgStoresDimensions(t *testing.T) {
 }
 
 func TestView_EmptyStoreShowsClipboardHint(t *testing.T) {
-	state := State{Rows: []Row{{Key: 'P', Description: "(read on select)"}}}
+	state := State{
+		Rows: []Row{{Key: 'p', Description: "(read on select)"}},
+		Reserved: ReservedKeys{
+			Clipboard: ReservedBinding{Printable: 'p'},
+			Cancel:    ReservedBinding{Symbolic: "Esc"},
+		},
+	}
 	m := NewModel(state, ModelDeps{})
 	m.width = 80
 
@@ -134,7 +200,13 @@ func TestView_EmptyStoreShowsClipboardHint(t *testing.T) {
 }
 
 func TestView_EmptyStoreHintUsesResolvedClipboardKey(t *testing.T) {
-	state := State{Rows: []Row{{Key: 'X'}}}
+	state := State{
+		Rows: []Row{{Key: 'x'}},
+		Reserved: ReservedKeys{
+			Clipboard: ReservedBinding{Printable: 'x'},
+			Cancel:    ReservedBinding{Symbolic: "Esc"},
+		},
+	}
 	m := NewModel(state, ModelDeps{})
 	m.width = 80
 
@@ -147,7 +219,13 @@ func TestView_EmptyStoreAndClipboardDisabledOmitsClipboardHint(t *testing.T) {
 	// With clipboard disabled in config, buildTUIState omits the pinned
 	// clipboard row entirely. The footer must not advertise a clipboard
 	// shortcut that does not exist.
-	m := NewModel(State{Rows: nil}, ModelDeps{})
+	m := NewModel(State{
+		Rows: nil,
+		Reserved: ReservedKeys{
+			Clipboard: ReservedBinding{Disabled: true},
+			Cancel:    ReservedBinding{Symbolic: "Esc"},
+		},
+	}, ModelDeps{})
 	m.width = 80
 
 	out := m.View()
@@ -159,6 +237,41 @@ func TestView_EmptyStoreAndClipboardDisabledOmitsClipboardHint(t *testing.T) {
 	}
 }
 
+func TestView_EmptyStoreUsesResolvedCancelKey(t *testing.T) {
+	m := NewModel(State{
+		Rows: []Row{{Key: 'x', Description: "(read on select)"}},
+		Reserved: ReservedKeys{
+			Clipboard: ReservedBinding{Printable: 'x'},
+			Cancel:    ReservedBinding{Symbolic: "Tab"},
+		},
+	}, ModelDeps{})
+	m.width = 80
+
+	out := m.View()
+	if !strings.Contains(out, "press X for clipboard or Tab to exit") {
+		t.Fatalf("empty-store footer must use resolved cancel key. Got:\n%s", out)
+	}
+}
+
+func TestView_EmptyStoreOmitsDisabledCancelHint(t *testing.T) {
+	m := NewModel(State{
+		Rows: []Row{{Key: 'x', Description: "(read on select)"}},
+		Reserved: ReservedKeys{
+			Clipboard: ReservedBinding{Printable: 'x'},
+			Cancel:    ReservedBinding{Disabled: true},
+		},
+	}, ModelDeps{})
+	m.width = 80
+
+	out := m.View()
+	if strings.Contains(out, "to exit") {
+		t.Fatalf("disabled cancel must not be advertised. Got:\n%s", out)
+	}
+	if !strings.Contains(out, "press X for clipboard") {
+		t.Fatalf("clipboard hint missing. Got:\n%s", out)
+	}
+}
+
 func TestView_NonEmptyShowsBoardFooter(t *testing.T) {
 	m := NewModel(sampleState(), ModelDeps{})
 	m.width = 80
@@ -166,6 +279,32 @@ func TestView_NonEmptyShowsBoardFooter(t *testing.T) {
 	out := m.View()
 	if !strings.Contains(out, "[/ search]") || !strings.Contains(out, "[Esc cancel]") {
 		t.Fatalf("board footer missing. Got:\n%s", out)
+	}
+}
+
+func TestView_NonEmptyFooterUsesResolvedReservedKeys(t *testing.T) {
+	state := sampleState()
+	state.Reserved.Search = ReservedBinding{Symbolic: "Tab"}
+	state.Reserved.Cancel = ReservedBinding{Printable: 'x'}
+	m := NewModel(state, ModelDeps{})
+	m.width = 80
+
+	out := m.View()
+	if !strings.Contains(out, "[Tab search]") || !strings.Contains(out, "[X cancel]") {
+		t.Fatalf("board footer must use resolved reserved keys. Got:\n%s", out)
+	}
+}
+
+func TestView_NonEmptyFooterOmitsDisabledHints(t *testing.T) {
+	state := sampleState()
+	state.Reserved.Search = ReservedBinding{Disabled: true}
+	state.Reserved.Cancel = ReservedBinding{Disabled: true}
+	m := NewModel(state, ModelDeps{})
+	m.width = 80
+
+	out := m.View()
+	if strings.Contains(out, "search]") || strings.Contains(out, "cancel]") {
+		t.Fatalf("disabled reserved hints must be omitted. Got:\n%s", out)
 	}
 }
 
@@ -228,5 +367,35 @@ func TestTruncateToWidth(t *testing.T) {
 				t.Fatalf("truncateToWidth(%q, %d) = %q, want %q", tc.in, tc.width, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRenderer_RunUsesInjectedInput(t *testing.T) {
+	r := NewRenderer(ModelDeps{}, ProgramIO{
+		Input:  strings.NewReader("\x1b"),
+		Output: io.Discard,
+	})
+
+	got, err := r.Run(sampleState())
+	if err != nil {
+		t.Fatalf("Run() unexpected error: %v", err)
+	}
+	if got.Action != ActionCancel {
+		t.Fatalf("Action = %q, want %q", got.Action, ActionCancel)
+	}
+}
+
+func TestRenderer_RunUsesInjectedOutput(t *testing.T) {
+	var out bytes.Buffer
+	r := NewRenderer(ModelDeps{}, ProgramIO{
+		Input:  strings.NewReader("\x03"),
+		Output: &out,
+	})
+
+	if _, err := r.Run(sampleState()); err != nil {
+		t.Fatalf("Run() unexpected error: %v", err)
+	}
+	if out.Len() == 0 {
+		t.Fatal("expected Bubble Tea to write to the injected output stream")
 	}
 }

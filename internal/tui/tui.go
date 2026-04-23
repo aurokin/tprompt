@@ -27,7 +27,24 @@ type Result struct {
 type State struct {
 	Rows     []Row
 	Overflow []Row
-	Reserved map[rune]string
+	Reserved ReservedKeys
+}
+
+// ReservedBinding is a resolved reserved-key role: either a printable rune, a
+// symbolic key name, or disabled.
+type ReservedBinding struct {
+	Printable rune
+	Symbolic  string
+	Disabled  bool
+}
+
+// ReservedKeys groups the TUI's reserved-key roles so matching and footer
+// rendering can share one source of truth.
+type ReservedKeys struct {
+	Clipboard ReservedBinding
+	Search    ReservedBinding
+	Cancel    ReservedBinding
+	Select    ReservedBinding
 }
 
 // Row is a single keybind-board entry.

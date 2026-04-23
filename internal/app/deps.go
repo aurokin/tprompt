@@ -87,6 +87,9 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 			}
 			return tui.NewRenderer(tui.ModelDeps{
 				MaxPasteBytes: cfg.MaxPasteBytes,
+			}, tui.ProgramIO{
+				Input:  stdin,
+				Output: stdout,
 			}), nil
 		},
 		NewSubmitter: func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter {
