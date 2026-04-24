@@ -178,9 +178,8 @@ Read first:
 
 Goal: land the two content-source/transformation modules. The sanitizer is
 fully wired into `tprompt send` in this phase. The clipboard reader is built
-and wired into `Deps.NewClip`, but has no CLI caller until Phase 5.5
-(`tprompt paste`) and Phase 5b (TUI `P`). `tprompt send` never reads the
-clipboard.
+and wired into `Deps.NewClip`; later phases use it from `tprompt paste` and
+the TUI clipboard row. `tprompt send` never reads the clipboard.
 
 Status: complete
 
@@ -234,7 +233,8 @@ Locked decisions (resolved during plan review):
   `$PATH` without touching the real host
 - add a shared `clipboard.Validate(content []byte, cap int64) error` helper
   (empty / non-UTF-8 / oversize) using the error strings locked in
-  `docs/implementation/error-handling.md`; consumed by Phase 5.5 and 5b
+  `docs/implementation/error-handling.md`; consumed by `tprompt paste` and the
+  TUI clipboard row
 - tests: platform/env selection, X11 fallback order, command-reader stdout
   capture, non-zero-exit stderr surfacing, `Validate` matrix
 
@@ -243,8 +243,7 @@ Locked decisions (resolved during plan review):
 - replace `Deps.NewClip` stub in `internal/app/deps.go`:
   - if `cfg.ClipboardArgv` non-empty → `clipboard.NewCommand(cfg.ClipboardArgv)`
   - else → `clipboard.NewAutoDetect(...)`
-- no CLI caller yet; the wiring exists so Phase 5.5 and 5b have a seam and
-  `doctor` can share the resolution logic
+- this wiring is shared by `tprompt paste`, the TUI, and `doctor`
 
 ### Doctor
 
@@ -406,8 +405,8 @@ Read first:
 ## Phase 5 — TUI flow and built-in TUI
 
 Goal: make the TUI flow (typically launched from a tmux popup) the best
-experience. Phase 5a ships the command shell and submission path with a
-cancel-only stub `Renderer`; Phase 5b swaps in the real bubbletea TUI.
+experience. Phase 5a shipped the command shell and submission path; Phase 5b
+replaced the temporary test/stub renderer with the real Bubble Tea TUI.
 
 Libraries introduced in Phase 5:
 
@@ -464,7 +463,7 @@ Locked decisions (resolved during plan review):
 
 ### Phase 5a — TUI command shell
 
-Status: planned.
+Status: complete.
 
 - register `tprompt tui` with flags `--target-pane` (required), `--client-tty`
   (optional), `--session-id` (optional); remove the `ErrNotImplemented` stub
@@ -476,26 +475,26 @@ Status: planned.
   - check `--target-pane` exists via tmux adapter; missing → `ExitTmux` (4)
   - build `tui.State` (board rows alphabetical by id, overflow rows,
     reserved-key map, clipboard-row hint)
+  - build a `Submitter` and inject it into the renderer
   - call `Renderer.Run(state)` → `tui.Result`
-  - on `ActionCancel` return nil (exit 0); on selection dispatch to
-    `Submitter.Submit(result)`
+  - on `ActionCancel` return nil (exit 0); prompt/clipboard submissions are
+    performed inside the renderer/model via the injected `Submitter`
 - extend `tui.Result` with `ClipboardBody []byte` for `ActionClipboard` so the
   bytes captured by the TUI travel through to the daemon (the daemon never
   reads the clipboard itself)
-- implement `Submitter` in `internal/tui/` (deep module):
+- implement `Submitter` in `internal/submitter/`:
   - for `ActionPrompt`: resolve from store, run
     `config.ResolveDelivery(cfg, frontmatter, nil)`, check body ≤
-    `max_paste_bytes` (returns typed `BodyTooLargeError` that the Renderer can
-    surface inline without exiting), build `SubmitRequest` with verification
-    policy from config, dial `daemon.Client`, return on non-`Accepted`
+    `max_paste_bytes` (returns typed `BodyTooLargeError`), build
+    `SubmitRequest` with verification policy from config, dial
+    `daemon.Client`, return on non-`Accepted`
   - for `ActionClipboard`: same as above but with `Source = clipboard`,
     `Body = result.ClipboardBody`, `PromptID`/`SourcePath` empty; no store
     resolution
-- add `Deps.NewRenderer func(state tui.State, submitter tui.Submitter)
-  tui.Renderer` to `internal/app/deps.go`; production returns a cancel-stub
-  `Renderer` whose `Run` immediately yields `Result{Action: ActionCancel}`;
-  tests override this factory to inject canned results and observe the
-  captured `SubmitRequest`
+- add `Deps.NewRenderer func(cfg config.Resolved, prompts store.Store,
+  submitter submitter.Submitter) (tui.Renderer, error)` to
+  `internal/app/deps.go`; tests can still inject canned renderers and observe
+  captured `SubmitRequest` values
 - implement the store metadata escape-stripper in `internal/store/`:
   - strip the same escape classes as the `safe` sanitizer from `title`,
     `description`, and each `tags` entry at load
@@ -516,7 +515,7 @@ Status: planned.
 
 ### Phase 5b — built-in Bubble Tea TUI
 
-Status: planned.
+Status: complete.
 
 - replace the cancel-stub `Renderer` in `app.ProductionDeps.NewRenderer` with
   a production implementation that wraps `tea.NewProgram(model).Run()` and
@@ -600,6 +599,8 @@ Read first:
 
 ## Phase 5.5 — `tprompt paste`
 
+Status: complete.
+
 Goal: dedicated clipboard-delivery command, synchronous, no daemon.
 
 Tasks:
@@ -630,7 +631,7 @@ Tasks:
 - add tests for clipboard reader detection and override
 - add tests for CLI exit codes (including cancel = 0)
 - add fake/mock tmux adapter tests for paste + type command construction
-- add TUI rendering tests
+- add focused TUI model/view tests where gaps remain
 - document known limitations clearly (same-host clipboard, no modifier keybinds, no live clipboard preview)
 
 Read first:

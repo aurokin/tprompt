@@ -82,6 +82,24 @@ func (s staticReader) Read() ([]byte, error) { return []byte(s), nil }
 
 type commandReader struct{ argv []string }
 
+// ReadError wraps failures from the configured clipboard reader command.
+// Callers use the type to classify clipboard read failures without parsing the
+// user-facing error string.
+type ReadError struct {
+	Command string
+	Err     error
+	Stderr  string
+}
+
+func (e *ReadError) Error() string {
+	if e.Stderr == "" {
+		return fmt.Sprintf("clipboard reader %q failed: %v", e.Command, e.Err)
+	}
+	return fmt.Sprintf("clipboard reader %q failed: %v: %s", e.Command, e.Err, e.Stderr)
+}
+
+func (e *ReadError) Unwrap() error { return e.Err }
+
 func (c *commandReader) Read() ([]byte, error) {
 	if len(c.argv) == 0 {
 		return nil, errors.New("clipboard: empty argv")
@@ -95,10 +113,7 @@ func (c *commandReader) Read() ([]byte, error) {
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		msg := bytes.TrimRight(stderr.Bytes(), "\n")
-		if len(msg) == 0 {
-			return nil, fmt.Errorf("clipboard reader %q failed: %w", c.argv[0], err)
-		}
-		return nil, fmt.Errorf("clipboard reader %q failed: %w: %s", c.argv[0], err, msg)
+		return nil, &ReadError{Command: c.argv[0], Err: err, Stderr: string(msg)}
 	}
 	return stdout.Bytes(), nil
 }

@@ -27,7 +27,7 @@ Example:
 [c]  code-merge           Merge review prompt
 ```
 
-The clipboard row is **always first** and is pinned. It has no description content; it may render a short hint such as `(read on select)`.
+When the clipboard action is bound to a printable reserved key, the clipboard row is **first** and pinned. It has no prompt id; it may render a short hint such as `(read on select)`. If the clipboard reserved key is disabled or symbolic, the board omits the pinned clipboard row, but clipboard remains reachable from the empty-query search catalog.
 
 ## Reserved keys
 
@@ -66,6 +66,8 @@ Triggered by `/`. All prompts (including overflow) are searchable — search is 
 - **Matching:** fuzzy (fzf-style). Typing `cmv` matches `code-merge-verification`.
 - **Scope:** `id + title + description + tags`. Body content is **not** indexed.
 - **Ranking:** `id` match beats `title` match beats `description` match beats `tags` match. Within the same field, tighter/earlier matches rank higher.
+- **Empty query:** shows the full catalog alphabetically, with the clipboard row first when clipboard is available.
+- **Non-empty query:** searches prompts only; the clipboard row is omitted because it has no searchable content.
 - **Exit search:** `Esc` to leave search and return to the board.
 - **Select in search:** `Enter` delivers the highlighted match.
 
@@ -82,7 +84,7 @@ Triggered by `/`. All prompts (including overflow) are searchable — search is 
 
 The TUI renders a single-line footer showing context-sensitive hints:
 
-- board view: `[/ search]  [Esc cancel]`
+- board view: `[/ search]  [Esc cancel]`, or `[/ search (N more)]  [Esc cancel]` when overflow exists
 - search view: `/query    [Esc exit search]  [Enter select]  [N matches]`
 - error view: `clipboard is empty — choose another option  [Esc cancel]`
 

@@ -79,16 +79,28 @@ func ExitCode(err error) int {
 		return ExitPrompt
 	}
 
-	// Clipboard content errors from the Submitter. Oversize clipboard content
-	// is translated to *submitter.BodyTooLargeError (handled above); the
-	// oversize-from-clipboard.Validate case (Phase 6 `paste`) is not wired
-	// here yet because it has no caller in Phase 5a.
+	if errors.Is(err, clipboard.ErrNoReaderAvailable) {
+		return ExitPrompt
+	}
+	var clipRead *clipboard.ReadError
+	if errors.As(err, &clipRead) {
+		return ExitPrompt
+	}
+
+	// Clipboard content errors from the TUI clipboard row and `tprompt paste`.
+	// The Submitter translates oversize clipboard content to
+	// *submitter.BodyTooLargeError; `paste` sees clipboard.OversizeError
+	// directly from clipboard.Validate.
 	var clipEmpty *clipboard.EmptyClipboardError
 	if errors.As(err, &clipEmpty) {
 		return ExitPrompt
 	}
 	var clipUTF8 *clipboard.InvalidUTF8Error
 	if errors.As(err, &clipUTF8) {
+		return ExitPrompt
+	}
+	var clipOversize *clipboard.OversizeError
+	if errors.As(err, &clipOversize) {
 		return ExitPrompt
 	}
 

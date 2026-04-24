@@ -82,7 +82,7 @@ A correct MVP implementation should satisfy all of the following.
 - unit tests for sanitizer modes against fixture escape sequences
 - unit tests for fuzzy search ranking
 - integration-ish tests for tmux command construction (bracketed paste and `send-keys -l`)
-- rendering tests for TUI row layout and overflow
+- model/view tests for TUI row layout and overflow
 - test coverage for error conditions
 
 ## Non-goals for MVP

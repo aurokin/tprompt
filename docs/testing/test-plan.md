@@ -99,12 +99,12 @@ Test:
 - `display-message` is called with `-c <client-tty>` when available, without `-c` otherwise
 - size cap rejection happens before any tmux command runs
 
-## TUI rendering tests
+## TUI model/view tests
 
 - three-column row layout with correct widths
 - description soft-truncates with ellipsis to fit terminal width
 - description falls back to title when missing, then blank
-- clipboard row is always first
+- clipboard row is first when present
 - reserved keys render in footer hints correctly
 - `/`-search switches mode and renders query input
 - overflow prompts are not shown in the board but appear in search results
@@ -112,6 +112,8 @@ Test:
 - `Esc` from search returns to board
 - `P` keypress returns `clipboard` action
 - prompt keypress returns `prompt` action with correct `prompt_id`
+
+The current strategy is pure `Update` and focused `View` unit coverage. There is no golden-file or teatest suite for the Bubble Tea program shell.
 
 ## CLI tests
 

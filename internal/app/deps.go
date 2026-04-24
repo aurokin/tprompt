@@ -27,6 +27,7 @@ type Deps struct {
 
 	ConfigPath       *string
 	LoadConfig       func(explicitPath string) (config.Resolved, error)
+	LoadPasteConfig  func(explicitPath string) (config.Resolved, error)
 	LoadDaemonConfig func(explicitPath string) (config.Resolved, error)
 	NewStore         func(cfg config.Resolved) (store.Store, error)
 	NewTmux          func() (tmux.Adapter, error)
@@ -39,32 +40,14 @@ type Deps struct {
 // ProductionDeps returns a Deps wired for real execution.
 func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 	return Deps{
-		Stdout:   stdout,
-		Stderr:   stderr,
-		Stdin:    stdin,
-		Env:      lookupEnv,
-		LookPath: exec.LookPath,
-		LoadConfig: func(explicitPath string) (config.Resolved, error) {
-			cfg, path, err := config.LoadOrDefault(explicitPath, lookupEnv)
-			if err != nil {
-				return config.Resolved{}, err
-			}
-			r, err := config.Normalize(cfg, path)
-			if err != nil {
-				return config.Resolved{}, err
-			}
-			if err := config.Validate(r); err != nil {
-				return config.Resolved{}, err
-			}
-			return r, nil
-		},
-		LoadDaemonConfig: func(explicitPath string) (config.Resolved, error) {
-			cfg, path, err := config.LoadOrDefault(explicitPath, lookupEnv)
-			if err != nil {
-				return config.Resolved{}, err
-			}
-			return config.ResolveDaemon(cfg, path), nil
-		},
+		Stdout:           stdout,
+		Stderr:           stderr,
+		Stdin:            stdin,
+		Env:              lookupEnv,
+		LookPath:         exec.LookPath,
+		LoadConfig:       productionLoadConfig,
+		LoadPasteConfig:  productionLoadPasteConfig,
+		LoadDaemonConfig: productionLoadDaemonConfig,
 		NewStore: func(cfg config.Resolved) (store.Store, error) {
 			s := store.NewFS(cfg.PromptsDir, cfg.ReservedPrintable, cfg.KeybindPool)
 			return s, nil
@@ -107,6 +90,37 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 			return submitter.New(prompts, client, cfg, target)
 		},
 	}
+}
+
+func productionLoadConfig(explicitPath string) (config.Resolved, error) {
+	return loadNormalizedConfig(explicitPath, config.Validate)
+}
+
+func productionLoadPasteConfig(explicitPath string) (config.Resolved, error) {
+	return loadNormalizedConfig(explicitPath, config.ValidatePaste)
+}
+
+func loadNormalizedConfig(explicitPath string, validate func(config.Resolved) error) (config.Resolved, error) {
+	cfg, path, err := config.LoadOrDefault(explicitPath, lookupEnv)
+	if err != nil {
+		return config.Resolved{}, err
+	}
+	r, err := config.Normalize(cfg, path)
+	if err != nil {
+		return config.Resolved{}, err
+	}
+	if err := validate(r); err != nil {
+		return config.Resolved{}, err
+	}
+	return r, nil
+}
+
+func productionLoadDaemonConfig(explicitPath string) (config.Resolved, error) {
+	cfg, path, err := config.LoadOrDefault(explicitPath, lookupEnv)
+	if err != nil {
+		return config.Resolved{}, err
+	}
+	return config.ResolveDaemon(cfg, path), nil
 }
 
 // newClipboardReader builds the clipboard.Reader used by both `Deps.NewClip`

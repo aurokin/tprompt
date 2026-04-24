@@ -25,10 +25,10 @@ This bundle is organized for **progressive disclosure**:
 The distinguishing feature is the **deferred TUI flow**:
 
 - user opens `tprompt` in a tmux popup (or anywhere else)
-- user picks a prompt
+- user picks a prompt or the clipboard row
 - TUI exits
 - daemon waits for the target pane to become the active target again
-- daemon injects the prompt text
+- daemon injects the selected content
 
 This avoids fragile sleep-based behavior.
 

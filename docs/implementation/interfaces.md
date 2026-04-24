@@ -63,19 +63,53 @@ TUIRenderer
 - Run(state TUIState) -> TUIResult | error
 
 TUIState {
-  bindings: KeybindAssignment
-  overflow: []PromptSummary        // reachable via search
-  reserved: map<char, ReservedAction>
-  pool: []char
+  rows: []TUIRow                   // board rows; printable clipboard row, when present, is first
+  overflow: []TUIRow               // prompts hidden from board; reachable via search
+  reserved: ReservedKeys           // clipboard, search, cancel, select
+  clipboard_available: bool        // true when clipboard can still appear in search
+}
+
+TUIRow {
+  key: char?                       // absent for overflow/search-only rows
+  prompt_id: string?               // absent for clipboard row
+  title: string?
+  description: string?
+  tags: []string
+}
+
+ReservedKeys {
+  clipboard: ReservedBinding
+  search: ReservedBinding
+  cancel: ReservedBinding
+  select: ReservedBinding
+}
+
+ReservedBinding {
+  printable: char?
+  symbolic: string?                // e.g. Esc, Enter, Tab, Space
+  disabled: bool
 }
 
 TUIResult {
   action: "prompt" | "clipboard" | "cancel"
   prompt_id: string?               // when action == "prompt"
+  clipboard_body: []byte?          // when action == "clipboard"
+}
+
+TUIModelDeps {
+  submitter: Submitter             // invoked by the Model via tea.Cmd
+  clipboard_reader: ClipboardReader?
+  prompt_store: PromptStore
+  max_paste_bytes: integer
 }
 ```
 
-The TUI returns a result; the caller then resolves content (prompt body or clipboard bytes) and submits the daemon job.
+The production TUI model owns recoverable selection handling. It resolves prompt bodies, reads clipboard content, validates `max_paste_bytes`, and invokes the injected `Submitter` via a Bubble Tea command. `Renderer.Run` returns the final `TUIResult` plus any submit error so the command layer can apply normal exit-code mapping.
+
+```text
+Submitter
+- Submit(result TUIResult) -> error
+```
 
 ## Keybind resolver
 
@@ -94,7 +128,6 @@ DaemonClient
 
 DaemonServer
 - Start() -> error
-- Stop() -> error
 ```
 
 ## Verification engine

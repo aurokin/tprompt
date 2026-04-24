@@ -181,6 +181,9 @@ func fakeDeps(t *testing.T) Deps {
 		LoadConfig: func(string) (config.Resolved, error) {
 			return config.Resolved{}, ErrNotImplemented
 		},
+		LoadPasteConfig: func(string) (config.Resolved, error) {
+			return config.Resolved{}, ErrNotImplemented
+		},
 		NewStore: func(config.Resolved) (store.Store, error) {
 			return nil, ErrNotImplemented
 		},

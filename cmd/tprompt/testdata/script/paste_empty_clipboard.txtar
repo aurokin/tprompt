@@ -1,0 +1,8 @@
+# paste rejects empty clipboard output before touching tmux.
+
+! tprompt paste --config config.toml --target-pane %1
+stderr 'clipboard is empty'
+! stdout .
+
+-- config.toml --
+clipboard_read_command = "sh -c true"

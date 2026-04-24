@@ -231,7 +231,25 @@ func Validate(r Resolved) error {
 	if r.PromptsDir == "" {
 		return &ValidationError{Field: "prompts_dir", Message: "must be set"}
 	}
+	if err := validateDeliveryConfig(r); err != nil {
+		return err
+	}
 
+	if r.SocketPath == "" {
+		return &ValidationError{Field: "socket_path", Message: "must be set"}
+	}
+
+	return nil
+}
+
+// ValidatePaste checks the subset of config needed by standalone clipboard
+// delivery. It intentionally does not require prompts_dir because `tprompt
+// paste` never opens the prompt store.
+func ValidatePaste(r Resolved) error {
+	return validateDeliveryConfig(r)
+}
+
+func validateDeliveryConfig(r Resolved) error {
 	switch r.DefaultMode {
 	case "paste", "type":
 	default:
@@ -248,10 +266,6 @@ func Validate(r Resolved) error {
 			Field:   "sanitize",
 			Message: fmt.Sprintf("invalid value %q: must be off, safe, or strict", r.Sanitize),
 		}
-	}
-
-	if r.SocketPath == "" {
-		return &ValidationError{Field: "socket_path", Message: "must be set"}
 	}
 
 	if r.MaxPasteBytes <= 0 {

@@ -39,14 +39,14 @@ Implemented contract:
 
 ## Post-injection check
 
-Optional but recommended for MVP:
+Deferred beyond the current MVP:
 
 - capture pane tail before injection
 - inject content
 - capture pane tail after injection
 - verify the captured text changed
 
-This does **not** prove semantic success. It only proves that the pane output changed after delivery.
+This does **not** prove semantic success. It only proves that the pane output changed after delivery. The tmux adapter exposes capture support, but the daemon does not currently run this post-injection check.
 
 ## Timeout guidance
 

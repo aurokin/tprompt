@@ -1,0 +1,10 @@
+# paste rejects clipboard content over max_paste_bytes before sanitizing or
+# touching tmux.
+
+! tprompt paste --config config.toml --target-pane %1 --sanitize safe
+stderr 'clipboard content exceeds max_paste_bytes \(6 > 5\)'
+! stdout .
+
+-- config.toml --
+clipboard_read_command = "printf abcdef"
+max_paste_bytes = 5

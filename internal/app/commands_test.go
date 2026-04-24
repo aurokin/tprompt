@@ -50,9 +50,6 @@ func TestZeroArgCommandsAcceptBareInvocation(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "list", args: []string{"list"}},
-		{name: "paste", args: []string{"paste"}},
-		{name: "doctor", args: []string{"doctor"}},
 		{name: "pick", args: []string{"pick"}},
 	}
 
@@ -134,6 +131,14 @@ func workingDeps(t *testing.T, fs *fakeStore) Deps {
 		LoadConfig: func(string) (config.Resolved, error) {
 			return config.Resolved{
 				PromptsDir: "/test/prompts",
+			}, nil
+		},
+		LoadPasteConfig: func(string) (config.Resolved, error) {
+			return config.Resolved{
+				PromptsDir:    "/test/prompts",
+				DefaultMode:   "paste",
+				Sanitize:      "off",
+				MaxPasteBytes: 1 << 20,
 			}, nil
 		},
 		LoadDaemonConfig: func(string) (config.Resolved, error) {

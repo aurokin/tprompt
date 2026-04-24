@@ -65,9 +65,9 @@ The reader returns raw bytes. Validation runs in a shared helper
 - not valid UTF-8 → `clipboard content is not valid UTF-8 text`
 - exceeds `max_paste_bytes` → `clipboard content exceeds max_paste_bytes (N > max_paste_bytes)`
 
-The helper is called by `tprompt paste` (Phase 5.5) and by the TUI clipboard
-row (Phase 5b). It lives in `internal/clipboard` alongside the reader so the
-error strings stay in one place.
+The helper is called by `tprompt paste` and by the TUI clipboard row. It lives
+in `internal/clipboard` alongside the reader so the error strings stay in one
+place.
 
 ## `doctor` checks
 

@@ -173,6 +173,10 @@ func TestNewCommand_NonZeroSurfacesStderr(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
+	var readErr *ReadError
+	if !errors.As(err, &readErr) {
+		t.Fatalf("want ReadError, got %T: %v", err, err)
+	}
 	if !strings.Contains(err.Error(), "boom") {
 		t.Errorf("error missing stderr text: %v", err)
 	}

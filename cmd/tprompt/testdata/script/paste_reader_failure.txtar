@@ -1,0 +1,8 @@
+# paste reports clipboard reader command failures as prompt/content errors.
+
+! tprompt paste --config config.toml --target-pane %1
+stderr 'clipboard reader "tprompt-nonexistent-clipboard-reader" failed'
+! stdout .
+
+-- config.toml --
+clipboard_read_command = "tprompt-nonexistent-clipboard-reader"

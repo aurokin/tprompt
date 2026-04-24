@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/sanitize"
@@ -208,17 +209,134 @@ func resolveSendTarget(flagValue string, adapter tmux.Adapter, env func(string) 
 }
 
 func newPasteCmd(deps Deps) *cobra.Command {
-	return &cobra.Command{
+	var (
+		targetPane   string
+		mode         string
+		pressEnter   bool
+		sanitizeFlag string
+	)
+	cmd := &cobra.Command{
 		Use:   "paste",
 		Short: "Deliver the host clipboard into a tmux pane synchronously",
 		Args:  cobra.NoArgs,
-		RunE: func(*cobra.Command, []string) error {
-			if _, err := deps.LoadConfig(*deps.ConfigPath); err != nil {
-				return err
+		RunE: func(c *cobra.Command, _ []string) error {
+			f := pasteFlags{targetPane: targetPane}
+			if c.Flags().Changed("mode") {
+				f.mode = &mode
 			}
-			return ErrNotImplemented
+			if c.Flags().Changed("enter") {
+				f.pressEnter = &pressEnter
+			}
+			if c.Flags().Changed("sanitize") {
+				f.sanitize = &sanitizeFlag
+			}
+			return runPaste(deps, f)
 		},
 	}
+	cmd.Flags().StringVar(&targetPane, "target-pane", "", "tmux pane ID to deliver into")
+	cmd.Flags().StringVar(&mode, "mode", "", "delivery mode: paste or type")
+	cmd.Flags().BoolVar(&pressEnter, "enter", false, "press Enter after delivery")
+	cmd.Flags().StringVar(&sanitizeFlag, "sanitize", "", "sanitize mode: off, safe, or strict")
+	return cmd
+}
+
+type pasteFlags struct {
+	targetPane string
+	mode       *string
+	pressEnter *bool
+	sanitize   *string
+}
+
+func runPaste(deps Deps, f pasteFlags) error {
+	cfg, err := deps.LoadPasteConfig(*deps.ConfigPath)
+	if err != nil {
+		return err
+	}
+
+	delivery, err := config.ResolveDelivery(cfg, config.FrontmatterDefaults{}, config.DeliveryFlags{
+		Mode:     f.mode,
+		Enter:    f.pressEnter,
+		Sanitize: f.sanitize,
+	})
+	if err != nil {
+		return err
+	}
+
+	adapter, target, err := resolvePasteTarget(deps, f.targetPane)
+	if err != nil {
+		return err
+	}
+
+	reader, err := deps.NewClip(cfg)
+	if err != nil {
+		return err
+	}
+	body, err := reader.Read()
+	if err != nil {
+		return err
+	}
+	if err := clipboard.Validate(body, cfg.MaxPasteBytes); err != nil {
+		return err
+	}
+	cleaned, err := sanitize.New(sanitize.Mode(delivery.Sanitize)).Process(body)
+	if err != nil {
+		return err
+	}
+
+	adapter, err = ensurePasteAdapterAndTarget(deps, adapter, f.targetPane, target)
+	if err != nil {
+		return err
+	}
+
+	switch delivery.Mode {
+	case "paste":
+		return adapter.Paste(context.Background(), target, string(cleaned), delivery.Enter)
+	case "type":
+		return adapter.Type(context.Background(), target, string(cleaned), delivery.Enter)
+	default:
+		return fmt.Errorf("internal error: unresolved delivery mode %q", delivery.Mode)
+	}
+}
+
+func resolvePasteTarget(deps Deps, targetPane string) (tmux.Adapter, tmux.TargetContext, error) {
+	if targetPane != "" {
+		return nil, tmux.TargetContext{PaneID: targetPane}, nil
+	}
+	adapter, err := deps.NewTmux()
+	if err != nil {
+		return nil, tmux.TargetContext{}, err
+	}
+	target, err := resolveSendTarget(targetPane, adapter, deps.Env)
+	if err != nil {
+		return nil, tmux.TargetContext{}, err
+	}
+	return adapter, target, nil
+}
+
+func ensurePasteAdapterAndTarget(
+	deps Deps,
+	adapter tmux.Adapter,
+	targetPane string,
+	target tmux.TargetContext,
+) (tmux.Adapter, error) {
+	if adapter == nil {
+		var err error
+		adapter, err = deps.NewTmux()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if targetPane == "" {
+		return adapter, nil
+	}
+	exists, err := adapter.PaneExists(context.Background(), target.PaneID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, &tmux.PaneMissingError{PaneID: target.PaneID}
+	}
+	return adapter, nil
 }
 
 func newDoctorCmd(deps Deps) *cobra.Command {

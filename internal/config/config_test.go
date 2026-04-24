@@ -478,6 +478,46 @@ func TestValidateRejectsNonPositiveMaxPasteBytes(t *testing.T) {
 	assertValidationField(t, Validate(r), "max_paste_bytes")
 }
 
+func TestValidatePasteAcceptsEmptyPromptsDir(t *testing.T) {
+	r := validResolved(t)
+	r.PromptsDir = ""
+	if err := ValidatePaste(r); err != nil {
+		t.Fatalf("ValidatePaste: %v", err)
+	}
+}
+
+func TestValidatePasteRejectsDeliveryConfigErrors(t *testing.T) {
+	cases := []struct {
+		name  string
+		mut   func(*Resolved)
+		field string
+	}{
+		{
+			name:  "invalid mode",
+			mut:   func(r *Resolved) { r.DefaultMode = "yolo" },
+			field: "default_mode",
+		},
+		{
+			name:  "invalid sanitize",
+			mut:   func(r *Resolved) { r.Sanitize = "maybe" },
+			field: "sanitize",
+		},
+		{
+			name:  "non-positive max paste bytes",
+			mut:   func(r *Resolved) { r.MaxPasteBytes = 0 },
+			field: "max_paste_bytes",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := validResolved(t)
+			r.PromptsDir = ""
+			tc.mut(&r)
+			assertValidationField(t, ValidatePaste(r), tc.field)
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // parseReservedKey tests
 // ---------------------------------------------------------------------------

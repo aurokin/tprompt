@@ -92,6 +92,7 @@ Notes:
 DeferredJob {
   job_id: string
   created_at: timestamp
+  submitter_pid: integer?
   request: DeliveryRequest
   verification_policy: VerificationPolicy
 }
@@ -101,13 +102,12 @@ DeferredJob {
 
 ```text
 VerificationPolicy {
-  require_target_pane_exists: true
-  require_tui_process_exit: true
-  require_selected_pane_match: bool
-  require_post_injection_change_check: bool
   timeout_ms: integer
+  poll_interval_ms: integer
 }
 ```
+
+The require-style behavior is baked into the MVP daemon rather than expressed as wire fields: verify target pane existence, wait for the submitter process to exit when `submitter_pid` is present, then verify pane selection before delivery. Post-injection capture-pane verification is deferred.
 
 ## Replacement semantics
 
