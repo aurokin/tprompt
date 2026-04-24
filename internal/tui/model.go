@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
@@ -36,6 +37,39 @@ func submitCmd(sub Submitter, result Result) tea.Cmd {
 	}
 }
 
+// clipboardReadMsg carries the outcome of an async clipboard Read + Validate
+// back into Update. err is non-nil for empty/non-UTF-8/oversize or reader
+// failure; body is the validated bytes on success.
+type clipboardReadMsg struct {
+	body []byte
+	err  error
+}
+
+// errClipboardUnavailable is surfaced as a clipboardReadMsg error when the
+// Model was constructed without a clipboard.Reader. Production never trips
+// this (buildTUIState omits the clipboard row + matchesReserved ignores a
+// disabled binding), but zero-value ModelDeps in tests or bespoke wiring
+// should degrade to an inline footer error rather than panicking.
+var errClipboardUnavailable = errors.New("clipboard is unavailable — choose another option")
+
+// readClipboardCmd returns a tea.Cmd that invokes the injected Reader and
+// validates the result against the paste limit, emitting clipboardReadMsg.
+func readClipboardCmd(r clipboard.Reader, limit int64) tea.Cmd {
+	return func() tea.Msg {
+		if r == nil {
+			return clipboardReadMsg{err: errClipboardUnavailable}
+		}
+		body, err := r.Read()
+		if err != nil {
+			return clipboardReadMsg{err: err}
+		}
+		if err := clipboard.Validate(body, limit); err != nil {
+			return clipboardReadMsg{err: err}
+		}
+		return clipboardReadMsg{body: body}
+	}
+}
+
 // ModelDeps are the capabilities the Model reaches into during event handling.
 // Phase 5b slices beyond the tracer bullet (AUR-24, AUR-25) populate these;
 // the tracer bullet leaves the Submitter/Clip/Store fields zero-valued because
@@ -59,17 +93,18 @@ const (
 
 // Model is the single bubbletea model for the TUI.
 type Model struct {
-	state         State
-	deps          ModelDeps
-	mode          mode
-	cursor        int
-	scrollOffset  int
-	width         int
-	height        int
-	result        Result
-	inlineError   string
-	submitErr     error
-	pendingSubmit bool
+	state            State
+	deps             ModelDeps
+	mode             mode
+	cursor           int
+	scrollOffset     int
+	width            int
+	height           int
+	result           Result
+	inlineError      string
+	submitErr        error
+	pendingSubmit    bool
+	pendingClipboard bool
 }
 
 // headerLines and footerLines are the fixed chrome subtracted from terminal
@@ -150,6 +185,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.result = msg.result
 		m.submitErr = msg.err
 		return m, tea.Quit
+	case clipboardReadMsg:
+		m.pendingClipboard = false
+		if msg.err != nil {
+			m.inlineError = clipboardErrorText(msg.err)
+			return m, nil
+		}
+		m.pendingSubmit = true
+		return m, submitCmd(m.deps.Submitter, Result{
+			Action:        ActionClipboard,
+			ClipboardBody: msg.body,
+		})
 	case tea.KeyMsg:
 		switch m.mode {
 		case modeBoard:
@@ -188,11 +234,19 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.state.Rows), m.rowsPerFrame())
 		}
 		return m, nil
-	case matchesReserved(msg, m.state.Reserved.Search),
-		matchesReserved(msg, m.state.Reserved.Clipboard):
-		// AUR-25/26 will wire these keys to actual behavior. For AUR-24 they
-		// are real actions in the §19 sense and must clear inlineError so the
-		// error-lifecycle contract holds now rather than later.
+	case matchesReserved(msg, m.state.Reserved.Clipboard):
+		// Ignore re-presses while an async read or submit is already in
+		// flight — prevents key repeat from enqueuing duplicate reads or
+		// racing the submit that follows a successful read.
+		if m.pendingClipboard || m.pendingSubmit {
+			return m, nil
+		}
+		m.inlineError = ""
+		m.pendingClipboard = true
+		return m, readClipboardCmd(m.deps.Clip, m.deps.MaxPasteBytes)
+	case matchesReserved(msg, m.state.Reserved.Search):
+		// AUR-26 will wire /-search. Treat the keypress as a real action for
+		// the §19 inline-error-lifecycle contract now rather than later.
 		m.inlineError = ""
 		return m, nil
 	}
@@ -206,8 +260,10 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) tryPromptSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Gate prompt selection while a submit is in flight. Without this a slow
 	// Submitter combined with key repeat could enqueue multiple submitCmds
-	// and produce duplicate daemon submissions from one interaction.
-	if m.pendingSubmit {
+	// and produce duplicate daemon submissions from one interaction. Same
+	// treatment for an in-flight clipboard read: a prompt keypress arriving
+	// between the read cmd and clipboardReadMsg would race the pending flow.
+	if m.pendingSubmit || m.pendingClipboard {
 		return m, nil
 	}
 	if msg.Type != tea.KeyRunes || len(msg.Runes) != 1 {
@@ -249,6 +305,23 @@ func (m Model) selectPrompt(id string) (tea.Model, tea.Cmd) {
 	m.inlineError = ""
 	m.pendingSubmit = true
 	return m, submitCmd(m.deps.Submitter, Result{Action: ActionPrompt, PromptID: id})
+}
+
+// clipboardErrorText maps a clipboard read/validate error to the inline
+// footer text shown after a failed P-press. The empty-clipboard string is
+// fixed by user story 17; the other two follow the same "— choose another
+// option" pattern so the footer stays consistent across validation failures.
+func clipboardErrorText(err error) string {
+	switch e := err.(type) {
+	case *clipboard.EmptyClipboardError:
+		return "clipboard is empty — choose another option"
+	case *clipboard.InvalidUTF8Error:
+		return "clipboard contains non-UTF-8 data — choose another option"
+	case *clipboard.OversizeError:
+		return fmt.Sprintf("clipboard exceeds max_paste_bytes (%d > %d) — choose another option", e.Bytes, e.Limit)
+	default:
+		return err.Error()
+	}
 }
 
 // promptKeyMatches implements the case-insensitive keybind contract: letters
