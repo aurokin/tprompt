@@ -32,7 +32,7 @@ type Deps struct {
 	NewTmux          func() (tmux.Adapter, error)
 	NewClip          func(cfg config.Resolved) (clipboard.Reader, error)
 	NewDaemonClient  func(cfg config.Resolved) (daemon.Client, error)
-	NewRenderer      func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter, clip clipboard.Reader) (tui.Renderer, error)
+	NewRenderer      func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error)
 	NewSubmitter     func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter
 }
 
@@ -73,22 +73,36 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 			return tmux.New(tmux.NewExecRunner("")), nil
 		},
 		NewClip: func(cfg config.Resolved) (clipboard.Reader, error) {
-			if len(cfg.ClipboardArgv) > 0 {
-				return clipboard.NewCommand(cfg.ClipboardArgv), nil
-			}
-			return clipboard.NewAutoDetect(lookupEnv, exec.LookPath)
+			return newClipboardReader(cfg, lookupEnv)
 		},
 		NewDaemonClient: func(cfg config.Resolved) (daemon.Client, error) {
 			return daemon.NewSocketClient(cfg.SocketPath), nil
 		},
-		NewRenderer: func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter, clip clipboard.Reader) (tui.Renderer, error) {
+		NewRenderer: func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error) {
+			// Stub renderers (TPROMPT_TEST_RENDERER) never touch the real
+			// clipboard, so build the Reader only for the production path.
+			// Otherwise hosts without pbpaste/wl-paste/xclip/xsel would fail
+			// startup for every stub-renderer testscript.
 			if spec := lookupEnv("TPROMPT_TEST_RENDERER"); spec != "" {
-				return parseTestRenderer(spec)
+				return parseTestRenderer(spec, sub)
+			}
+			// Also skip when the clipboard binding is disabled in config:
+			// no clipboard row is pinned, no keypress will match the
+			// clipboard key (matchesReserved short-circuits on Disabled),
+			// and forcing users in minimal environments through an
+			// autodetect failure would block valid non-clipboard TUI usage.
+			var clip clipboard.Reader
+			if !reservedBinding("clipboard", cfg).Disabled {
+				var err error
+				clip, err = newClipboardReader(cfg, lookupEnv)
+				if err != nil {
+					return nil, err
+				}
 			}
 			return tui.NewRenderer(tui.ModelDeps{
 				Submitter:     sub,
-				Store:         prompts,
 				Clip:          clip,
+				Store:         prompts,
 				MaxPasteBytes: cfg.MaxPasteBytes,
 			}, tui.ProgramIO{
 				Input:  stdin,
@@ -99,6 +113,18 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 			return submitter.New(prompts, client, cfg, target)
 		},
 	}
+}
+
+// newClipboardReader builds the clipboard.Reader used by both `Deps.NewClip`
+// (for non-TUI commands like `paste`/`doctor`) and the production TUI
+// Renderer. Extracted so the TUI factory can defer construction until after
+// the `TPROMPT_TEST_RENDERER` shortcut, sparing stub-renderer testscripts
+// from hard-failing on hosts with no pbpaste/wl-paste/xclip/xsel.
+func newClipboardReader(cfg config.Resolved, getenv func(string) string) (clipboard.Reader, error) {
+	if len(cfg.ClipboardArgv) > 0 {
+		return clipboard.NewCommand(cfg.ClipboardArgv), nil
+	}
+	return clipboard.NewAutoDetect(getenv, exec.LookPath)
 }
 
 // cancelStubRenderer is retained for TPROMPT_TEST_RENDERER=cancel; production
@@ -116,20 +142,31 @@ func (cancelStubRenderer) Run(tui.State) (tui.Result, error) {
 //
 //	cancel              → ActionCancel
 //	clipboard:<body>    → ActionClipboard with ClipboardBody = <body>
-func parseTestRenderer(spec string) (tui.Renderer, error) {
+//
+// The clipboard stub performs its own Submit so runTUI's ActionClipboard
+// branch can mirror the real-renderer path (no direct submit), matching the
+// AUR-24 ActionPrompt pattern where the Model owns submission.
+func parseTestRenderer(spec string, sub submitter.Submitter) (tui.Renderer, error) {
 	switch {
 	case spec == "cancel":
 		return cancelStubRenderer{}, nil
 	case strings.HasPrefix(spec, "clipboard:"):
 		body := spec[len("clipboard:"):]
-		return staticClipboardRenderer{body: []byte(body)}, nil
+		return staticClipboardRenderer{body: []byte(body), sub: sub}, nil
 	default:
 		return nil, fmt.Errorf("TPROMPT_TEST_RENDERER: unsupported spec %q", spec)
 	}
 }
 
-type staticClipboardRenderer struct{ body []byte }
+type staticClipboardRenderer struct {
+	body []byte
+	sub  submitter.Submitter
+}
 
 func (r staticClipboardRenderer) Run(tui.State) (tui.Result, error) {
-	return tui.Result{Action: tui.ActionClipboard, ClipboardBody: r.body}, nil
+	result := tui.Result{Action: tui.ActionClipboard, ClipboardBody: r.body}
+	if r.sub == nil {
+		return result, nil
+	}
+	return result, r.sub.Submit(result)
 }

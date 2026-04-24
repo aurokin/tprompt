@@ -263,8 +263,11 @@ func TestUpdate_SearchEnterOnClipboardRowTriggersClipboardPath(t *testing.T) {
 	next, cmd := m.Update(keyMsg("enter"))
 	got := next.(Model)
 
-	if !got.pendingSubmit {
-		t.Fatal("Enter on clip row must set pendingSubmit")
+	if !got.pendingClipboard {
+		t.Fatal("Enter on clip row must set pendingClipboard")
+	}
+	if got.pendingSubmit {
+		t.Fatal("Enter on clip row must not set pendingSubmit until after the read")
 	}
 	if cmd == nil {
 		t.Fatal("Enter on clip row must return a clipboard read cmd")
@@ -459,7 +462,7 @@ func TestUpdate_SearchCancelIgnoredWhilePending(t *testing.T) {
 
 func TestUpdate_ClipboardReadMsgOnErrorSetsInlineError(t *testing.T) {
 	m := NewModel(searchStateWithRows([]Row{{Key: '1', PromptID: "alpha"}}, nil), ModelDeps{})
-	m.pendingSubmit = true
+	m.pendingClipboard = true
 
 	next, cmd := m.Update(clipboardReadMsg{err: errors.New("clipboard is empty")})
 	got := next.(Model)
@@ -467,8 +470,8 @@ func TestUpdate_ClipboardReadMsgOnErrorSetsInlineError(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("error clipboardReadMsg must not emit a cmd, got %T", cmd())
 	}
-	if got.pendingSubmit {
-		t.Fatal("error clipboardReadMsg must clear pendingSubmit")
+	if got.pendingClipboard {
+		t.Fatal("error clipboardReadMsg must clear pendingClipboard")
 	}
 	if !strings.Contains(got.inlineError, "clipboard is empty") {
 		t.Fatalf("inlineError = %q, want error text", got.inlineError)
@@ -478,13 +481,16 @@ func TestUpdate_ClipboardReadMsgOnErrorSetsInlineError(t *testing.T) {
 func TestUpdate_ClipboardReadMsgOnSuccessFiresSubmitCmd(t *testing.T) {
 	deps, sub, _ := promptDeps(nil, nil, nil)
 	m := NewModel(searchStateWithRows([]Row{{Key: '1', PromptID: "alpha"}}, nil), deps)
-	m.pendingSubmit = true
+	m.pendingClipboard = true
 
 	next, cmd := m.Update(clipboardReadMsg{body: []byte("pasted")})
 	got := next.(Model)
 
+	if got.pendingClipboard {
+		t.Fatal("success clipboardReadMsg must clear pendingClipboard")
+	}
 	if !got.pendingSubmit {
-		t.Fatal("success clipboardReadMsg must keep pendingSubmit until submitResultMsg")
+		t.Fatal("success clipboardReadMsg must set pendingSubmit until submitResultMsg")
 	}
 	if cmd == nil {
 		t.Fatal("success clipboardReadMsg must return submitCmd")
@@ -502,26 +508,6 @@ func TestUpdate_ClipboardReadMsgOnSuccessFiresSubmitCmd(t *testing.T) {
 	}
 	if len(sub.calls) != 1 {
 		t.Fatalf("Submit called %d times, want 1", len(sub.calls))
-	}
-}
-
-func TestUpdate_SubmitResultMsgMarksResultSubmittedByModel(t *testing.T) {
-	// runTUI uses Result.SubmittedByModel to skip its post-Run submit for
-	// paths that the Model already drove — without it, a clipboard selection
-	// in search would deliver twice.
-	m := NewModel(searchStateWithRows(nil, nil), ModelDeps{})
-	m.pendingSubmit = true
-
-	next, _ := m.Update(submitResultMsg{
-		result: Result{Action: ActionClipboard, ClipboardBody: []byte("x")},
-	})
-	got := next.(Model)
-
-	if !got.result.SubmittedByModel {
-		t.Fatal("submitResultMsg must mark Result.SubmittedByModel=true")
-	}
-	if got.result.Action != ActionClipboard {
-		t.Fatalf("Action = %q, want preserved ActionClipboard", got.result.Action)
 	}
 }
 

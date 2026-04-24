@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
@@ -36,25 +37,34 @@ func submitCmd(sub Submitter, result Result) tea.Cmd {
 	}
 }
 
-// clipboardReadMsg carries the outcome of an async clipboard read: body is
-// the validated bytes on success; err is the first failure from Read or
-// Validate. AUR-25 will wire board-mode P to the same helper.
+// clipboardReadMsg carries the outcome of an async clipboard Read + Validate
+// back into Update. err is non-nil for empty/non-UTF-8/oversize or reader
+// failure; body is the validated bytes on success.
 type clipboardReadMsg struct {
 	body []byte
 	err  error
 }
 
-// clipboardReadCmd returns a tea.Cmd that reads the host clipboard and
-// validates it against MaxPasteBytes, reporting the outcome via
-// clipboardReadMsg.
-func clipboardReadCmd(reader clipboard.Reader, maxBytes int64) tea.Cmd {
+// errClipboardUnavailable is surfaced as a clipboardReadMsg error when the
+// Model was constructed without a clipboard.Reader. Production never trips
+// this (buildTUIState omits the clipboard row + matchesReserved ignores a
+// disabled binding), but zero-value ModelDeps in tests or bespoke wiring
+// should degrade to an inline footer error rather than panicking.
+var errClipboardUnavailable = errors.New("clipboard is unavailable — choose another option")
+
+// readClipboardCmd returns a tea.Cmd that invokes the injected Reader and
+// validates the result against the paste limit, emitting clipboardReadMsg.
+func readClipboardCmd(r clipboard.Reader, limit int64) tea.Cmd {
 	return func() tea.Msg {
-		body, err := reader.Read()
+		if r == nil {
+			return clipboardReadMsg{err: errClipboardUnavailable}
+		}
+		body, err := r.Read()
 		if err != nil {
 			return clipboardReadMsg{err: err}
 		}
-		if verr := clipboard.Validate(body, maxBytes); verr != nil {
-			return clipboardReadMsg{err: verr}
+		if err := clipboard.Validate(body, limit); err != nil {
+			return clipboardReadMsg{err: err}
 		}
 		return clipboardReadMsg{body: body}
 	}
@@ -71,9 +81,7 @@ type ModelDeps struct {
 	MaxPasteBytes int64
 }
 
-// mode distinguishes board rendering from search. Only modeBoard is exercised
-// in the tracer bullet; modeSearch is carried so AUR-26 can plug in without
-// reshaping the Model.
+// mode distinguishes board rendering from search.
 type mode int
 
 const (
@@ -83,16 +91,18 @@ const (
 
 // Model is the single bubbletea model for the TUI.
 type Model struct {
-	state         State
-	deps          ModelDeps
-	mode          mode
-	cursor        int
-	width         int
-	height        int
-	result        Result
-	inlineError   string
-	submitErr     error
-	pendingSubmit bool
+	state            State
+	deps             ModelDeps
+	mode             mode
+	cursor           int
+	scrollOffset     int
+	width            int
+	height           int
+	result           Result
+	inlineError      string
+	submitErr        error
+	pendingSubmit    bool
+	pendingClipboard bool
 
 	// Search-mode state.
 	query               string
@@ -101,6 +111,15 @@ type Model struct {
 	results             []MatchedRow
 	index               *SearchIndex
 }
+
+// headerLines and footerLines are the fixed chrome subtracted from terminal
+// height to compute rowsPerFrame. No header is rendered yet; the footer is a
+// single hint/error line composed by m.footer(). Future slices that grow the
+// chrome (e.g. a multi-line search query line) should update these.
+const (
+	headerLines = 0
+	footerLines = 1
+)
 
 // NewModel constructs a Model seeded with the rendered state and deps.
 func NewModel(state State, deps ModelDeps) Model {
@@ -119,6 +138,44 @@ func (m Model) SubmitErr() error { return m.submitErr }
 // Init satisfies tea.Model. No startup command yet.
 func (m Model) Init() tea.Cmd { return nil }
 
+// rowsPerFrame returns how many row lines fit in the current viewport. Returns
+// 0 pre-WindowSizeMsg (m.height == 0) or when the chrome exceeds the window;
+// View treats that as "render all rows" so tests without a terminal still
+// see everything.
+func (m Model) rowsPerFrame() int {
+	rpf := m.height - headerLines - footerLines
+	if rpf <= 0 {
+		return 0
+	}
+	return rpf
+}
+
+// clampScrollOffset returns the scrollOffset that keeps cursor visible in the
+// window [offset, offset+rpf) and prevents overscroll past the list tail.
+// rpf <= 0 (pre-WindowSizeMsg) or an empty row set collapse to offset 0.
+func clampScrollOffset(cursor, offset, rowCount, rpf int) int {
+	if rpf <= 0 || rowCount == 0 {
+		return 0
+	}
+	if cursor < offset {
+		offset = cursor
+	}
+	if cursor >= offset+rpf {
+		offset = cursor - rpf + 1
+	}
+	max := rowCount - rpf
+	if max < 0 {
+		max = 0
+	}
+	if offset > max {
+		offset = max
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return offset
+}
+
 // Update handles inbound messages. Keypress handling forks by mode so search
 // can layer in without disturbing board handling.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -126,20 +183,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.state.Rows), m.rowsPerFrame())
 		return m, nil
 	case submitResultMsg:
 		m.pendingSubmit = false
 		m.result = msg.result
-		m.result.SubmittedByModel = true
 		m.submitErr = msg.err
 		return m, tea.Quit
 	case clipboardReadMsg:
+		m.pendingClipboard = false
 		if msg.err != nil {
-			m.pendingSubmit = false
-			m.inlineError = msg.err.Error()
+			m.inlineError = clipboardErrorText(msg.err)
 			return m, nil
 		}
-		// Hand off to submitCmd; pendingSubmit stays true until submitResultMsg.
+		m.pendingSubmit = true
 		return m, submitCmd(m.deps.Submitter, Result{
 			Action:        ActionClipboard,
 			ClipboardBody: msg.body,
@@ -172,25 +229,32 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.Type == tea.KeyUp:
 		if m.cursor > 0 {
 			m.cursor--
+			m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.state.Rows), m.rowsPerFrame())
 		}
 		// ↑/↓ preserve inlineError per §19.
 		return m, nil
 	case msg.Type == tea.KeyDown:
 		if m.cursor < len(m.state.Rows)-1 {
 			m.cursor++
+			m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.state.Rows), m.rowsPerFrame())
 		}
 		return m, nil
+	case matchesReserved(msg, m.state.Reserved.Clipboard):
+		// Ignore re-presses while an async read or submit is already in
+		// flight — prevents key repeat from enqueuing duplicate reads or
+		// racing the submit that follows a successful read.
+		if m.pendingClipboard || m.pendingSubmit {
+			return m, nil
+		}
+		m.inlineError = ""
+		m.pendingClipboard = true
+		return m, readClipboardCmd(m.deps.Clip, m.deps.MaxPasteBytes)
 	case matchesReserved(msg, m.state.Reserved.Search):
-		if m.pendingSubmit {
+		if m.pendingSubmit || m.pendingClipboard {
 			return m, nil
 		}
 		m.inlineError = ""
 		return m.enterSearch(), nil
-	case matchesReserved(msg, m.state.Reserved.Clipboard):
-		// AUR-25 wires this to selectClipboard(). Clearing inlineError here
-		// keeps the §19 contract satisfied until then.
-		m.inlineError = ""
-		return m, nil
 	}
 
 	return m.tryPromptSelect(msg)
@@ -202,8 +266,10 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) tryPromptSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Gate prompt selection while a submit is in flight. Without this a slow
 	// Submitter combined with key repeat could enqueue multiple submitCmds
-	// and produce duplicate daemon submissions from one interaction.
-	if m.pendingSubmit {
+	// and produce duplicate daemon submissions from one interaction. Same
+	// treatment for an in-flight clipboard read: a prompt keypress arriving
+	// between the read cmd and clipboardReadMsg would race the pending flow.
+	if m.pendingSubmit || m.pendingClipboard {
 		return m, nil
 	}
 	if msg.Type != tea.KeyRunes || len(msg.Runes) != 1 {
@@ -245,6 +311,36 @@ func (m Model) selectPrompt(id string) (tea.Model, tea.Cmd) {
 	m.inlineError = ""
 	m.pendingSubmit = true
 	return m, submitCmd(m.deps.Submitter, Result{Action: ActionPrompt, PromptID: id})
+}
+
+// selectClipboard kicks off an async clipboard read via readClipboardCmd. The
+// resulting clipboardReadMsg hands off to submitCmd in Update on success, or
+// populates inlineError on failure. Shared between board-mode P and
+// search-mode Enter-on-clipboard-row.
+func (m Model) selectClipboard() (tea.Model, tea.Cmd) {
+	if m.pendingSubmit || m.pendingClipboard {
+		return m, nil
+	}
+	m.inlineError = ""
+	m.pendingClipboard = true
+	return m, readClipboardCmd(m.deps.Clip, m.deps.MaxPasteBytes)
+}
+
+// clipboardErrorText maps a clipboard read/validate error to the inline
+// footer text shown after a failed P-press. The empty-clipboard string is
+// fixed by user story 17; the other two follow the same "— choose another
+// option" pattern so the footer stays consistent across validation failures.
+func clipboardErrorText(err error) string {
+	switch e := err.(type) {
+	case *clipboard.EmptyClipboardError:
+		return "clipboard is empty — choose another option"
+	case *clipboard.InvalidUTF8Error:
+		return "clipboard contains non-UTF-8 data — choose another option"
+	case *clipboard.OversizeError:
+		return fmt.Sprintf("clipboard exceeds max_paste_bytes (%d > %d) — choose another option", e.Bytes, e.Limit)
+	default:
+		return err.Error()
+	}
 }
 
 // promptKeyMatches implements the case-insensitive keybind contract: letters
@@ -315,7 +411,7 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// bound to Esc at the config level. Per ticket: "Esc does NOT exit the
 	// TUI in search mode".
 	if msg.Type == tea.KeyEsc {
-		if m.pendingSubmit {
+		if m.pendingSubmit || m.pendingClipboard {
 			return m, nil
 		}
 		m.mode = modeBoard
@@ -341,7 +437,7 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Enter (or remapped Select): select the highlighted row.
 	if matchesReserved(msg, m.state.Reserved.Select) {
-		if m.pendingSubmit {
+		if m.pendingSubmit || m.pendingClipboard {
 			return m, nil
 		}
 		if m.searchCursor < 0 || m.searchCursor >= len(m.results) {
@@ -402,23 +498,6 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// selectClipboard kicks off an async clipboard read via tea.Cmd. On success
-// the resulting clipboardReadMsg hands off to submitCmd in Update; on error
-// it populates inlineError and stays open. AUR-25 will call this from
-// board-mode P.
-func (m Model) selectClipboard() (tea.Model, tea.Cmd) {
-	if m.pendingSubmit {
-		return m, nil
-	}
-	if m.deps.Clip == nil {
-		m.inlineError = "clipboard reader not configured"
-		return m, nil
-	}
-	m.inlineError = ""
-	m.pendingSubmit = true
-	return m, clipboardReadCmd(m.deps.Clip, m.deps.MaxPasteBytes)
-}
-
 // View renders the mode-appropriate body and footer hint.
 func (m Model) View() string {
 	width := m.width
@@ -432,7 +511,26 @@ func (m Model) View() string {
 }
 
 func (m Model) viewBoard(width int) string {
-	return renderRowList(m.state.Rows, m.cursor, width) + m.footer()
+	var sb strings.Builder
+	idWidth := maxIDWidth(m.state.Rows)
+	const keyCol = 3 // "[X]"
+	const padding = 2
+	descCol := width - keyCol - idWidth - padding*2
+	if descCol < 0 {
+		descCol = 0
+	}
+
+	start, end := m.visibleRowRange()
+	for i, row := range m.state.Rows[start:end] {
+		line := renderRow(row, idWidth, descCol)
+		if start+i == m.cursor {
+			line = selectedStyle.Render(line)
+		}
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+	sb.WriteString(m.footer())
+	return sb.String()
 }
 
 func (m Model) viewSearch(width int) string {
@@ -444,7 +542,8 @@ func (m Model) viewSearch(width int) string {
 }
 
 // renderRowList formats rows as the three-column keybind board, highlighting
-// the row at cursor. Shared between board and search views.
+// the row at cursor. Used by the search view, which always renders every
+// match (no viewport scrolling).
 func renderRowList(rows []Row, cursor, width int) string {
 	var sb strings.Builder
 	idWidth := maxIDWidth(rows)
@@ -463,6 +562,23 @@ func renderRowList(rows []Row, cursor, width int) string {
 		sb.WriteString("\n")
 	}
 	return sb.String()
+}
+
+// visibleRowRange returns [start, end) of m.state.Rows that fit in the current
+// viewport. Pre-WindowSizeMsg (rpf == 0) or when every row fits, it returns
+// the full range so the render-all fallback satisfies pre-WindowSize tests
+// and avoids division-by-zero paths.
+func (m Model) visibleRowRange() (int, int) {
+	rows := len(m.state.Rows)
+	rpf := m.rowsPerFrame()
+	if rpf <= 0 || rows <= rpf {
+		return 0, rows
+	}
+	end := m.scrollOffset + rpf
+	if end > rows {
+		end = rows
+	}
+	return m.scrollOffset, end
 }
 
 var selectedStyle = lipgloss.NewStyle().Reverse(true)

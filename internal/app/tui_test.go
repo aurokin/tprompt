@@ -19,12 +19,28 @@ type recordingRenderer struct {
 	called bool
 	result tui.Result
 	err    error
+	sub    submitter.Submitter
 }
 
+// Run mirrors the real bubbleRenderer: for prompt/clipboard actions it
+// invokes the injected Submitter and propagates any error, so the runTUI
+// tests can observe the submit-wiring contract after AUR-25 moved the
+// Submit call out of runTUI itself.
 func (r *recordingRenderer) Run(s tui.State) (tui.Result, error) {
 	r.called = true
 	r.state = s
-	return r.result, r.err
+	if r.err != nil {
+		return r.result, r.err
+	}
+	if r.sub != nil {
+		switch r.result.Action {
+		case tui.ActionPrompt, tui.ActionClipboard:
+			if err := r.sub.Submit(r.result); err != nil {
+				return r.result, err
+			}
+		}
+	}
+	return r.result, nil
 }
 
 func tuiDeps(t *testing.T, fs *fakeStore, rend tui.Renderer, cfgOverride ...func(*config.Resolved)) Deps {
@@ -55,7 +71,12 @@ func tuiDeps(t *testing.T, fs *fakeStore, rend tui.Renderer, cfgOverride ...func
 	deps.NewTmux = func() (tmux.Adapter, error) {
 		return &fakeAdapter{paneExists: true}, nil
 	}
-	deps.NewRenderer = func(config.Resolved, store.Store, submitter.Submitter, clipboard.Reader) (tui.Renderer, error) {
+	deps.NewRenderer = func(_ config.Resolved, _ store.Store, sub submitter.Submitter) (tui.Renderer, error) {
+		// Inject the real Submitter so recordingRenderer.Run can call Submit
+		// the same way the production bubbleRenderer does via tea.Cmd.
+		if rr, ok := rend.(*recordingRenderer); ok {
+			rr.sub = sub
+		}
 		return rend, nil
 	}
 	return deps
@@ -516,75 +537,6 @@ func TestTUI_ClipboardSelectionInvokesSubmitterWithDeps(t *testing.T) {
 	}
 	if rec.client == nil {
 		t.Error("daemon client not threaded into submitter")
-	}
-}
-
-// runTUI must thread the clipboard reader returned by deps.NewClip into the
-// Renderer factory so the Model can read the clipboard when the user selects
-// the clipboard row (AUR-26 search Enter on clip row, AUR-25 board P).
-// Without this wire-up the Model's selectClipboard falls through to the
-// "clipboard reader not configured" inline error and never submits.
-func TestTUI_ThreadsClipboardReaderIntoRenderer(t *testing.T) {
-	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
-	deps := tuiDeps(t, &fakeStore{}, rend)
-	// Use a pointer-receiver Reader so identity comparison is safe — the
-	// default clipboard.NewStatic returns a slice-backed value that can't be
-	// compared with !=.
-	wantClip := &taggedReader{}
-	deps.NewClip = func(config.Resolved) (clipboard.Reader, error) {
-		return wantClip, nil
-	}
-	var gotClip clipboard.Reader
-	deps.NewRenderer = func(_ config.Resolved, _ store.Store, _ submitter.Submitter, clip clipboard.Reader) (tui.Renderer, error) {
-		gotClip = clip
-		return rend, nil
-	}
-
-	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
-	if err != nil {
-		t.Fatalf("executeRootWith: %v", err)
-	}
-	if gotClip == nil {
-		t.Fatal("NewRenderer called with nil Clip — runTUI must thread deps.NewClip through")
-	}
-	got, ok := gotClip.(*taggedReader)
-	if !ok {
-		t.Fatalf("NewRenderer Clip type = %T, want *taggedReader", gotClip)
-	}
-	if got != wantClip {
-		t.Fatal("NewRenderer Clip was not the reader returned by deps.NewClip")
-	}
-}
-
-// taggedReader is an identity-comparable clipboard.Reader for tests. The
-// stdlib clipboard.NewStatic returns a slice-backed Reader that cannot be
-// compared with ==.
-type taggedReader struct{}
-
-func (*taggedReader) Read() ([]byte, error) { return nil, nil }
-
-// When the Model has already submitted the clipboard action via tea.Cmd
-// (AUR-26 search Enter on clip row, AUR-25 board P), the Result carries
-// SubmittedByModel=true and runTUI must not re-submit — otherwise the same
-// clipboard bytes would be delivered twice for one user action.
-func TestTUI_ClipboardModelSubmittedDoesNotReSubmit(t *testing.T) {
-	rend := &recordingRenderer{result: tui.Result{
-		Action:           tui.ActionClipboard,
-		ClipboardBody:    []byte("clip body"),
-		SubmittedByModel: true,
-	}}
-	rec := &recordingSubmitter{}
-	deps := tuiDeps(t, &fakeStore{}, rend)
-	deps.NewSubmitter = func(config.Resolved, store.Store, daemon.Client, tmux.TargetContext) submitter.Submitter {
-		return rec
-	}
-
-	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%9")
-	if err != nil {
-		t.Fatalf("Model-submitted clipboard: want nil err, got %v", err)
-	}
-	if rec.called {
-		t.Fatal("runTUI must not call Submitter when Result.SubmittedByModel=true")
 	}
 }
 

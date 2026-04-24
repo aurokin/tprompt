@@ -79,18 +79,15 @@ func runTUI(deps Deps, f tuiFlags) error {
 	state := buildTUIState(summaries, cfg)
 
 	// Build the Submitter up front so it can be injected into the Renderer.
-	// The real Model invokes Submit via a tea.Cmd for ActionPrompt; the stub
-	// Renderer paths used by TPROMPT_TEST_RENDERER fall back to the direct
-	// sub.Submit below.
+	// The real Model invokes Submit via a tea.Cmd for ActionPrompt and
+	// ActionClipboard alike; the stub clipboard Renderer (used by
+	// TPROMPT_TEST_RENDERER) also calls Submit itself, so runTUI never
+	// re-submits here regardless of which Renderer ran. Clipboard-reader
+	// construction is deferred to the production branch inside
+	// ProductionDeps.NewRenderer so stub-renderer testscripts don't regress
+	// on hosts without a clipboard tool.
 	sub := deps.NewSubmitter(cfg, s, client, target)
-
-	// Build the clipboard reader for the Renderer. Soft-fail: if no reader is
-	// available on this host, we still open the TUI — the Model surfaces a
-	// "clipboard reader not configured" inline error if the user presses the
-	// clipboard key. Prompt selection remains fully functional regardless.
-	clip, _ := deps.NewClip(cfg)
-
-	renderer, err := deps.NewRenderer(cfg, s, sub, clip)
+	renderer, err := deps.NewRenderer(cfg, s, sub)
 	if err != nil {
 		return err
 	}
@@ -102,24 +99,11 @@ func runTUI(deps Deps, f tuiFlags) error {
 	switch result.Action {
 	case tui.ActionCancel:
 		return nil
-	case tui.ActionPrompt:
-		// The real Renderer invokes Submitter inside the Model via tea.Cmd;
-		// any error has already surfaced via renderer.Run above. Stub
-		// renderers do not emit ActionPrompt today, so no direct submit is
-		// required here.
+	case tui.ActionPrompt, tui.ActionClipboard:
+		// Submit was performed inside the Renderer (real Model via tea.Cmd,
+		// or the staticClipboardRenderer stub). Any error already surfaced
+		// via renderer.Run above, so nothing to do here.
 		return nil
-	case tui.ActionClipboard:
-		if result.SubmittedByModel {
-			// The Model already invoked Submit via tea.Cmd (AUR-26 search
-			// Enter on clip row, AUR-25 board P). Any error has surfaced
-			// via renderer.Run above — submitting again here would produce
-			// a duplicate delivery for one user action.
-			return nil
-		}
-		// Stub Renderer (staticClipboardRenderer / TPROMPT_TEST_RENDERER)
-		// returns ActionClipboard directly without going through the Model;
-		// submit on its behalf.
-		return sub.Submit(result)
 	default:
 		return fmt.Errorf("tui: unknown renderer action %q", result.Action)
 	}

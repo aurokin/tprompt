@@ -801,3 +801,216 @@ func TestRenderer_RunSurfacesSubmitErrFromFinalModel(t *testing.T) {
 		t.Fatalf("Submitter.Submit calls = %d, want 1", len(sub.calls))
 	}
 }
+
+// sampleState has 4 rows; height=3 subtracts 1 footer line for rowsPerFrame=2
+// so only 2 rows fit. Shared by the scroll tests below.
+func scrollableModel() Model {
+	m := NewModel(sampleState(), ModelDeps{})
+	m.width = 80
+	m.height = 3
+	return m
+}
+
+func TestUpdate_DownArrowScrollsOffsetPastBottom(t *testing.T) {
+	m := scrollableModel()
+
+	// Rows: [clipboard, alpha, beta, code-review]. rpf=2, so visible is [0,2).
+	// Pressing down three times walks the cursor to row 3 and drags the
+	// viewport with it so scrollOffset lands at 2 (tail frame).
+	for i := 0; i < 3; i++ {
+		next, _ := m.Update(keyMsg("down"))
+		m = next.(Model)
+	}
+	if m.cursor != 3 {
+		t.Fatalf("cursor = %d, want 3", m.cursor)
+	}
+	if m.scrollOffset != 2 {
+		t.Fatalf("scrollOffset = %d, want 2", m.scrollOffset)
+	}
+}
+
+func TestUpdate_UpArrowScrollsOffsetPastTop(t *testing.T) {
+	m := scrollableModel()
+	m.cursor = 3
+	m.scrollOffset = 2
+
+	for i := 0; i < 3; i++ {
+		next, _ := m.Update(keyMsg("up"))
+		m = next.(Model)
+	}
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0", m.cursor)
+	}
+	if m.scrollOffset != 0 {
+		t.Fatalf("scrollOffset = %d, want 0", m.scrollOffset)
+	}
+}
+
+func TestUpdate_ScrollOffsetClampedAtTail(t *testing.T) {
+	m := scrollableModel()
+
+	// Spam down far past the end. cursor clamps at len-1 (3); scrollOffset
+	// clamps at len-rpf (2) so the last frame shows the tail without blank
+	// rows below.
+	for i := 0; i < 20; i++ {
+		next, _ := m.Update(keyMsg("down"))
+		m = next.(Model)
+	}
+	if m.cursor != 3 {
+		t.Fatalf("cursor = %d, want 3 (len-1)", m.cursor)
+	}
+	if m.scrollOffset != 2 {
+		t.Fatalf("scrollOffset = %d, want 2 (len-rpf)", m.scrollOffset)
+	}
+}
+
+func TestUpdate_WindowResizeShrinkKeepsCursorVisible(t *testing.T) {
+	m := NewModel(sampleState(), ModelDeps{})
+	m.cursor = 3
+	// Start in a tall terminal where everything fits (rpf=19); scrollOffset
+	// is 0 because no scrolling has been needed yet.
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	m = next.(Model)
+	if m.scrollOffset != 0 {
+		t.Fatalf("precondition: scrollOffset = %d, want 0", m.scrollOffset)
+	}
+
+	// Shrink to rpf=2. Cursor at row 3 must stay in-frame, so offset drags
+	// up to 2 (cursor - rpf + 1).
+	next, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 3})
+	m = next.(Model)
+	if m.scrollOffset != 2 {
+		t.Fatalf("scrollOffset = %d, want 2 (cursor kept visible after shrink)", m.scrollOffset)
+	}
+}
+
+func TestUpdate_WindowResizeGrowCollapsesBlankTail(t *testing.T) {
+	m := scrollableModel()
+	m.cursor = 3
+	m.scrollOffset = 2
+
+	// Grow to a terminal where every row fits. An offset of 2 would leave
+	// blank rows below the tail; clamp collapses it to 0.
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	m = next.(Model)
+	if m.scrollOffset != 0 {
+		t.Fatalf("scrollOffset = %d, want 0 (blank tail collapsed)", m.scrollOffset)
+	}
+}
+
+func TestView_SlicesRowsToViewport(t *testing.T) {
+	m := scrollableModel()
+	m.cursor = 3
+	m.scrollOffset = 2
+
+	out := m.View()
+	// Onscreen rows
+	if !strings.Contains(out, "beta") || !strings.Contains(out, "code-review") {
+		t.Fatalf("visible rows missing from view:\n%s", out)
+	}
+	// Offscreen rows (clipboard @0, alpha @1) must not appear. Match on
+	// content that's unique to those rows so the footer doesn't false-
+	// positive us.
+	if strings.Contains(out, "alpha") || strings.Contains(out, "first") {
+		t.Fatalf("offscreen alpha row leaked into view:\n%s", out)
+	}
+	if strings.Contains(out, "(read on select)") {
+		t.Fatalf("offscreen clipboard row leaked into view:\n%s", out)
+	}
+}
+
+func TestView_PreWindowSizeRendersAllRows(t *testing.T) {
+	// No WindowSizeMsg ever sent, so height=0 and rowsPerFrame()==0. View
+	// must render all rows instead of slicing with a zero window (which
+	// would blank the board).
+	m := NewModel(sampleState(), ModelDeps{})
+	m.width = 80
+
+	out := m.View()
+	for _, id := range []string{"alpha", "beta", "code-review"} {
+		if !strings.Contains(out, id) {
+			t.Fatalf("pre-WindowSize view missing %q:\n%s", id, out)
+		}
+	}
+}
+
+func TestUpdate_BoundKeyOnScrolledOffRowSubmits(t *testing.T) {
+	// The scroll invariant: pressing a row's assigned key must select it
+	// even when the row is scrolled off-screen. Here alpha (row 1, key '1')
+	// is offscreen — visible window is rows [2,4) — but pressing '1'
+	// still resolves alpha and fires the submit cmd.
+	deps, sub, _ := promptDeps(map[string]string{"alpha": "body"}, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.width = 80
+	m.height = 3
+	m.cursor = 3
+	m.scrollOffset = 2
+
+	next, cmd := m.Update(keyMsg("1"))
+	got := next.(Model)
+
+	if !got.pendingSubmit {
+		t.Fatal("pendingSubmit should be true after selecting scrolled-off row")
+	}
+	if cmd == nil {
+		t.Fatal("expected submit cmd for scrolled-off row key, got nil")
+	}
+	sr, ok := runCmd(cmd).(submitResultMsg)
+	if !ok {
+		t.Fatalf("cmd emitted %T, want submitResultMsg", sr)
+	}
+	if sr.result.Action != ActionPrompt || sr.result.PromptID != "alpha" {
+		t.Fatalf("submitResultMsg.result = %+v, want ActionPrompt/alpha", sr.result)
+	}
+	if len(sub.calls) != 1 || sub.calls[0].PromptID != "alpha" {
+		t.Fatalf("Submitter calls = %+v, want one call for alpha", sub.calls)
+	}
+}
+
+func TestUpdate_ScrollingPreservesInlineError(t *testing.T) {
+	// §19: navigation keys preserve inlineError even when they trigger a
+	// scroll — otherwise a user with an error on screen would lose it the
+	// moment they reach for the arrow keys.
+	m := scrollableModel()
+	m.inlineError = "prompt body exceeds max_paste_bytes — choose another prompt"
+
+	for i := 0; i < 3; i++ {
+		next, _ := m.Update(keyMsg("down"))
+		m = next.(Model)
+	}
+	if m.scrollOffset == 0 {
+		t.Fatal("precondition: expected scrolling to have advanced scrollOffset")
+	}
+	if m.inlineError == "" {
+		t.Fatal("inlineError should be preserved through scroll-triggered navigation")
+	}
+}
+
+func TestClampScrollOffset(t *testing.T) {
+	cases := []struct {
+		name     string
+		cursor   int
+		offset   int
+		rowCount int
+		rpf      int
+		want     int
+	}{
+		{"pre-WindowSize rpf zero collapses", 2, 5, 10, 0, 0},
+		{"empty row set collapses", 0, 3, 0, 2, 0},
+		{"cursor inside window is noop", 2, 1, 10, 3, 1},
+		{"cursor above window pulls offset down", 5, 0, 10, 2, 4},
+		{"cursor below window pulls offset up", 0, 3, 10, 2, 0},
+		{"offset past tail clamps to len-rpf", 3, 7, 4, 2, 2},
+		{"negative offset clamped to zero", 0, -5, 4, 2, 0},
+		{"rpf exceeds row count collapses to zero", 1, 3, 4, 10, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := clampScrollOffset(tc.cursor, tc.offset, tc.rowCount, tc.rpf)
+			if got != tc.want {
+				t.Fatalf("clampScrollOffset(%d, %d, %d, %d) = %d, want %d",
+					tc.cursor, tc.offset, tc.rowCount, tc.rpf, got, tc.want)
+			}
+		})
+	}
+}

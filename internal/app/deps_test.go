@@ -8,7 +8,7 @@ import (
 )
 
 func TestParseTestRenderer_Cancel(t *testing.T) {
-	r, err := parseTestRenderer("cancel")
+	r, err := parseTestRenderer("cancel", nil)
 	if err != nil {
 		t.Fatalf("parseTestRenderer: %v", err)
 	}
@@ -22,7 +22,7 @@ func TestParseTestRenderer_Cancel(t *testing.T) {
 }
 
 func TestParseTestRenderer_Clipboard(t *testing.T) {
-	r, err := parseTestRenderer("clipboard:hello from tests")
+	r, err := parseTestRenderer("clipboard:hello from tests", nil)
 	if err != nil {
 		t.Fatalf("parseTestRenderer: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestParseTestRenderer_ClipboardEmptyBody(t *testing.T) {
 	// `clipboard:` with empty body is a legal spec — the Submitter will surface
 	// EmptyClipboardError, which is exactly what the oversize/empty testscripts
 	// may want to exercise.
-	r, err := parseTestRenderer("clipboard:")
+	r, err := parseTestRenderer("clipboard:", nil)
 	if err != nil {
 		t.Fatalf("parseTestRenderer: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestParseTestRenderer_ClipboardEmptyBody(t *testing.T) {
 }
 
 func TestParseTestRenderer_Unknown(t *testing.T) {
-	_, err := parseTestRenderer("nonsense")
+	_, err := parseTestRenderer("nonsense", nil)
 	if err == nil {
 		t.Fatal("want error for unknown spec")
 	}
