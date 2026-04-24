@@ -87,6 +87,25 @@ func TestSearchIndex_IDMatchOutranksTitleOnlyMatch(t *testing.T) {
 	}
 }
 
+func TestSearchIndex_IDMatchOutranksStrongLowerPriorityMatches(t *testing.T) {
+	rows := []Row{
+		{Key: '1', PromptID: "prefix-middle-foo-suffix", Title: "unrelated"},
+		{
+			Key:         '2',
+			PromptID:    "bravo",
+			Title:       "foo",
+			Description: "foo",
+			Tags:        []string{"foo"},
+		},
+	}
+	idx := newSearchIndex(rows, nil, clipRow())
+
+	got := idsOf(idx.Query("foo"))
+	if len(got) < 2 || got[0] != "prefix-middle-foo-suffix" {
+		t.Fatalf("expected weak id match to outrank strong lower-priority matches, got %v", got)
+	}
+}
+
 func TestSearchIndex_TitleOutranksDescription(t *testing.T) {
 	// Each row matches exactly one field with identical text. Row A matches
 	// on title (weight 0.75), row B on description (weight 0.5). A wins.

@@ -188,6 +188,9 @@ func TestTUI_StateOmitsClipboardRowWhenKeyDisabled(t *testing.T) {
 	if len(rend.state.Rows) != 1 || rend.state.Rows[0].PromptID != "alpha" {
 		t.Fatalf("want single board row alpha, got %+v", rend.state.Rows)
 	}
+	if !rend.state.ClipboardAvailable {
+		t.Fatal("disabled clipboard keybind must keep clipboard available through search")
+	}
 }
 
 func TestTUI_StateBuildsSymbolicReservedBindings(t *testing.T) {

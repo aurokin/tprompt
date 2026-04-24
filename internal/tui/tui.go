@@ -25,9 +25,10 @@ type Result struct {
 // State holds everything the TUI needs to render without importing store or
 // keybind packages directly.
 type State struct {
-	Rows     []Row
-	Overflow []Row
-	Reserved ReservedKeys
+	Rows               []Row
+	Overflow           []Row
+	Reserved           ReservedKeys
+	ClipboardAvailable bool
 }
 
 // ReservedBinding is a resolved reserved-key role: either a printable rune, a

@@ -141,9 +141,10 @@ func buildTUIState(summaries []store.Summary, cfg config.Resolved) tui.State {
 	rows = append(rows, board...)
 
 	return tui.State{
-		Rows:     rows,
-		Overflow: overflow,
-		Reserved: reserved,
+		Rows:               rows,
+		Overflow:           overflow,
+		Reserved:           reserved,
+		ClipboardAvailable: true,
 	}
 }
 
