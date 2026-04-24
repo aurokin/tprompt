@@ -107,6 +107,7 @@ type Model struct {
 	// Search-mode state.
 	query               string
 	searchCursor        int
+	searchScrollOffset  int
 	highlightedPromptID string
 	results             []MatchedRow
 	index               *SearchIndex
@@ -184,6 +185,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.state.Rows), m.rowsPerFrame())
+		m.searchScrollOffset = clampScrollOffset(m.searchCursor, m.searchScrollOffset, len(m.results), m.rowsPerFrame())
 		return m, nil
 	case submitResultMsg:
 		m.pendingSubmit = false
@@ -343,7 +345,6 @@ func clipboardErrorText(err error) string {
 	}
 }
 
-
 // promptKeyMatches implements the case-insensitive keybind contract: letters
 // fold to lowercase on both sides, non-letters must match literally.
 func promptKeyMatches(got, bound rune) bool {
@@ -365,13 +366,14 @@ func (m Model) enterSearch() Model {
 		if hasClip {
 			boardRows = boardRows[1:]
 		}
-		if !hasClip {
-			clip = Row{}
+		if !hasClip && m.state.ClipboardAvailable {
+			clip = Row{Description: "(read on select)"}
 		}
 		m.index = newSearchIndex(boardRows, m.state.Overflow, clip)
 	}
 	m.results = m.index.Query("")
 	m.searchCursor = 0
+	m.searchScrollOffset = 0
 	if len(m.results) > 0 {
 		m.highlightedPromptID = m.results[0].Row.PromptID
 	} else {
@@ -400,6 +402,7 @@ func (m Model) refilter() Model {
 	} else {
 		m.highlightedPromptID = ""
 	}
+	m.searchScrollOffset = clampScrollOffset(m.searchCursor, m.searchScrollOffset, len(m.results), m.rowsPerFrame())
 	return m
 }
 
@@ -420,6 +423,7 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.results = nil
 		m.highlightedPromptID = ""
 		m.searchCursor = 0
+		m.searchScrollOffset = 0
 		m.inlineError = ""
 		return m, nil
 	}
@@ -455,6 +459,7 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.Type == tea.KeyUp {
 		if m.searchCursor > 0 {
 			m.searchCursor--
+			m.searchScrollOffset = clampScrollOffset(m.searchCursor, m.searchScrollOffset, len(m.results), m.rowsPerFrame())
 			m.highlightedPromptID = m.results[m.searchCursor].Row.PromptID
 		}
 		return m, nil
@@ -462,6 +467,7 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.Type == tea.KeyDown {
 		if m.searchCursor < len(m.results)-1 {
 			m.searchCursor++
+			m.searchScrollOffset = clampScrollOffset(m.searchCursor, m.searchScrollOffset, len(m.results), m.rowsPerFrame())
 			m.highlightedPromptID = m.results[m.searchCursor].Row.PromptID
 		}
 		return m, nil
@@ -539,15 +545,16 @@ func (m Model) viewSearch(width int) string {
 	for i, r := range m.results {
 		rows[i] = r.Row
 	}
-	return renderRowList(rows, m.searchCursor, width) + m.footer()
+	start, end := m.visibleSearchRowRange()
+	return renderRowList(rows[start:end], m.searchCursor-start, width, maxIDWidth(rows)) + m.footer()
 }
 
 // renderRowList formats rows as the three-column keybind board, highlighting
-// the row at cursor. Used by the search view, which always renders every
-// match (no viewport scrolling).
-func renderRowList(rows []Row, cursor, width int) string {
+// the row at cursor. Used by the search view after slicing to the current
+// viewport; idWidth is computed from the complete result set to keep columns
+// stable while scrolling.
+func renderRowList(rows []Row, cursor, width, idWidth int) string {
 	var sb strings.Builder
-	idWidth := maxIDWidth(rows)
 	const keyCol = 3 // "[X]"
 	const padding = 2
 	descCol := width - keyCol - idWidth - padding*2
@@ -563,6 +570,19 @@ func renderRowList(rows []Row, cursor, width int) string {
 		sb.WriteString("\n")
 	}
 	return sb.String()
+}
+
+func (m Model) visibleSearchRowRange() (int, int) {
+	rows := len(m.results)
+	rpf := m.rowsPerFrame()
+	if rpf <= 0 || rows <= rpf {
+		return 0, rows
+	}
+	end := m.searchScrollOffset + rpf
+	if end > rows {
+		end = rows
+	}
+	return m.searchScrollOffset, end
 }
 
 // visibleRowRange returns [start, end) of m.state.Rows that fit in the current

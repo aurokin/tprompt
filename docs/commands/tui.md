@@ -83,7 +83,7 @@ Triggered by `/`. All prompts (including overflow) are searchable — search is 
 The TUI renders a single-line footer showing context-sensitive hints:
 
 - board view: `[/ search]  [Esc cancel]`
-- search view: `/query    [Esc exit search]  [Enter select]`
+- search view: `/query    [Esc exit search]  [Enter select]  [N matches]`
 - error view: `clipboard is empty — choose another option  [Esc cancel]`
 
 ## Scrolling
@@ -91,6 +91,8 @@ The TUI renders a single-line footer showing context-sensitive hints:
 If the board (frontmatter-declared + auto-assigned rows + clipboard) exceeds the available height, vertical scrolling is permitted with `↑`/`↓` but single-key selection continues to work regardless of scroll position.
 
 Overflow rows (those past the auto-assign pool) are not visible in the board even with scrolling.
+
+Search results use the same visible-height limit and scroll with `↑`/`↓`, including the empty-query complete catalog.
 
 ## Non-goals
 

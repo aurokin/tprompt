@@ -22,6 +22,18 @@ const (
 	weightTags        = 0.25
 )
 
+type matchRank struct {
+	score        float64
+	bestPriority int
+}
+
+const (
+	priorityID = iota
+	priorityTitle
+	priorityDescription
+	priorityTags
+)
+
 // SearchIndex fuzzy-matches prompt rows across four per-field corpuses with
 // weighted scoring. All sahilm/fuzzy coupling lives in this file; callers see
 // only []MatchedRow.
@@ -41,12 +53,12 @@ type SearchIndex struct {
 }
 
 // newSearchIndex builds the indexer. rows is the board rows (clip row not
-// included); overflow is the hidden overflow rows; clipRow is the pinned
-// clipboard row if one exists (identified by Key != 0). The clip row appears
-// only in the empty-query catalog — it is omitted from non-empty query
-// results because it has no searchable content.
+// included); overflow is the hidden overflow rows; clipRow is the clipboard
+// row if one exists. The clip row appears only in the empty-query catalog — it
+// is omitted from non-empty query results because it has no searchable content.
 func newSearchIndex(rows []Row, overflow []Row, clipRow Row) *SearchIndex {
-	hasClip := clipRow.Key != 0
+	hasClip := clipRow.PromptID == "" &&
+		(clipRow.Key != 0 || clipRow.Title != "" || clipRow.Description != "" || len(clipRow.Tags) > 0)
 
 	capacity := len(rows) + len(overflow)
 	if hasClip {
@@ -89,9 +101,9 @@ func newSearchIndex(rows []Row, overflow []Row, clipRow Row) *SearchIndex {
 	return idx
 }
 
-// Query returns matched rows sorted by weighted score descending, with an
-// alphabetical-by-id tiebreak. An empty query returns the full catalog
-// alphabetically with the clipboard row first.
+// Query returns matched rows sorted by best matched field priority first, then
+// weighted score descending, with an alphabetical-by-id tiebreak. An empty
+// query returns the full catalog alphabetically with the clipboard row first.
 func (s *SearchIndex) Query(q string) []MatchedRow {
 	if q == "" {
 		return s.catalog()
@@ -111,30 +123,45 @@ func (s *SearchIndex) catalog() []MatchedRow {
 }
 
 func (s *SearchIndex) ranked(q string) []MatchedRow {
-	scores := make(map[int]float64)
-	accumulate := func(corpus []string, weight float64) {
+	ranks := make(map[int]matchRank)
+	accumulate := func(corpus []string, weight float64, priority int) {
 		for _, m := range fuzzy.Find(q, corpus) {
 			if s.rows[m.Index].PromptID == "" {
 				// The clip row has no searchable content, but guard in case a
 				// future caller passes a clip row with a populated field.
 				continue
 			}
-			scores[m.Index] += float64(m.Score) * weight
+			rank, ok := ranks[m.Index]
+			if !ok {
+				rank.bestPriority = priority
+			} else if priority < rank.bestPriority {
+				rank.bestPriority = priority
+			}
+			rank.score += float64(m.Score) * weight
+			ranks[m.Index] = rank
 		}
 	}
-	accumulate(s.ids, weightID)
-	accumulate(s.titles, weightTitle)
-	accumulate(s.descriptions, weightDescription)
-	accumulate(s.tagsText, weightTags)
+	accumulate(s.ids, weightID, priorityID)
+	accumulate(s.titles, weightTitle, priorityTitle)
+	accumulate(s.descriptions, weightDescription, priorityDescription)
+	accumulate(s.tagsText, weightTags, priorityTags)
 
-	if len(scores) == 0 {
+	if len(ranks) == 0 {
 		return []MatchedRow{}
 	}
-	out := make([]MatchedRow, 0, len(scores))
-	for idx, score := range scores {
-		out = append(out, MatchedRow{Row: s.rows[idx], Score: score})
+	out := make([]MatchedRow, 0, len(ranks))
+	priorities := make(map[string]int, len(ranks))
+	for idx, rank := range ranks {
+		row := s.rows[idx]
+		out = append(out, MatchedRow{Row: row, Score: rank.score})
+		priorities[row.PromptID] = rank.bestPriority
 	}
 	sort.Slice(out, func(a, b int) bool {
+		priorityA := priorities[out[a].Row.PromptID]
+		priorityB := priorities[out[b].Row.PromptID]
+		if priorityA != priorityB {
+			return priorityA < priorityB
+		}
 		if out[a].Score != out[b].Score {
 			return out[a].Score > out[b].Score
 		}

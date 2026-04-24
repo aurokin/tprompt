@@ -17,8 +17,9 @@ func searchStateWithRows(board []Row, overflow []Row) State {
 	rows := []Row{{Key: 'p', Description: "(read on select)"}}
 	rows = append(rows, board...)
 	return State{
-		Rows:     rows,
-		Overflow: overflow,
+		Rows:               rows,
+		Overflow:           overflow,
+		ClipboardAvailable: true,
 		Reserved: ReservedKeys{
 			Clipboard: ReservedBinding{Printable: 'p'},
 			Search:    ReservedBinding{Printable: '/'},
@@ -285,6 +286,39 @@ func TestUpdate_SearchEnterOnClipboardRowTriggersClipboardPath(t *testing.T) {
 	}
 }
 
+func TestUpdate_SearchIncludesClipboardWhenBoardKeyDisabled(t *testing.T) {
+	deps, _, _ := promptDeps(nil, nil, nil)
+	deps.Clip = clipboard.NewStatic([]byte("pasted"))
+	state := State{
+		Rows:               []Row{{Key: '1', PromptID: "alpha"}},
+		ClipboardAvailable: true,
+		Reserved: ReservedKeys{
+			Clipboard: ReservedBinding{Disabled: true},
+			Search:    ReservedBinding{Printable: '/'},
+			Cancel:    ReservedBinding{Symbolic: "Esc"},
+			Select:    ReservedBinding{Symbolic: "Enter"},
+		},
+	}
+	m := NewModel(state, deps)
+	m = enterSearchViaSlash(t, m)
+
+	if ids := promptIDs(m.results); len(ids) != 2 || ids[0] != "" || ids[1] != "alpha" {
+		t.Fatalf("search catalog = %v, want clipboard row then alpha", ids)
+	}
+	if m.results[0].Row.Key != 0 {
+		t.Fatalf("search-only clipboard row key = %q, want zero/keyless", m.results[0].Row.Key)
+	}
+
+	next, cmd := m.Update(keyMsg("enter"))
+	got := next.(Model)
+	if !got.pendingClipboard {
+		t.Fatal("Enter on search-only clipboard row must set pendingClipboard")
+	}
+	if cmd == nil {
+		t.Fatal("Enter on search-only clipboard row must return clipboard read cmd")
+	}
+}
+
 func TestUpdate_SearchCtrlCCancelsAndQuits(t *testing.T) {
 	m := NewModel(searchStateWithRows([]Row{{Key: '1', PromptID: "alpha"}}, nil), ModelDeps{})
 	m = enterSearchViaSlash(t, m)
@@ -414,6 +448,40 @@ func TestView_SearchFooterShowsMatchCount(t *testing.T) {
 	}
 	if !strings.Contains(out, "[Enter select]") {
 		t.Fatalf("search footer must show [Enter select]. Got:\n%s", out)
+	}
+}
+
+func TestView_SearchSlicesRowsToViewport(t *testing.T) {
+	board := []Row{
+		{Key: '1', PromptID: "alpha", Description: "first"},
+		{Key: '2', PromptID: "beta", Description: "second"},
+		{Key: '3', PromptID: "delta", Description: "third"},
+		{Key: '4', PromptID: "gamma", Description: "fourth"},
+	}
+	m := NewModel(searchStateWithRows(board, nil), ModelDeps{})
+	m.width = 80
+	m.height = 3 // rowsPerFrame = 2
+	m = enterSearchViaSlash(t, m)
+	for i := 0; i < 3; i++ {
+		next, _ := m.Update(keyMsg("down"))
+		m = next.(Model)
+	}
+
+	if m.searchCursor != 3 {
+		t.Fatalf("searchCursor = %d, want 3", m.searchCursor)
+	}
+	if m.searchScrollOffset != 2 {
+		t.Fatalf("searchScrollOffset = %d, want 2", m.searchScrollOffset)
+	}
+	out := m.View()
+	if !strings.Contains(out, "beta") || !strings.Contains(out, "delta") {
+		t.Fatalf("visible search rows missing from view:\n%s", out)
+	}
+	if strings.Contains(out, "(read on select)") || strings.Contains(out, "alpha") {
+		t.Fatalf("offscreen search rows leaked into view:\n%s", out)
+	}
+	if !strings.Contains(out, "[5 matches]") {
+		t.Fatalf("search footer should remain visible after slicing:\n%s", out)
 	}
 }
 
