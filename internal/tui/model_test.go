@@ -342,6 +342,7 @@ func TestDisplayKey(t *testing.T) {
 		{"lowercase letter unchanged", 'a', "a"},
 		{"digit unchanged", '1', "1"},
 		{"symbol unchanged", '/', "/"},
+		{"zero rune renders as space", 0, " "},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
