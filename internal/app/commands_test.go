@@ -155,7 +155,7 @@ func workingDeps(t *testing.T, fs *fakeStore) Deps {
 		NewDaemonClient: func(config.Resolved) (daemon.Client, error) {
 			return nil, ErrNotImplemented
 		},
-		NewRenderer: func(config.Resolved, store.Store, submitter.Submitter) (tui.Renderer, error) {
+		NewRenderer: func(config.Resolved, store.Store, submitter.Submitter, clipboard.Reader) (tui.Renderer, error) {
 			return cancelRenderer{}, nil
 		},
 		NewSubmitter: func(config.Resolved, store.Store, daemon.Client, tmux.TargetContext) submitter.Submitter {

@@ -190,7 +190,7 @@ func fakeDeps(t *testing.T) Deps {
 		NewClip: func(config.Resolved) (clipboard.Reader, error) {
 			return nil, ErrNotImplemented
 		},
-		NewRenderer: func(config.Resolved, store.Store, submitter.Submitter) (tui.Renderer, error) {
+		NewRenderer: func(config.Resolved, store.Store, submitter.Submitter, clipboard.Reader) (tui.Renderer, error) {
 			return nil, ErrNotImplemented
 		},
 	}

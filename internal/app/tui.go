@@ -83,7 +83,14 @@ func runTUI(deps Deps, f tuiFlags) error {
 	// Renderer paths used by TPROMPT_TEST_RENDERER fall back to the direct
 	// sub.Submit below.
 	sub := deps.NewSubmitter(cfg, s, client, target)
-	renderer, err := deps.NewRenderer(cfg, s, sub)
+
+	// Build the clipboard reader for the Renderer. Soft-fail: if no reader is
+	// available on this host, we still open the TUI — the Model surfaces a
+	// "clipboard reader not configured" inline error if the user presses the
+	// clipboard key. Prompt selection remains fully functional regardless.
+	clip, _ := deps.NewClip(cfg)
+
+	renderer, err := deps.NewRenderer(cfg, s, sub, clip)
 	if err != nil {
 		return err
 	}

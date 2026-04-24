@@ -55,7 +55,7 @@ func tuiDeps(t *testing.T, fs *fakeStore, rend tui.Renderer, cfgOverride ...func
 	deps.NewTmux = func() (tmux.Adapter, error) {
 		return &fakeAdapter{paneExists: true}, nil
 	}
-	deps.NewRenderer = func(config.Resolved, store.Store, submitter.Submitter) (tui.Renderer, error) {
+	deps.NewRenderer = func(config.Resolved, store.Store, submitter.Submitter, clipboard.Reader) (tui.Renderer, error) {
 		return rend, nil
 	}
 	return deps
@@ -518,6 +518,50 @@ func TestTUI_ClipboardSelectionInvokesSubmitterWithDeps(t *testing.T) {
 		t.Error("daemon client not threaded into submitter")
 	}
 }
+
+// runTUI must thread the clipboard reader returned by deps.NewClip into the
+// Renderer factory so the Model can read the clipboard when the user selects
+// the clipboard row (AUR-26 search Enter on clip row, AUR-25 board P).
+// Without this wire-up the Model's selectClipboard falls through to the
+// "clipboard reader not configured" inline error and never submits.
+func TestTUI_ThreadsClipboardReaderIntoRenderer(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, &fakeStore{}, rend)
+	// Use a pointer-receiver Reader so identity comparison is safe — the
+	// default clipboard.NewStatic returns a slice-backed value that can't be
+	// compared with !=.
+	wantClip := &taggedReader{}
+	deps.NewClip = func(config.Resolved) (clipboard.Reader, error) {
+		return wantClip, nil
+	}
+	var gotClip clipboard.Reader
+	deps.NewRenderer = func(_ config.Resolved, _ store.Store, _ submitter.Submitter, clip clipboard.Reader) (tui.Renderer, error) {
+		gotClip = clip
+		return rend, nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	if err != nil {
+		t.Fatalf("executeRootWith: %v", err)
+	}
+	if gotClip == nil {
+		t.Fatal("NewRenderer called with nil Clip — runTUI must thread deps.NewClip through")
+	}
+	got, ok := gotClip.(*taggedReader)
+	if !ok {
+		t.Fatalf("NewRenderer Clip type = %T, want *taggedReader", gotClip)
+	}
+	if got != wantClip {
+		t.Fatal("NewRenderer Clip was not the reader returned by deps.NewClip")
+	}
+}
+
+// taggedReader is an identity-comparable clipboard.Reader for tests. The
+// stdlib clipboard.NewStatic returns a slice-backed Reader that cannot be
+// compared with ==.
+type taggedReader struct{}
+
+func (*taggedReader) Read() ([]byte, error) { return nil, nil }
 
 // When the Model has already submitted the clipboard action via tea.Cmd
 // (AUR-26 search Enter on clip row, AUR-25 board P), the Result carries
