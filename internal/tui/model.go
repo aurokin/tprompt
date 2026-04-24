@@ -343,6 +343,7 @@ func clipboardErrorText(err error) string {
 	}
 }
 
+
 // promptKeyMatches implements the case-insensitive keybind contract: letters
 // fold to lowercase on both sides, non-letters must match literally.
 func promptKeyMatches(got, bound rune) bool {
