@@ -356,12 +356,46 @@ func newPickCmd(deps Deps) *cobra.Command {
 		Short: "Select a prompt via an external picker (picker_command)",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			if _, err := deps.LoadConfig(*deps.ConfigPath); err != nil {
-				return err
-			}
-			return ErrNotImplemented
+			return runPick(deps)
 		},
 	}
+}
+
+func runPick(deps Deps) error {
+	cfg, err := deps.LoadConfig(*deps.ConfigPath)
+	if err != nil {
+		return err
+	}
+	if len(cfg.PickerArgv) == 0 {
+		return &config.ValidationError{Field: "picker_command", Message: "must be set for pick"}
+	}
+
+	s, err := deps.NewStore(cfg)
+	if err != nil {
+		return err
+	}
+	summaries, err := s.List()
+	if err != nil {
+		return err
+	}
+	ids := make([]string, 0, len(summaries))
+	for _, summary := range summaries {
+		ids = append(ids, summary.ID)
+	}
+
+	p, err := deps.NewPicker(cfg)
+	if err != nil {
+		return err
+	}
+	selected, cancelled, err := p.Select(ids)
+	if err != nil {
+		return err
+	}
+	if cancelled {
+		return nil
+	}
+	_, _ = fmt.Fprintln(deps.Stdout, selected)
+	return nil
 }
 
 func newDaemonCmd(deps Deps) *cobra.Command {

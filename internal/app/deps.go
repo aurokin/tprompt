@@ -9,6 +9,7 @@ import (
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
+	"github.com/hsadler/tprompt/internal/picker"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/submitter"
 	"github.com/hsadler/tprompt/internal/tmux"
@@ -32,6 +33,7 @@ type Deps struct {
 	NewStore         func(cfg config.Resolved) (store.Store, error)
 	NewTmux          func() (tmux.Adapter, error)
 	NewClip          func(cfg config.Resolved) (clipboard.Reader, error)
+	NewPicker        func(cfg config.Resolved) (picker.Picker, error)
 	NewDaemonClient  func(cfg config.Resolved) (daemon.Client, error)
 	NewRenderer      func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error)
 	NewSubmitter     func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter
@@ -57,6 +59,9 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 		},
 		NewClip: func(cfg config.Resolved) (clipboard.Reader, error) {
 			return newClipboardReader(cfg, lookupEnv)
+		},
+		NewPicker: func(cfg config.Resolved) (picker.Picker, error) {
+			return picker.NewCommand(cfg.PickerArgv), nil
 		},
 		NewDaemonClient: func(cfg config.Resolved) (daemon.Client, error) {
 			return daemon.NewSocketClient(cfg.SocketPath), nil

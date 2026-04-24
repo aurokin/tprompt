@@ -403,6 +403,45 @@ func TestNormalizeRejectsUnparseableClipboardCommand(t *testing.T) {
 	}
 }
 
+func TestNormalizePickerArgv(t *testing.T) {
+	dir := t.TempDir()
+	promptsDir := filepath.Join(dir, "prompts")
+	mustMkdir(t, promptsDir)
+
+	cfg := Default()
+	cfg.PromptsDir = promptsDir
+	cfg.PickerCommand = `fzf --prompt "tprompt> "`
+	r, err := Normalize(cfg, "")
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	want := []string{"fzf", "--prompt", "tprompt> "}
+	if !stringSliceEqual(r.PickerArgv, want) {
+		t.Fatalf("PickerArgv = %v, want %v", r.PickerArgv, want)
+	}
+}
+
+func TestNormalizeRejectsUnparseablePickerCommand(t *testing.T) {
+	dir := t.TempDir()
+	promptsDir := filepath.Join(dir, "prompts")
+	mustMkdir(t, promptsDir)
+
+	cfg := Default()
+	cfg.PromptsDir = promptsDir
+	cfg.PickerCommand = `"unterminated`
+	_, err := Normalize(cfg, "")
+	if err == nil {
+		t.Fatal("want error for bad picker_command, got nil")
+	}
+	var ve *ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want *ValidationError, got %T: %v", err, err)
+	}
+	if ve.Field != "picker_command" {
+		t.Fatalf("Field = %q", ve.Field)
+	}
+}
+
 func TestNormalizeEmptyClipboardCommand(t *testing.T) {
 	dir := t.TempDir()
 	promptsDir := filepath.Join(dir, "prompts")
@@ -417,6 +456,18 @@ func TestNormalizeEmptyClipboardCommand(t *testing.T) {
 	if r.ClipboardArgv != nil {
 		t.Fatalf("ClipboardArgv = %v, want nil", r.ClipboardArgv)
 	}
+}
+
+func stringSliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestResolveDaemonIgnoresPromptAndClipboardFields(t *testing.T) {

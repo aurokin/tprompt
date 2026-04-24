@@ -7,6 +7,7 @@ import (
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
+	"github.com/hsadler/tprompt/internal/picker"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/submitter"
 	"github.com/hsadler/tprompt/internal/tmux"
@@ -191,6 +192,9 @@ func fakeDeps(t *testing.T) Deps {
 			return nil, ErrNotImplemented
 		},
 		NewClip: func(config.Resolved) (clipboard.Reader, error) {
+			return nil, ErrNotImplemented
+		},
+		NewPicker: func(config.Resolved) (picker.Picker, error) {
 			return nil, ErrNotImplemented
 		},
 		NewRenderer: func(config.Resolved, store.Store, submitter.Submitter) (tui.Renderer, error) {

@@ -9,6 +9,7 @@ import (
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
+	"github.com/hsadler/tprompt/internal/picker"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/submitter"
 	"github.com/hsadler/tprompt/internal/tmux"
@@ -55,9 +56,14 @@ func TestZeroArgCommandsAcceptBareInvocation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, err := executeRoot(t, tt.args...)
-			if !errors.Is(err, ErrNotImplemented) {
-				t.Fatalf("want ErrNotImplemented, got %v", err)
+			fs := &fakeStore{summaries: []store.Summary{}}
+			deps := workingDeps(t, fs)
+			deps.NewPicker = func(config.Resolved) (picker.Picker, error) {
+				return &fakePicker{cancelled: true}, nil
+			}
+			_, _, err := executeRootWith(t, deps, tt.args...)
+			if err != nil {
+				t.Fatalf("want nil, got %v", err)
 			}
 		})
 	}
@@ -99,6 +105,18 @@ type fakeStore struct {
 	discoverErr error
 }
 
+type fakePicker struct {
+	selected  string
+	cancelled bool
+	err       error
+	gotIDs    []string
+}
+
+func (f *fakePicker) Select(ids []string) (string, bool, error) {
+	f.gotIDs = append([]string(nil), ids...)
+	return f.selected, f.cancelled, f.err
+}
+
 func (f *fakeStore) Discover() error { return f.discoverErr }
 
 func (f *fakeStore) List() ([]store.Summary, error) {
@@ -131,6 +149,7 @@ func workingDeps(t *testing.T, fs *fakeStore) Deps {
 		LoadConfig: func(string) (config.Resolved, error) {
 			return config.Resolved{
 				PromptsDir: "/test/prompts",
+				PickerArgv: []string{"fzf"},
 			}, nil
 		},
 		LoadPasteConfig: func(string) (config.Resolved, error) {
@@ -155,6 +174,9 @@ func workingDeps(t *testing.T, fs *fakeStore) Deps {
 			return nil, ErrNotImplemented
 		},
 		NewClip: func(config.Resolved) (clipboard.Reader, error) {
+			return nil, ErrNotImplemented
+		},
+		NewPicker: func(config.Resolved) (picker.Picker, error) {
 			return nil, ErrNotImplemented
 		},
 		NewDaemonClient: func(config.Resolved) (daemon.Client, error) {
@@ -209,6 +231,66 @@ func TestListEmptyStore(t *testing.T) {
 	}
 	if stdout != "" {
 		t.Fatalf("want empty stdout, got %q", stdout)
+	}
+}
+
+func TestPickPrintsSelectedID(t *testing.T) {
+	fs := &fakeStore{
+		summaries: []store.Summary{
+			{ID: "alpha"},
+			{ID: "beta"},
+		},
+	}
+	fp := &fakePicker{selected: "beta"}
+	deps := workingDeps(t, fs)
+	deps.NewPicker = func(config.Resolved) (picker.Picker, error) { return fp, nil }
+
+	stdout, _, err := executeRootWith(t, deps, "pick")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout != "beta\n" {
+		t.Fatalf("stdout = %q, want beta newline", stdout)
+	}
+	wantIDs := []string{"alpha", "beta"}
+	if !stringSliceEqual(fp.gotIDs, wantIDs) {
+		t.Fatalf("picker ids = %v, want %v", fp.gotIDs, wantIDs)
+	}
+}
+
+func TestPickCancelPrintsNothing(t *testing.T) {
+	fs := &fakeStore{summaries: []store.Summary{{ID: "alpha"}}}
+	deps := workingDeps(t, fs)
+	deps.NewPicker = func(config.Resolved) (picker.Picker, error) {
+		return &fakePicker{cancelled: true}, nil
+	}
+
+	stdout, _, err := executeRootWith(t, deps, "pick")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+}
+
+func TestPickRejectsEmptyPickerCommand(t *testing.T) {
+	fs := &fakeStore{summaries: []store.Summary{{ID: "alpha"}}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{PromptsDir: "/test/prompts"}, nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "pick")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	var ve *config.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want *config.ValidationError, got %T: %v", err, err)
+	}
+	if ve.Field != "picker_command" {
+		t.Fatalf("field = %q, want picker_command", ve.Field)
 	}
 }
 

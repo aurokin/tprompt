@@ -617,6 +617,27 @@ Read first:
 - `docs/storage/clipboard.md`
 - `docs/tmux/delivery.md`
 
+## Phase 5.75 — `tprompt pick`
+
+Status: complete.
+
+Goal: close the CLI-surface drift between `EXPECTATIONS.md` and the
+implementation by making `tprompt pick` a small scripting helper.
+
+Tasks:
+
+- implement `tprompt pick`
+- run the configured external picker command (`picker_command`, default `fzf`)
+- send prompt IDs to the picker on stdin
+- print the selected prompt ID to stdout
+- treat picker cancellation as success with empty stdout
+- keep `pick` separate from tmux delivery, the daemon, and the built-in TUI
+
+Read first:
+
+- `docs/commands/cli.md`
+- `docs/implementation/interfaces.md`
+
 ## Phase 6 — tests and hardening
 
 Goal: make failures explicit and predictable.
@@ -649,7 +670,6 @@ Tasks:
 - improve `doctor` (add a daemon-reachability check now that the socket is real)
 - improve help text
 - improve prompt list/show formatting (show resolved keybind)
-- support configurable picker command if desired (for `tprompt pick` only)
 - refine logs and daemon status output
 - **CLI auto-start of the daemon** (deferred from Phase 4): when the TUI flow
   or `daemon status` finds the socket unreachable, optionally spawn the

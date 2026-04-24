@@ -74,6 +74,7 @@ type Resolved struct {
 	VerificationPollIntervalMS int
 	ClipboardReadCommand       string
 	ClipboardArgv              []string
+	PickerArgv                 []string
 	MaxPasteBytes              int64
 	Sanitize                   string
 	KeybindPool                []rune
@@ -182,6 +183,12 @@ func Normalize(cfg Config, configPath string) (Resolved, error) {
 	r.SocketPath = expandHome(cfg.SocketPath)
 	r.LogPath = expandHome(cfg.LogPath)
 
+	pickerArgv, err := parseCommandArgv("picker_command", cfg.PickerCommand)
+	if err != nil {
+		return Resolved{}, err
+	}
+	r.PickerArgv = pickerArgv
+
 	reservedPrintable := make(map[rune]string)
 	reservedSymbolic := make(map[string]string)
 	for role, raw := range cfg.ReservedKeys {
@@ -206,24 +213,33 @@ func Normalize(cfg Config, configPath string) (Resolved, error) {
 
 	r.KeybindPool = normalizePool(cfg.KeybindPool, reservedPrintable)
 
-	if cfg.ClipboardReadCommand != "" {
-		argv, err := shlex.Split(cfg.ClipboardReadCommand)
-		if err != nil {
-			return Resolved{}, &ValidationError{
-				Field:   "clipboard_read_command",
-				Message: fmt.Sprintf("cannot parse as argv: %v", err),
-			}
-		}
-		if len(argv) == 0 {
-			return Resolved{}, &ValidationError{
-				Field:   "clipboard_read_command",
-				Message: "parses to empty argv",
-			}
-		}
-		r.ClipboardArgv = argv
+	clipboardArgv, err := parseCommandArgv("clipboard_read_command", cfg.ClipboardReadCommand)
+	if err != nil {
+		return Resolved{}, err
 	}
+	r.ClipboardArgv = clipboardArgv
 
 	return r, nil
+}
+
+func parseCommandArgv(field, command string) ([]string, error) {
+	if command == "" {
+		return nil, nil
+	}
+	argv, err := shlex.Split(command)
+	if err != nil {
+		return nil, &ValidationError{
+			Field:   field,
+			Message: fmt.Sprintf("cannot parse as argv: %v", err),
+		}
+	}
+	if len(argv) == 0 {
+		return nil, &ValidationError{
+			Field:   field,
+			Message: "parses to empty argv",
+		}
+	}
+	return argv, nil
 }
 
 // Validate checks a Resolved config for semantic errors. Call after Normalize.
