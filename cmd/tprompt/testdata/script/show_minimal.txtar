@@ -8,7 +8,7 @@ stdout 'Source: .*/prompts/bare\.md'
 ! stdout 'Title:'
 ! stdout 'Description:'
 ! stdout 'Tags:'
-stdout 'Key:'
+stdout 'Key: 1 \(auto\)'
 stdout 'Just a body\.'
 ! stderr .
 

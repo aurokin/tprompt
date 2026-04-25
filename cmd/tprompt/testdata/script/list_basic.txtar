@@ -1,8 +1,8 @@
-# list prints prompt IDs alphabetically, one per line.
+# list prints prompt IDs alphabetically with resolved board key state.
 
 mkdir prompts
 tprompt list --config config.toml
-stdout '^bug-hunt\ncode-review\nno-frontmatter\n$'
+stdout '^bug-hunt  key b \(explicit\)\ncode-review  key c \(explicit\)\nno-frontmatter  key 1 \(auto\)\n$'
 ! stderr .
 
 -- config.toml --
