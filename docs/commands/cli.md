@@ -24,15 +24,27 @@ deep-review  key none (overflow, not on board)
 
 ### `tprompt show <id>`
 
-Shows the resolved prompt.
+Shows the resolved prompt. Output order:
 
-Recommended default output:
+- `ID:` — prompt ID
+- `Source:` — source file path
+- `Title:`, `Description:`, `Tags:` — included only when the frontmatter sets them
+- `Key:` — resolved board key state, formatted as `<key> (explicit)`,
+  `<key> (auto)`, or `none (overflow, not on board)`
+- a blank line, then the markdown body
 
-- prompt ID
-- source file path
-- metadata summary (title, description, tags) if present
-- resolved board key state (`explicit`, `auto`, or `overflow`)
-- body
+Example:
+
+```text
+ID: code-review
+Source: /home/user/.config/tprompt/prompts/code-review.md
+Title: Code Review
+Description: Deep review prompt focused on correctness, risk, tests
+Tags: review, code
+Key: c (explicit)
+
+Review this code for correctness, risk, and missing tests.
+```
 
 ### `tprompt send <id>`
 
@@ -87,17 +99,41 @@ Launches the built-in interactive TUI, which submits a delivery job to the daemo
 
 ### `tprompt doctor`
 
-Checks environment and configuration.
+Checks environment and configuration. Each line is prefixed `ok`, `warn`, or
+`FAIL` so output is greppable.
 
-Checks:
+Checks, in order:
 
-- config loads and validates
-- prompt directory exists
-- prompt files discoverable
-- duplicate IDs absent
-- duplicate or reserved keybinds absent
-- inside tmux or not
-- clipboard reader resolved and installed when needed
+1. **config loads and validates** — `FAIL` on any load or validation error.
+2. **prompts directory exists** — `FAIL` when missing.
+3. **prompts discovered** — `FAIL` on duplicate IDs, malformed
+   frontmatter, or duplicate/reserved/malformed `key:` values; reports the
+   discovered prompt count on success.
+4. **inside tmux** — `warn` when `$TMUX` is unset.
+5. **clipboard reader** — `warn` when no reader is auto-detected and no
+   override is configured, or when a configured override is missing on
+   `$PATH`. `tprompt send`-only workflows do not need a reader.
+6. **picker command** — `warn` when `picker_command` is empty or its binary is
+   not on `$PATH`. Only `tprompt pick` needs this.
+7. **daemon reachable** — `warn` when the configured socket is unreachable or
+   the daemon is not running. Only the TUI flow requires it; direct
+   `send`/`paste` are unaffected.
+
+Only the first three checks affect the exit code. Tmux, clipboard, picker, and
+daemon failures are reported as warnings so a user who only runs `tprompt
+send` is not blocked by missing optional tooling.
+
+Example output:
+
+```text
+ok   config loaded (/home/user/.config/tprompt/config.toml)
+ok   prompts directory exists (/home/user/.config/tprompt/prompts)
+ok   4 prompts discovered
+ok   inside tmux
+ok   clipboard reader: pbpaste (auto-detected, darwin)
+warn picker command: fzf not found on $PATH (tprompt pick unavailable)
+warn daemon not running (/home/user/.local/state/tprompt/daemon.sock): connection refused
+```
 
 ### `tprompt daemon start`
 ### `tprompt daemon status`

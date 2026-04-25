@@ -121,14 +121,37 @@ The banner appears in the tmux status area of the originating client when `clien
 
 Default path: `~/.local/state/tprompt/daemon.log`.
 
-Log entries are single-line logfmt records. Failure entries include timestamp, job ID, target pane, source, prompt ID when the source is a prompt, outcome, and message. Payload bodies are **never** logged — prompt bodies and clipboard bytes stay out of the log, and sanitizer rejections record only class + byte offset.
+Log entries are single-line logfmt records. Each entry includes a timestamp
+plus any non-empty subset of `job_id`, `pane`, `source`, `prompt_id`,
+`outcome`, and `msg`. Lifecycle events (`started`, `stopped`) carry no job
+fields. Payload bodies are **never** logged — prompt bodies and clipboard
+bytes stay out of the log, and sanitizer rejections record only class + byte
+offset.
 
-Example failure log entries:
+`outcome=` is a closed set so log filters stay stable:
+
+| Outcome | Meaning |
+|---|---|
+| `started` | daemon process began listening on its socket |
+| `stopped` | daemon exited gracefully |
+| `delivered` | job delivered successfully (currently not logged on success — reserved) |
+| `replaced` | pending job dropped because a newer job arrived for the same pane |
+| `timeout` | verification timed out before injection |
+| `pane_missing` | target pane vanished |
+| `sanitize_reject` | strict-mode sanitizer rejected the payload |
+| `oversize` | payload exceeded `max_paste_bytes` before any tmux command ran |
+| `delivery_error` | tmux command (`load-buffer` / `paste-buffer` / `send-keys`) returned non-zero |
+| `ipc_error` | local IPC failure (socket, connection, protocol) |
+| `warning` | non-fatal diagnostic such as post-injection verification |
+
+Example log entries:
 
 ```text
+time=2026-04-16T12:30:01Z outcome=started msg="pid=12345 socket=/run/user/1000/tprompt/daemon.sock"
 time=2026-04-16T12:30:45Z job_id=j-1 pane=%5 source=prompt prompt_id=code-review outcome=timeout msg="verification timed out after 5000ms"
 time=2026-04-16T12:31:03Z job_id=j-2 pane=%5 source=clipboard outcome=delivery_error msg="tmux paste-buffer into %5 failed: tmux server died"
 time=2026-04-16T12:31:19Z job_id=j-3 pane=%5 source=prompt prompt_id=code-review outcome=warning msg="post-injection verification: pane output appeared unchanged after delivery; this is a diagnostic warning, not proof that the target application ignored the input"
+time=2026-04-16T12:35:00Z outcome=stopped
 ```
 
 `tprompt daemon status` reports the running daemon in a deterministic, scan-friendly block:
