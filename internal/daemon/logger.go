@@ -31,11 +31,12 @@ const (
 // offset in Msg, never raw content (docs/commands/daemon.md "Append-only
 // log").
 type Entry struct {
-	JobID   string
-	Pane    string
-	Source  string
-	Outcome string
-	Msg     string
+	JobID    string
+	Pane     string
+	Source   string
+	PromptID string
+	Outcome  string
+	Msg      string
 }
 
 // Logger writes append-only one-line logfmt entries to a file shared across
@@ -145,6 +146,7 @@ func formatLine(t time.Time, e Entry) string {
 	appendField(&b, "job_id", e.JobID)
 	appendField(&b, "pane", e.Pane)
 	appendField(&b, "source", e.Source)
+	appendField(&b, "prompt_id", e.PromptID)
 	appendField(&b, "outcome", e.Outcome)
 	appendField(&b, "msg", e.Msg)
 	b.WriteByte('\n')
