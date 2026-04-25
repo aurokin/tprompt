@@ -17,10 +17,11 @@ import (
 // "always ready" so the executor reaches the delivery stage without extra
 // setup.
 type executorAdapter struct {
-	mu         sync.Mutex
-	pasteCalls []executorCall
-	typeCalls  []executorCall
-	displays   []displayCall
+	mu          sync.Mutex
+	pasteCalls  []executorCall
+	typeCalls   []executorCall
+	displays    []displayCall
+	displayHook func(tmux.MessageTarget, string) error
 
 	pasteErr  error
 	typeErr   error
@@ -106,6 +107,12 @@ func (a *executorAdapter) Type(ctx context.Context, t tmux.TargetContext, body s
 
 func (a *executorAdapter) DisplayMessage(target tmux.MessageTarget, message string) error {
 	a.mu.Lock()
+	hook := a.displayHook
+	if hook != nil {
+		a.displays = append(a.displays, displayCall{Target: target, Message: message})
+		a.mu.Unlock()
+		return hook(target, message)
+	}
 	defer a.mu.Unlock()
 	a.displays = append(a.displays, displayCall{Target: target, Message: message})
 	return nil
@@ -291,6 +298,42 @@ func TestExecutorPostInjectionVerificationPostCaptureFailureDoesNotFailDelivery(
 	}
 	if !strings.Contains(logBuf.String(), "capture after delivery failed") {
 		t.Fatalf("expected capture warning log, got %q", logBuf.String())
+	}
+}
+
+func TestExecutorPostInjectionWarningRetriesWithoutPaneWhenBannerTargetFails(t *testing.T) {
+	a := newExecutorAdapter()
+	a.captureTails = []string{"before"}
+	a.captureErrs = []error{nil, errors.New("capture failed")}
+	a.displayHook = func(target tmux.MessageTarget, _ string) error {
+		if target.PaneID != "" {
+			return &tmux.DeliveryError{Op: "display-message", Message: "can't find pane"}
+		}
+		return nil
+	}
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+	e.EnablePostInjectionVerification(true)
+
+	job := makeDeliveryJob("hi", "paste")
+	job.Origin = &tmux.OriginContext{Session: "$1", Window: "@2"}
+	e.Run(context.Background(), job)
+
+	displays := a.snapshotDisplays()
+	if len(displays) != 2 {
+		t.Fatalf("expected pane-scoped warning plus broader fallback, got %+v", displays)
+	}
+	if displays[0].Target.PaneID != "%5" {
+		t.Fatalf("first warning should target original pane, got %+v", displays[0].Target)
+	}
+	if displays[1].Target.PaneID != "" {
+		t.Fatalf("fallback warning should clear missing pane, got %+v", displays[1].Target)
+	}
+	if displays[1].Target.Window != "@2" || displays[1].Target.Session != "$1" {
+		t.Fatalf("fallback warning should preserve broader scope, got %+v", displays[1].Target)
+	}
+	if !strings.Contains(logBuf.String(), "outcome="+OutcomeWarning) {
+		t.Fatalf("expected warning log, got %q", logBuf.String())
 	}
 }
 

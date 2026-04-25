@@ -204,7 +204,21 @@ func (e *Executor) verifyPostInjection(ctx context.Context, job Job, before stri
 
 func (e *Executor) handleWarning(job Job, msg string) {
 	_ = e.logger.Log(jobEntry(job, OutcomeWarning, msg))
-	_ = e.adapter.DisplayMessage(job.messageTarget(), BannerPrefix+"warning: "+msg)
+	e.displayWarning(job.messageTarget(), BannerPrefix+"warning: "+msg)
+}
+
+func (e *Executor) displayWarning(target tmux.MessageTarget, msg string) {
+	if err := e.adapter.DisplayMessage(target, msg); err == nil {
+		return
+	}
+	if target.PaneID == "" {
+		return
+	}
+	target.PaneID = ""
+	if target.ClientTTY == "" && target.Window == "" && target.Session == "" {
+		return
+	}
+	_ = e.adapter.DisplayMessage(target, msg)
 }
 
 func jobEntry(job Job, outcome, msg string) Entry {
