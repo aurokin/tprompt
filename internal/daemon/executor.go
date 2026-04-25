@@ -134,10 +134,11 @@ func (e *Executor) deliver(ctx context.Context, job Job, cleaned []byte) error {
 		return err
 	}
 
-	if err := ctx.Err(); err != nil {
+	if err := e.verifyPostInjection(ctx, job, before, captureErr); isContextDone(ctx, err) {
+		return nil
+	} else {
 		return err
 	}
-	return e.verifyPostInjection(ctx, job, before, captureErr)
 }
 
 func canceled(ctx context.Context) (bool, error) {
@@ -187,6 +188,9 @@ func (e *Executor) verifyPostInjection(ctx context.Context, job Job, before stri
 	if beforeErr != nil {
 		e.handleWarning(job, beforeErr.Error())
 		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	after, err := e.adapter.CapturePaneTail(ctx, job.PaneID, postInjectionCaptureLines)
 	if err != nil {

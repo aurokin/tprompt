@@ -683,7 +683,7 @@ func TestExecutorCancellationDuringPreCaptureIsSilent(t *testing.T) {
 	}
 }
 
-func TestExecutorCancellationBeforePostCaptureIsSilent(t *testing.T) {
+func TestExecutorCancellationBeforePostCaptureStillCompletesDelivery(t *testing.T) {
 	a := newExecutorAdapter()
 	var cancel context.CancelFunc
 	a.captureTails = []string{"before", "same"}
@@ -698,8 +698,8 @@ func TestExecutorCancellationBeforePostCaptureIsSilent(t *testing.T) {
 	ctx, cancelFn := context.WithCancel(context.Background())
 	cancel = cancelFn
 	err := e.deliver(ctx, makeDeliveryJob("hi", "paste"), []byte("hi"))
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("deliver error = %v, want context.Canceled", err)
+	if err != nil {
+		t.Fatalf("deliver error = %v, want nil after successful paste", err)
 	}
 	if got := a.snapshotCaptureCalls(); got != 1 {
 		t.Fatalf("canceled delivery should skip post-capture, got %d captures", got)
@@ -712,7 +712,7 @@ func TestExecutorCancellationBeforePostCaptureIsSilent(t *testing.T) {
 	}
 }
 
-func TestExecutorCancellationDuringPostCaptureIsSilent(t *testing.T) {
+func TestExecutorCancellationDuringPostCaptureStillCompletesDelivery(t *testing.T) {
 	a := newExecutorAdapter()
 	captureStarted := make(chan struct{})
 	captureRelease := make(chan struct{})
@@ -740,8 +740,8 @@ func TestExecutorCancellationDuringPostCaptureIsSilent(t *testing.T) {
 	cancel()
 	close(captureRelease)
 
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("deliver error = %v, want context.Canceled", err)
+	if err := <-done; err != nil {
+		t.Fatalf("deliver error = %v, want nil after successful paste", err)
 	}
 	if got := a.snapshotCaptureCalls(); got != 2 {
 		t.Fatalf("capture calls = %d, want 2", got)
