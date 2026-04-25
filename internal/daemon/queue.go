@@ -299,13 +299,7 @@ func (q *Queue) finishWorker(state *workerState, delivered bool) *workerState {
 }
 
 func (q *Queue) handleReplaced(displaced Job, replacingJobID string) {
-	_ = q.logger.Log(Entry{
-		JobID:   displaced.JobID,
-		Pane:    displaced.PaneID,
-		Source:  displaced.Source,
-		Outcome: OutcomeReplaced,
-		Msg:     fmt.Sprintf("replaced by job %s", replacingJobID),
-	})
+	_ = q.logger.Log(jobEntry(displaced, OutcomeReplaced, fmt.Sprintf("replaced by job %s", replacingJobID)))
 	_ = q.adapter.DisplayMessage(displaced.messageTarget(), ReplacedBanner)
 }
 
