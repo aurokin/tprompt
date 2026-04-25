@@ -17,15 +17,21 @@ import (
 // "always ready" so the executor reaches the delivery stage without extra
 // setup.
 type executorAdapter struct {
-	mu         sync.Mutex
-	pasteCalls []executorCall
-	typeCalls  []executorCall
-	displays   []displayCall
+	mu          sync.Mutex
+	pasteCalls  []executorCall
+	typeCalls   []executorCall
+	displays    []displayCall
+	displayHook func(tmux.MessageTarget, string) error
 
 	pasteErr  error
 	typeErr   error
 	pasteHook func(context.Context, tmux.TargetContext, string, bool) error
 	typeHook  func(context.Context, tmux.TargetContext, string, bool) error
+
+	captureCalls int
+	captureTails []string
+	captureErrs  []error
+	captureHook  func(context.Context, string, int) (string, error)
 
 	paneExists      bool
 	paneExistsErr   error
@@ -55,7 +61,25 @@ func (a *executorAdapter) IsTargetSelected(context.Context, tmux.TargetContext) 
 	return a.targetSelected, a.targetSelectErr
 }
 
-func (a *executorAdapter) CapturePaneTail(string, int) (string, error) { return "", nil }
+func (a *executorAdapter) CapturePaneTail(ctx context.Context, paneID string, lines int) (string, error) {
+	a.mu.Lock()
+	hook := a.captureHook
+	if hook != nil {
+		a.captureCalls++
+		a.mu.Unlock()
+		return hook(ctx, paneID, lines)
+	}
+	defer a.mu.Unlock()
+	call := a.captureCalls
+	a.captureCalls++
+	if call < len(a.captureErrs) && a.captureErrs[call] != nil {
+		return "", a.captureErrs[call]
+	}
+	if call < len(a.captureTails) {
+		return a.captureTails[call], nil
+	}
+	return "", nil
+}
 
 func (a *executorAdapter) Paste(ctx context.Context, t tmux.TargetContext, body string, enter bool) error {
 	a.mu.Lock()
@@ -83,6 +107,12 @@ func (a *executorAdapter) Type(ctx context.Context, t tmux.TargetContext, body s
 
 func (a *executorAdapter) DisplayMessage(target tmux.MessageTarget, message string) error {
 	a.mu.Lock()
+	hook := a.displayHook
+	if hook != nil {
+		a.displays = append(a.displays, displayCall{Target: target, Message: message})
+		a.mu.Unlock()
+		return hook(target, message)
+	}
 	defer a.mu.Unlock()
 	a.displays = append(a.displays, displayCall{Target: target, Message: message})
 	return nil
@@ -94,6 +124,12 @@ func (a *executorAdapter) snapshotDisplays() []displayCall {
 	out := make([]displayCall, len(a.displays))
 	copy(out, a.displays)
 	return out
+}
+
+func (a *executorAdapter) snapshotCaptureCalls() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.captureCalls
 }
 
 func basePolicy() VerificationPolicy {
@@ -130,6 +166,9 @@ func TestExecutorHappyPasteIsSilent(t *testing.T) {
 	if logBuf.Len() != 0 {
 		t.Fatalf("expected no log on success, got: %q", logBuf.String())
 	}
+	if got := a.snapshotCaptureCalls(); got != 0 {
+		t.Fatalf("post-injection verification should be disabled by default, got %d captures", got)
+	}
 }
 
 func TestExecutorHappyTypeIsSilent(t *testing.T) {
@@ -144,6 +183,157 @@ func TestExecutorHappyTypeIsSilent(t *testing.T) {
 	}
 	if displays := a.snapshotDisplays(); len(displays) != 0 {
 		t.Fatalf("expected no banner on success, got: %+v", displays)
+	}
+}
+
+func TestExecutorPostInjectionVerificationChangedTailIsSilent(t *testing.T) {
+	a := newExecutorAdapter()
+	a.captureTails = []string{"before", "after"}
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+	e.EnablePostInjectionVerification(true)
+
+	e.Run(context.Background(), makeDeliveryJob("hello", "paste"))
+
+	if got := a.snapshotCaptureCalls(); got != 2 {
+		t.Fatalf("capture calls = %d, want before and after", got)
+	}
+	if displays := a.snapshotDisplays(); len(displays) != 0 {
+		t.Fatalf("changed pane tail should not warn, got: %+v", displays)
+	}
+	if logBuf.Len() != 0 {
+		t.Fatalf("changed pane tail should not log, got: %q", logBuf.String())
+	}
+}
+
+func TestExecutorPostInjectionVerificationUnchangedTailWarns(t *testing.T) {
+	a := newExecutorAdapter()
+	a.captureTails = []string{"same", "same"}
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+	e.EnablePostInjectionVerification(true)
+
+	e.Run(context.Background(), makeDeliveryJob("SECRET PROMPT BODY", "paste"))
+
+	displays := a.snapshotDisplays()
+	if len(displays) != 1 {
+		t.Fatalf("expected warning banner, got %d", len(displays))
+	}
+	if !strings.Contains(displays[0].Message, "warning: post-injection verification") {
+		t.Fatalf("warning banner = %q", displays[0].Message)
+	}
+	logged := logBuf.String()
+	if !strings.Contains(logged, "outcome="+OutcomeWarning) {
+		t.Fatalf("expected warning log, got: %q", logged)
+	}
+	if strings.Contains(logged, "SECRET PROMPT BODY") || strings.Contains(displays[0].Message, "SECRET PROMPT BODY") {
+		t.Fatalf("warning leaked prompt body; log=%q banner=%q", logged, displays[0].Message)
+	}
+}
+
+func TestExecutorPostInjectionVerificationWarningRedactsClipboardBody(t *testing.T) {
+	a := newExecutorAdapter()
+	a.captureTails = []string{"same", "same"}
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+	e.EnablePostInjectionVerification(true)
+
+	job := makeDeliveryJob("SECRET CLIPBOARD BYTES", "paste")
+	job.Source = SourceClipboard
+	job.PromptID = ""
+	e.Run(context.Background(), job)
+
+	displays := a.snapshotDisplays()
+	if len(displays) != 1 {
+		t.Fatalf("expected warning banner, got %d", len(displays))
+	}
+	logged := logBuf.String()
+	if strings.Contains(logged, "SECRET CLIPBOARD BYTES") || strings.Contains(displays[0].Message, "SECRET CLIPBOARD BYTES") {
+		t.Fatalf("warning leaked clipboard body; log=%q banner=%q", logged, displays[0].Message)
+	}
+	if strings.Contains(logged, "prompt_id=") {
+		t.Fatalf("clipboard warning log should omit prompt_id: %q", logged)
+	}
+}
+
+func TestExecutorPostInjectionVerificationCaptureFailureDoesNotFailDelivery(t *testing.T) {
+	a := newExecutorAdapter()
+	a.captureErrs = []error{errors.New("SECRET CAPTURE OUTPUT")}
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+	e.EnablePostInjectionVerification(true)
+
+	e.Run(context.Background(), makeDeliveryJob("hi", "paste"))
+
+	if len(a.pasteCalls) != 1 {
+		t.Fatalf("capture failure should not block delivery, paste calls=%d", len(a.pasteCalls))
+	}
+	if displays := a.snapshotDisplays(); len(displays) != 1 {
+		t.Fatalf("capture failure should warn once, got %+v", displays)
+	}
+	logged := logBuf.String()
+	if !strings.Contains(logged, "capture before delivery failed") {
+		t.Fatalf("expected capture warning log, got %q", logged)
+	}
+	if strings.Contains(logged, "SECRET CAPTURE OUTPUT") {
+		t.Fatalf("warning should not log raw capture failure text: %q", logged)
+	}
+}
+
+func TestExecutorPostInjectionVerificationPostCaptureFailureDoesNotFailDelivery(t *testing.T) {
+	a := newExecutorAdapter()
+	a.captureTails = []string{"before"}
+	a.captureErrs = []error{nil, errors.New("capture failed")}
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+	e.EnablePostInjectionVerification(true)
+
+	e.Run(context.Background(), makeDeliveryJob("hi", "type"))
+
+	if len(a.typeCalls) != 1 {
+		t.Fatalf("post-capture failure should not block delivery, type calls=%d", len(a.typeCalls))
+	}
+	if displays := a.snapshotDisplays(); len(displays) != 1 {
+		t.Fatalf("post-capture failure should warn once, got %+v", displays)
+	}
+	if !strings.Contains(logBuf.String(), "capture after delivery failed") {
+		t.Fatalf("expected capture warning log, got %q", logBuf.String())
+	}
+}
+
+func TestExecutorPostInjectionWarningRetriesWithoutPaneWhenBannerTargetFails(t *testing.T) {
+	a := newExecutorAdapter()
+	a.captureTails = []string{"before"}
+	a.captureErrs = []error{nil, errors.New("capture failed")}
+	a.displayHook = func(target tmux.MessageTarget, _ string) error {
+		if target.PaneID != "" {
+			return &tmux.DeliveryError{Op: "display-message", Message: "can't find pane"}
+		}
+		return nil
+	}
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+	e.EnablePostInjectionVerification(true)
+
+	job := makeDeliveryJob("hi", "paste")
+	job.Origin = &tmux.OriginContext{Session: "$1", Window: "@2"}
+	e.Run(context.Background(), job)
+
+	displays := a.snapshotDisplays()
+	if len(displays) != 2 {
+		t.Fatalf("expected pane-scoped warning plus broader fallback, got %+v", displays)
+	}
+	if displays[0].Target.PaneID != "%5" {
+		t.Fatalf("first warning should target original pane, got %+v", displays[0].Target)
+	}
+	if displays[1].Target.PaneID != "" {
+		t.Fatalf("fallback warning should clear missing pane, got %+v", displays[1].Target)
+	}
+	if displays[1].Target.Window != "@2" || displays[1].Target.Session != "$1" {
+		t.Fatalf("fallback warning should preserve broader scope, got %+v", displays[1].Target)
+	}
+	if !strings.Contains(logBuf.String(), "outcome="+OutcomeWarning) {
+		t.Fatalf("expected warning log, got %q", logBuf.String())
 	}
 }
 
@@ -214,11 +404,15 @@ func TestExecutorPaneVanishedDuringVerify(t *testing.T) {
 	a.paneExists = false
 	var logBuf bytes.Buffer
 	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+	e.EnablePostInjectionVerification(true)
 
 	e.Run(context.Background(), makeDeliveryJob("hi", "paste"))
 
 	if len(a.pasteCalls) != 0 {
 		t.Fatal("paste should not be called when verification fails")
+	}
+	if got := a.snapshotCaptureCalls(); got != 0 {
+		t.Fatalf("post-injection verification should not capture after pane-missing verify failure, got %d captures", got)
 	}
 	displays := a.snapshotDisplays()
 	if len(displays) != 1 {
@@ -415,6 +609,142 @@ func TestExecutorCancellationAfterVerifySkipsDelivery(t *testing.T) {
 
 	if len(a.pasteCalls) != 0 {
 		t.Fatalf("paste should not be called after replacement cancellation")
+	}
+	if displays := a.snapshotDisplays(); len(displays) != 0 {
+		t.Fatalf("cancellation should be silent, got banners: %+v", displays)
+	}
+	if logBuf.Len() != 0 {
+		t.Fatalf("cancellation should be silent, got log: %q", logBuf.String())
+	}
+}
+
+func TestExecutorCancellationBeforePreCaptureIsSilent(t *testing.T) {
+	a := newExecutorAdapter()
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+	e.EnablePostInjectionVerification(true)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := e.deliver(ctx, makeDeliveryJob("hi", "paste"), []byte("hi"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("deliver error = %v, want context.Canceled", err)
+	}
+	if got := a.snapshotCaptureCalls(); got != 0 {
+		t.Fatalf("canceled delivery should not capture, got %d captures", got)
+	}
+	if len(a.pasteCalls) != 0 {
+		t.Fatalf("canceled delivery should not paste, got %d calls", len(a.pasteCalls))
+	}
+	if displays := a.snapshotDisplays(); len(displays) != 0 {
+		t.Fatalf("cancellation should be silent, got banners: %+v", displays)
+	}
+	if logBuf.Len() != 0 {
+		t.Fatalf("cancellation should be silent, got log: %q", logBuf.String())
+	}
+}
+
+func TestExecutorCancellationDuringPreCaptureIsSilent(t *testing.T) {
+	a := newExecutorAdapter()
+	started := make(chan struct{})
+	a.captureHook = func(ctx context.Context, _ string, _ int) (string, error) {
+		close(started)
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+	e.EnablePostInjectionVerification(true)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- e.deliver(ctx, makeDeliveryJob("hi", "paste"), []byte("hi"))
+	}()
+
+	<-started
+	cancel()
+
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("deliver error = %v, want context.Canceled", err)
+	}
+	if got := a.snapshotCaptureCalls(); got != 1 {
+		t.Fatalf("capture calls = %d, want 1", got)
+	}
+	if len(a.pasteCalls) != 0 {
+		t.Fatalf("canceled delivery should not paste, got %d calls", len(a.pasteCalls))
+	}
+	if displays := a.snapshotDisplays(); len(displays) != 0 {
+		t.Fatalf("cancellation should be silent, got banners: %+v", displays)
+	}
+	if logBuf.Len() != 0 {
+		t.Fatalf("cancellation should be silent, got log: %q", logBuf.String())
+	}
+}
+
+func TestExecutorCancellationBeforePostCaptureStillCompletesDelivery(t *testing.T) {
+	a := newExecutorAdapter()
+	var cancel context.CancelFunc
+	a.captureTails = []string{"before", "same"}
+	a.pasteHook = func(context.Context, tmux.TargetContext, string, bool) error {
+		cancel()
+		return nil
+	}
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+	e.EnablePostInjectionVerification(true)
+
+	ctx, cancelFn := context.WithCancel(context.Background())
+	cancel = cancelFn
+	err := e.deliver(ctx, makeDeliveryJob("hi", "paste"), []byte("hi"))
+	if err != nil {
+		t.Fatalf("deliver error = %v, want nil after successful paste", err)
+	}
+	if got := a.snapshotCaptureCalls(); got != 1 {
+		t.Fatalf("canceled delivery should skip post-capture, got %d captures", got)
+	}
+	if displays := a.snapshotDisplays(); len(displays) != 0 {
+		t.Fatalf("cancellation should be silent, got banners: %+v", displays)
+	}
+	if logBuf.Len() != 0 {
+		t.Fatalf("cancellation should be silent, got log: %q", logBuf.String())
+	}
+}
+
+func TestExecutorCancellationDuringPostCaptureStillCompletesDelivery(t *testing.T) {
+	a := newExecutorAdapter()
+	captureStarted := make(chan struct{})
+	captureRelease := make(chan struct{})
+	var cancel context.CancelFunc
+	a.captureHook = func(ctx context.Context, _ string, _ int) (string, error) {
+		if a.snapshotCaptureCalls() == 1 {
+			return "before", nil
+		}
+		close(captureStarted)
+		<-captureRelease
+		return "", ctx.Err()
+	}
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+	e.EnablePostInjectionVerification(true)
+
+	ctx, cancelFn := context.WithCancel(context.Background())
+	cancel = cancelFn
+	done := make(chan error, 1)
+	go func() {
+		done <- e.deliver(ctx, makeDeliveryJob("hi", "paste"), []byte("hi"))
+	}()
+
+	<-captureStarted
+	cancel()
+	close(captureRelease)
+
+	if err := <-done; err != nil {
+		t.Fatalf("deliver error = %v, want nil after successful paste", err)
+	}
+	if got := a.snapshotCaptureCalls(); got != 2 {
+		t.Fatalf("capture calls = %d, want 2", got)
 	}
 	if displays := a.snapshotDisplays(); len(displays) != 0 {
 		t.Fatalf("cancellation should be silent, got banners: %+v", displays)

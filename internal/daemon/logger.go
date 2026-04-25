@@ -24,6 +24,7 @@ const (
 	OutcomeOversize       = "oversize"
 	OutcomeDeliveryError  = "delivery_error"
 	OutcomeIPCError       = "ipc_error"
+	OutcomeWarning        = "warning"
 )
 
 // Entry is the metadata-only payload accepted by Logger. The struct

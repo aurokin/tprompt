@@ -22,6 +22,7 @@ daemon_auto_start = false
 picker_command = "fzf"
 verification_timeout_ms = 5000
 verification_poll_interval_ms = 100
+post_injection_verification = false     # opt-in diagnostic warning only
 
 # Clipboard
 clipboard_read_command = ""            # empty = auto-detect (pbpaste/wl-paste/xclip/xsel)
@@ -53,6 +54,7 @@ select    = "Enter"
 - daemon auto-start for TUI flows
 - verification timeout
 - poll interval
+- post-injection verification warning
 - clipboard reader override
 - max paste bytes
 - sanitize mode
@@ -114,6 +116,12 @@ start the daemon implicitly.
 Applies to both `tprompt paste` and prompt body delivery. Content exceeding this cap is rejected before any tmux command runs.
 
 Sensible default: 1 MiB (1048576 bytes). Users can raise it but the adapter still caps per-chunk size in `type` mode (see `docs/tmux/delivery.md`).
+
+## Post-injection verification
+
+`post_injection_verification` defaults to `false`.
+
+When set to `true`, the daemon captures the target pane tail before and after successful TUI-flow delivery. If the tail appears unchanged, the daemon emits a warning diagnostic. This warning does not change delivery success or failure, and it does not prove whether the target application interpreted the input.
 
 ## Config validation
 

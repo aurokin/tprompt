@@ -65,7 +65,9 @@ func (s *scriptedAdapter) CurrentContext() (tmux.TargetContext, error) {
 	return tmux.TargetContext{}, nil
 }
 
-func (s *scriptedAdapter) CapturePaneTail(string, int) (string, error) { return "", nil }
+func (s *scriptedAdapter) CapturePaneTail(context.Context, string, int) (string, error) {
+	return "", nil
+}
 
 func (s *scriptedAdapter) Paste(context.Context, tmux.TargetContext, string, bool) error {
 	return nil

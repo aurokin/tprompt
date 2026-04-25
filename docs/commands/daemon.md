@@ -87,6 +87,18 @@ Recommended behavior:
 - clear timeout error if readiness never occurs
 - timed-out jobs surface via `display-message` + log
 
+## Post-injection warning
+
+By default, daemon delivery success is still defined by pre-injection verification plus successful tmux injection. Users can opt in to a post-injection diagnostic with:
+
+```toml
+post_injection_verification = true
+```
+
+When enabled, the daemon captures the target pane tail before and after successful delivery. If the tail appears unchanged, the daemon emits a warning via `tmux display-message` and the append-only log. This is warning-only: it does not prove the target application interpreted or ignored the input, and it does not turn a successful tmux delivery into a failure.
+
+Capture failures also produce only warning diagnostics after otherwise successful delivery. The warning text does not include prompt bodies or clipboard bytes.
+
 ## Error feedback
 
 Two channels, both always on:
@@ -100,6 +112,7 @@ tprompt: target pane %12 no longer exists
 tprompt: verification timed out after 5s
 tprompt: content rejected by sanitizer (mode=strict)
 tprompt: replaced by a newer job — this delivery was dropped
+tprompt: warning: post-injection verification: pane output appeared unchanged after delivery; this is a diagnostic warning, not proof that the target application ignored the input
 ```
 
 The banner appears in the tmux status area of the originating client when `client_tty` is known. If `client_tty` is unavailable, the daemon targets the pane explicitly when it still exists; pane-missing failures without any remaining client/window/session scope are logged without broadcasting an unscoped banner.
@@ -115,6 +128,7 @@ Example failure log entries:
 ```text
 time=2026-04-16T12:30:45Z job_id=j-1 pane=%5 source=prompt prompt_id=code-review outcome=timeout msg="verification timed out after 5000ms"
 time=2026-04-16T12:31:03Z job_id=j-2 pane=%5 source=clipboard outcome=delivery_error msg="tmux paste-buffer into %5 failed: tmux server died"
+time=2026-04-16T12:31:19Z job_id=j-3 pane=%5 source=prompt prompt_id=code-review outcome=warning msg="post-injection verification: pane output appeared unchanged after delivery; this is a diagnostic warning, not proof that the target application ignored the input"
 ```
 
 `tprompt daemon status` reports the running daemon in a deterministic, scan-friendly block:
@@ -129,7 +143,7 @@ tprompt daemon
   pending jobs: 0
 ```
 
-Success is not logged by default. A future confirmation mode would need an explicit product contract before implementation.
+Success is not logged by default. Post-injection verification is a warning-only diagnostic, not a confirmation mode.
 
 ## Persistence
 

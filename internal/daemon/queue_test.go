@@ -30,7 +30,7 @@ func (f *fakeAdapter) PaneExists(context.Context, string) (bool, error) { return
 func (f *fakeAdapter) IsTargetSelected(context.Context, tmux.TargetContext) (bool, error) {
 	return true, nil
 }
-func (f *fakeAdapter) CapturePaneTail(string, int) (string, error) { return "", nil }
+func (f *fakeAdapter) CapturePaneTail(context.Context, string, int) (string, error) { return "", nil }
 func (f *fakeAdapter) Paste(context.Context, tmux.TargetContext, string, bool) error {
 	return nil
 }

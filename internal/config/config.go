@@ -24,6 +24,7 @@ type Config struct {
 	PickerCommand              string            `toml:"picker_command"`
 	VerificationTimeoutMS      int               `toml:"verification_timeout_ms"`
 	VerificationPollIntervalMS int               `toml:"verification_poll_interval_ms"`
+	PostInjectionVerification  bool              `toml:"post_injection_verification"`
 	ClipboardReadCommand       string            `toml:"clipboard_read_command"`
 	MaxPasteBytes              int64             `toml:"max_paste_bytes"`
 	Sanitize                   string            `toml:"sanitize"`
@@ -42,6 +43,7 @@ func Default() Config {
 		PickerCommand:              "fzf",
 		VerificationTimeoutMS:      5000,
 		VerificationPollIntervalMS: 100,
+		PostInjectionVerification:  false,
 		ClipboardReadCommand:       "",
 		MaxPasteBytes:              1 << 20,
 		Sanitize:                   "off",
@@ -75,6 +77,7 @@ type Resolved struct {
 	PickerCommand              string
 	VerificationTimeoutMS      int
 	VerificationPollIntervalMS int
+	PostInjectionVerification  bool
 	ClipboardReadCommand       string
 	ClipboardArgv              []string
 	PickerArgv                 []string
@@ -92,11 +95,12 @@ type Resolved struct {
 // validation.
 func ResolveDaemon(cfg Config, configPath string) Resolved {
 	return Resolved{
-		SocketPath:      expandHome(cfg.SocketPath),
-		LogPath:         expandHome(cfg.LogPath),
-		DaemonAutoStart: cfg.DaemonAutoStart,
-		MaxPasteBytes:   cfg.MaxPasteBytes,
-		ConfigPath:      configPath,
+		SocketPath:                expandHome(cfg.SocketPath),
+		LogPath:                   expandHome(cfg.LogPath),
+		DaemonAutoStart:           cfg.DaemonAutoStart,
+		MaxPasteBytes:             cfg.MaxPasteBytes,
+		PostInjectionVerification: cfg.PostInjectionVerification,
+		ConfigPath:                configPath,
 	}
 }
 
@@ -178,6 +182,7 @@ func Normalize(cfg Config, configPath string) (Resolved, error) {
 		VerificationTimeoutMS:      cfg.VerificationTimeoutMS,
 		VerificationPollIntervalMS: cfg.VerificationPollIntervalMS,
 		DaemonAutoStart:            cfg.DaemonAutoStart,
+		PostInjectionVerification:  cfg.PostInjectionVerification,
 		ClipboardReadCommand:       cfg.ClipboardReadCommand,
 		MaxPasteBytes:              cfg.MaxPasteBytes,
 		Sanitize:                   cfg.Sanitize,

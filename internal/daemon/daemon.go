@@ -72,8 +72,8 @@ func (j Job) originContext() tmux.OriginContext {
 // VerificationPolicy controls how long the daemon waits for the target pane
 // to become the active pane again before delivering. The require_* booleans
 // from docs/architecture/data-model.md are baked in for MVP — pre-injection
-// pane existence and selection are always checked, post-injection capture-
-// pane verification is deferred to Phase 7.
+// pane existence and selection are always checked. Optional post-injection
+// capture comparison is daemon config, not wire payload policy.
 type VerificationPolicy struct {
 	TimeoutMS      int `json:"timeout_ms"`
 	PollIntervalMS int `json:"poll_interval_ms"`

@@ -475,6 +475,7 @@ func runDaemonStart(parent context.Context, deps Deps) error {
 	defer func() { _ = logger.Close() }()
 
 	executor := daemon.NewExecutor(adapter, logger, cfg.MaxPasteBytes)
+	executor.EnablePostInjectionVerification(cfg.PostInjectionVerification)
 	queue := daemon.NewQueue(adapter, logger, executor.Run)
 	started := time.Now()
 

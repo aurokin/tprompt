@@ -47,6 +47,9 @@ func TestDefaultMatchesDocumentedMVPValues(t *testing.T) {
 	if got.MaxPasteBytes != 1<<20 {
 		t.Fatalf("Default().MaxPasteBytes = %d, want %d", got.MaxPasteBytes, 1<<20)
 	}
+	if got.PostInjectionVerification {
+		t.Fatal("Default().PostInjectionVerification = true, want false")
+	}
 }
 
 func TestDefaultSanitizeIsOff(t *testing.T) {
@@ -93,6 +96,7 @@ daemon_auto_start = true
 picker_command = "fzf"
 verification_timeout_ms = 5000
 verification_poll_interval_ms = 100
+post_injection_verification = true
 clipboard_read_command = ""
 max_paste_bytes = 1048576
 sanitize = "off"
@@ -121,6 +125,9 @@ select = "Enter"
 	}
 	if !got.DaemonAutoStart {
 		t.Fatal("DaemonAutoStart = false, want true")
+	}
+	if !got.PostInjectionVerification {
+		t.Fatal("PostInjectionVerification = false, want true")
 	}
 	if got.KeybindPool != "12345qerfgtzxc" {
 		t.Fatalf("KeybindPool = %q", got.KeybindPool)
@@ -496,6 +503,8 @@ func TestResolveDaemonIgnoresPromptAndClipboardFields(t *testing.T) {
 	cfg.PromptsDir = ""
 	cfg.ClipboardReadCommand = `"unterminated`
 	cfg.ReservedKeys["clipboard"] = "ctrl+x"
+	cfg.DaemonAutoStart = true
+	cfg.PostInjectionVerification = true
 
 	r := ResolveDaemon(cfg, "/tmp/config.toml")
 	if r.SocketPath == "" {
@@ -506,6 +515,12 @@ func TestResolveDaemonIgnoresPromptAndClipboardFields(t *testing.T) {
 	}
 	if r.ConfigPath != "/tmp/config.toml" {
 		t.Fatalf("ConfigPath = %q, want %q", r.ConfigPath, "/tmp/config.toml")
+	}
+	if !r.DaemonAutoStart {
+		t.Fatal("ResolveDaemon did not carry DaemonAutoStart")
+	}
+	if !r.PostInjectionVerification {
+		t.Fatal("ResolveDaemon did not carry PostInjectionVerification")
 	}
 }
 
