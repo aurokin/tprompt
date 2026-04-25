@@ -18,6 +18,7 @@ default_mode = "paste"
 default_enter = false
 socket_path = "~/.local/state/tprompt/daemon.sock"
 log_path = "~/.local/state/tprompt/daemon.log"
+daemon_auto_start = false
 picker_command = "fzf"
 verification_timeout_ms = 5000
 verification_poll_interval_ms = 100
@@ -50,6 +51,7 @@ select    = "Enter"
 ## Optional config fields
 
 - picker command (affects `tprompt pick`; does not affect the built-in TUI)
+- daemon auto-start for TUI flows
 - verification timeout
 - poll interval
 - post-injection verification warning
@@ -100,6 +102,14 @@ clipboard = ""     # disable clipboard keybind; still accessible via search
 ## Sanitize
 
 `sanitize` accepts `"off"`, `"safe"`, or `"strict"`. Invalid values fail config validation. See `docs/implementation/sanitization.md`.
+
+## Daemon Auto-Start
+
+`daemon_auto_start` defaults to `false`. When set to `true`, `tprompt tui`
+may start the daemon if the configured socket is unreachable, wait briefly for
+readiness, then retry the daemon preflight. This is limited to TUI-oriented
+flows; explicit lifecycle commands such as `tprompt daemon status` do not
+start the daemon implicitly.
 
 ## `max_paste_bytes`
 

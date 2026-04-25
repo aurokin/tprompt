@@ -3,8 +3,11 @@ package app
 import (
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
@@ -26,17 +29,19 @@ type Deps struct {
 	Env      func(string) string
 	LookPath func(string) (string, error)
 
-	ConfigPath       *string
-	LoadConfig       func(explicitPath string) (config.Resolved, error)
-	LoadPasteConfig  func(explicitPath string) (config.Resolved, error)
-	LoadDaemonConfig func(explicitPath string) (config.Resolved, error)
-	NewStore         func(cfg config.Resolved) (store.Store, error)
-	NewTmux          func() (tmux.Adapter, error)
-	NewClip          func(cfg config.Resolved) (clipboard.Reader, error)
-	NewPicker        func(cfg config.Resolved) (picker.Picker, error)
-	NewDaemonClient  func(cfg config.Resolved) (daemon.Client, error)
-	NewRenderer      func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error)
-	NewSubmitter     func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter
+	ConfigPath               *string
+	LoadConfig               func(explicitPath string) (config.Resolved, error)
+	LoadPasteConfig          func(explicitPath string) (config.Resolved, error)
+	LoadDaemonConfig         func(explicitPath string) (config.Resolved, error)
+	NewStore                 func(cfg config.Resolved) (store.Store, error)
+	NewTmux                  func() (tmux.Adapter, error)
+	NewClip                  func(cfg config.Resolved) (clipboard.Reader, error)
+	NewPicker                func(cfg config.Resolved) (picker.Picker, error)
+	NewDaemonClient          func(cfg config.Resolved) (daemon.Client, error)
+	NewDaemonReadinessClient func(cfg config.Resolved, timeout time.Duration) daemon.Client
+	StartDaemon              func(cfg config.Resolved, explicitConfigPath string) error
+	NewRenderer              func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error)
+	NewSubmitter             func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter
 }
 
 // ProductionDeps returns a Deps wired for real execution.
@@ -66,6 +71,8 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 		NewDaemonClient: func(cfg config.Resolved) (daemon.Client, error) {
 			return daemon.NewSocketClient(cfg.SocketPath), nil
 		},
+		NewDaemonReadinessClient: productionNewDaemonReadinessClient,
+		StartDaemon:              productionStartDaemon,
 		NewRenderer: func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error) {
 			// Stub renderers (TPROMPT_TEST_RENDERER) never touch the real
 			// clipboard, so build the Reader only for the production path.
@@ -95,6 +102,38 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 			return submitter.New(prompts, client, cfg, target)
 		},
 	}
+}
+
+func productionNewDaemonReadinessClient(cfg config.Resolved, timeout time.Duration) daemon.Client {
+	dialTimeout := daemon.DefaultDialTimeout
+	if timeout > 0 && timeout < dialTimeout {
+		dialTimeout = timeout
+	}
+	return daemon.NewSocketClientWithTimeouts(cfg.SocketPath, dialTimeout, timeout)
+}
+
+func productionStartDaemon(_ config.Resolved, explicitConfigPath string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable: %w", err)
+	}
+	var args []string
+	if explicitConfigPath != "" {
+		args = append(args, "--config", explicitConfigPath)
+	}
+	args = append(args, "daemon", "start")
+	cmd := exec.Command(exe, args...)
+	cmd.Stdin = nil
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	if err := cmd.Process.Release(); err != nil {
+		return fmt.Errorf("release daemon process: %w", err)
+	}
+	return nil
 }
 
 func productionLoadConfig(explicitPath string) (config.Resolved, error) {

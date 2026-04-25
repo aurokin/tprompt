@@ -29,6 +29,9 @@ func TestDefaultMatchesDocumentedMVPValues(t *testing.T) {
 	if got.LogPath != "~/.local/state/tprompt/daemon.log" {
 		t.Fatalf("Default().LogPath = %q", got.LogPath)
 	}
+	if got.DaemonAutoStart {
+		t.Fatal("Default().DaemonAutoStart = true, want false")
+	}
 	if got.PickerCommand != "fzf" {
 		t.Fatalf("Default().PickerCommand = %q, want %q", got.PickerCommand, "fzf")
 	}
@@ -89,6 +92,7 @@ default_mode = "paste"
 default_enter = false
 socket_path = "~/.local/state/tprompt/daemon.sock"
 log_path = "~/.local/state/tprompt/daemon.log"
+daemon_auto_start = true
 picker_command = "fzf"
 verification_timeout_ms = 5000
 verification_poll_interval_ms = 100
@@ -118,6 +122,9 @@ select = "Enter"
 	}
 	if got.PickerCommand != "fzf" {
 		t.Fatalf("PickerCommand = %q", got.PickerCommand)
+	}
+	if !got.DaemonAutoStart {
+		t.Fatal("DaemonAutoStart = false, want true")
 	}
 	if !got.PostInjectionVerification {
 		t.Fatal("PostInjectionVerification = false, want true")
@@ -253,6 +260,20 @@ func TestNormalizeExpandsHomePaths(t *testing.T) {
 	}
 	if strings.Contains(r.LogPath, "~") {
 		t.Fatalf("LogPath still contains ~: %q", r.LogPath)
+	}
+}
+
+func TestNormalizeThreadsDaemonAutoStart(t *testing.T) {
+	cfg := Default()
+	cfg.PromptsDir = t.TempDir()
+	cfg.DaemonAutoStart = true
+
+	r, err := Normalize(cfg, "")
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	if !r.DaemonAutoStart {
+		t.Fatal("Resolved.DaemonAutoStart = false, want true")
 	}
 }
 
@@ -482,6 +503,7 @@ func TestResolveDaemonIgnoresPromptAndClipboardFields(t *testing.T) {
 	cfg.PromptsDir = ""
 	cfg.ClipboardReadCommand = `"unterminated`
 	cfg.ReservedKeys["clipboard"] = "ctrl+x"
+	cfg.DaemonAutoStart = true
 	cfg.PostInjectionVerification = true
 
 	r := ResolveDaemon(cfg, "/tmp/config.toml")
@@ -493,6 +515,9 @@ func TestResolveDaemonIgnoresPromptAndClipboardFields(t *testing.T) {
 	}
 	if r.ConfigPath != "/tmp/config.toml" {
 		t.Fatalf("ConfigPath = %q, want %q", r.ConfigPath, "/tmp/config.toml")
+	}
+	if !r.DaemonAutoStart {
+		t.Fatal("ResolveDaemon did not carry DaemonAutoStart")
 	}
 	if !r.PostInjectionVerification {
 		t.Fatal("ResolveDaemon did not carry PostInjectionVerification")

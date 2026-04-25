@@ -145,6 +145,36 @@ func TestDaemonStatusSocketUnavailableMapsToExitDaemon(t *testing.T) {
 	}
 }
 
+func TestDaemonStatusDoesNotAutoStart(t *testing.T) {
+	client := &fakeDaemonClient{
+		statusFn: func() (daemon.StatusResponse, error) {
+			return daemon.StatusResponse{}, &daemon.SocketUnavailableError{
+				Path:   "/tmp/x.sock",
+				Reason: "no such file",
+			}
+		},
+	}
+	deps := daemonDeps(t, client)
+	deps.LoadDaemonConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{
+			SocketPath:      "/tmp/tprompt-test.sock",
+			LogPath:         "/tmp/tprompt-test.log",
+			MaxPasteBytes:   1 << 20,
+			DaemonAutoStart: true,
+		}, nil
+	}
+	deps.StartDaemon = func(config.Resolved, string) error {
+		t.Fatal("daemon status must not auto-start")
+		return nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "daemon", "status")
+	var su *daemon.SocketUnavailableError
+	if !errors.As(err, &su) {
+		t.Fatalf("want SocketUnavailableError, got %T: %v", err, err)
+	}
+}
+
 func TestDaemonStatusLoadConfigError(t *testing.T) {
 	client := &fakeDaemonClient{
 		statusFn: func() (daemon.StatusResponse, error) {
