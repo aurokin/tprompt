@@ -116,7 +116,13 @@ func productionStartDaemon(_ config.Resolved, explicitConfigPath string) error {
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	if err := cmd.Process.Release(); err != nil {
+		return fmt.Errorf("release daemon process: %w", err)
+	}
+	return nil
 }
 
 func productionLoadConfig(explicitPath string) (config.Resolved, error) {
