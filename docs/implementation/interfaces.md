@@ -125,9 +125,12 @@ Pure function. Errors on duplicate / reserved / malformed `key:` values.
 ```text
 DaemonClient
 - Submit(job DeferredJob) -> JobSubmitResult | error
+- Status() -> DaemonStatus | error
+- Stop() -> DaemonStopResult | error
 
 DaemonServer
 - Start() -> error
+- Stop request handler triggers graceful shutdown
 ```
 
 ## Verification engine

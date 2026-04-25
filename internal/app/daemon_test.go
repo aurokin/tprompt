@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
@@ -19,6 +20,7 @@ import (
 type fakeDaemonClient struct {
 	submitFn func(daemon.SubmitRequest) (daemon.SubmitResponse, error)
 	statusFn func() (daemon.StatusResponse, error)
+	stopFn   func() (daemon.StopResponse, error)
 }
 
 func (f *fakeDaemonClient) Submit(req daemon.SubmitRequest) (daemon.SubmitResponse, error) {
@@ -26,7 +28,17 @@ func (f *fakeDaemonClient) Submit(req daemon.SubmitRequest) (daemon.SubmitRespon
 }
 
 func (f *fakeDaemonClient) Status() (daemon.StatusResponse, error) {
+	if f.statusFn == nil {
+		return daemon.StatusResponse{}, nil
+	}
 	return f.statusFn()
+}
+
+func (f *fakeDaemonClient) Stop() (daemon.StopResponse, error) {
+	if f.stopFn == nil {
+		return daemon.StopResponse{Accepted: true}, nil
+	}
+	return f.stopFn()
 }
 
 func daemonDeps(t *testing.T, client daemon.Client) Deps {
@@ -190,6 +202,72 @@ func TestDaemonStatusRejectsEmptySocketPath(t *testing.T) {
 	}
 	if ve.Field != "socket_path" {
 		t.Fatalf("Field = %q, want %q", ve.Field, "socket_path")
+	}
+}
+
+func TestDaemonStopPrintsStoppedAfterSocketDisappears(t *testing.T) {
+	statusCalls := 0
+	client := &fakeDaemonClient{
+		stopFn: func() (daemon.StopResponse, error) {
+			return daemon.StopResponse{Accepted: true}, nil
+		},
+		statusFn: func() (daemon.StatusResponse, error) {
+			statusCalls++
+			if statusCalls == 1 {
+				return daemon.StatusResponse{Socket: "/tmp/x.sock"}, nil
+			}
+			return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Path: "/tmp/x.sock", Reason: "connection refused"}
+		},
+	}
+
+	deps := daemonDeps(t, client)
+	stdout, _, err := executeRootWith(t, deps, "daemon", "stop")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "tprompt daemon stopped") {
+		t.Fatalf("stdout = %q, want stopped message", stdout)
+	}
+}
+
+func TestDaemonStopNoDaemonRunningPrintsClearMessage(t *testing.T) {
+	client := &fakeDaemonClient{
+		stopFn: func() (daemon.StopResponse, error) {
+			return daemon.StopResponse{}, &daemon.SocketUnavailableError{Path: "/tmp/x.sock", Reason: "no such file"}
+		},
+		statusFn: func() (daemon.StatusResponse, error) {
+			t.Fatal("Status should not be called when daemon is not running")
+			return daemon.StatusResponse{}, nil
+		},
+	}
+
+	deps := daemonDeps(t, client)
+	stdout, _, err := executeRootWith(t, deps, "daemon", "stop")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "daemon not running") {
+		t.Fatalf("stdout = %q, want not-running message", stdout)
+	}
+}
+
+func TestDaemonStopTimeoutMapsToExitDaemon(t *testing.T) {
+	client := &fakeDaemonClient{
+		stopFn: func() (daemon.StopResponse, error) {
+			return daemon.StopResponse{Accepted: true}, nil
+		},
+		statusFn: func() (daemon.StatusResponse, error) {
+			return daemon.StatusResponse{Socket: "/tmp/x.sock"}, nil
+		},
+	}
+
+	err := runDaemonStop(daemonDeps(t, client), time.Millisecond)
+	var timeoutErr *daemon.ShutdownTimeoutError
+	if !errors.As(err, &timeoutErr) {
+		t.Fatalf("want ShutdownTimeoutError, got %T: %v", err, err)
+	}
+	if ExitCode(err) != ExitDaemon {
+		t.Fatalf("ExitCode = %d, want %d", ExitCode(err), ExitDaemon)
 	}
 }
 

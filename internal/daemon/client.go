@@ -64,6 +64,21 @@ func (c *socketClient) Status() (StatusResponse, error) {
 	return *resp.Status, nil
 }
 
+func (c *socketClient) Stop() (StopResponse, error) {
+	req := StopRequest{}
+	var resp wireResponse
+	if err := c.do(wireRequest{Kind: kindStop, Stop: &req}, &resp); err != nil {
+		return StopResponse{}, err
+	}
+	if resp.Error != "" {
+		return StopResponse{}, fmt.Errorf("daemon: %s", resp.Error)
+	}
+	if resp.Stop == nil {
+		return StopResponse{}, errors.New("daemon: empty stop response")
+	}
+	return *resp.Stop, nil
+}
+
 func (c *socketClient) do(req wireRequest, resp *wireResponse) error {
 	conn, err := net.DialTimeout("unix", c.path, c.dialTimeout)
 	if err != nil {

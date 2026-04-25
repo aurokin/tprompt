@@ -211,6 +211,65 @@ func TestServerStatusRoundTrip(t *testing.T) {
 	}
 }
 
+func TestServerStopRoundTripCancelsRun(t *testing.T) {
+	path := socketPath(t)
+	adapter := &fakeAdapter{}
+	logger := NewLoggerWriter(&bytes.Buffer{})
+	queue := NewQueue(adapter, logger, func(context.Context, Job) bool { return true })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := NewServer(ServerConfig{
+		SocketPath: path,
+		Queue:      queue,
+		Logger:     logger,
+		StatusFn:   func() StatusResponse { return StatusResponse{} },
+		ShutdownFn: cancel,
+	})
+
+	runDone := make(chan struct {
+		result RunResult
+		err    error
+	}, 1)
+	ready := make(chan struct{})
+	go func() {
+		result, err := Run(ctx, srv, func() { close(ready) })
+		runDone <- struct {
+			result RunResult
+			err    error
+		}{result: result, err: err}
+	}()
+
+	select {
+	case <-ready:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("server did not signal ready")
+	}
+
+	resp, err := NewSocketClient(path).Stop()
+	if err != nil {
+		cancel()
+		t.Fatalf("Stop: %v", err)
+	}
+	if !resp.Accepted {
+		cancel()
+		t.Fatalf("Stop response = %+v, want Accepted=true", resp)
+	}
+
+	select {
+	case done := <-runDone:
+		if done.err != nil {
+			t.Fatalf("Run returned error after stop: %v", done.err)
+		}
+		if done.result.ExitReason != RunExitContextCanceled {
+			t.Fatalf("ExitReason = %q, want %q", done.result.ExitReason, RunExitContextCanceled)
+		}
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("Run did not return after stop")
+	}
+}
+
 func TestListenStaleSocketIsRemoved(t *testing.T) {
 	path := socketPath(t)
 

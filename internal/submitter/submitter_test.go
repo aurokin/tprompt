@@ -51,6 +51,10 @@ func (f *fakeDaemonClient) Status() (daemon.StatusResponse, error) {
 	return daemon.StatusResponse{}, nil
 }
 
+func (f *fakeDaemonClient) Stop() (daemon.StopResponse, error) {
+	return daemon.StopResponse{}, nil
+}
+
 func baseCfg() config.Resolved {
 	return config.Resolved{
 		DefaultMode:                "paste",
