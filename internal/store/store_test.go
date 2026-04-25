@@ -120,19 +120,69 @@ func TestFSStoreDetectsDuplicatePromptIDs(t *testing.T) {
 }
 
 func TestFSStoreSurfacesKeybindValidationErrors(t *testing.T) {
-	dir := t.TempDir()
-	writePrompt(t, dir, "alpha.md", "---\nkey: x\n---\na\n")
-	writePrompt(t, dir, "bravo.md", "---\nkey: X\n---\nb\n")
-
-	store := NewFS(dir, nil, []rune("123"))
-	err := store.Discover()
-	if err == nil {
-		t.Fatal("want error, got nil")
+	tests := []struct {
+		name     string
+		reserved map[rune]string
+		files    map[string]string
+		assert   func(*testing.T, error)
+	}{
+		{
+			name: "duplicate",
+			files: map[string]string{
+				"alpha.md": "---\nkey: x\n---\na\n",
+				"bravo.md": "---\nkey: X\n---\nb\n",
+			},
+			assert: func(t *testing.T, err error) {
+				t.Helper()
+				var dupErr *keybind.DuplicateKeybindError
+				if !errors.As(err, &dupErr) {
+					t.Fatalf("want DuplicateKeybindError, got %T", err)
+				}
+			},
+		},
+		{
+			name:     "reserved",
+			reserved: map[rune]string{'p': "clipboard"},
+			files: map[string]string{
+				"alpha.md": "---\nkey: P\n---\na\n",
+			},
+			assert: func(t *testing.T, err error) {
+				t.Helper()
+				var reservedErr *keybind.ReservedKeybindError
+				if !errors.As(err, &reservedErr) {
+					t.Fatalf("want ReservedKeybindError, got %T", err)
+				}
+			},
+		},
+		{
+			name: "malformed",
+			files: map[string]string{
+				"alpha.md": "---\nkey: ctrl+x\n---\na\n",
+			},
+			assert: func(t *testing.T, err error) {
+				t.Helper()
+				var malformed *keybind.MalformedKeybindError
+				if !errors.As(err, &malformed) {
+					t.Fatalf("want MalformedKeybindError, got %T", err)
+				}
+			},
+		},
 	}
 
-	var dupErr *keybind.DuplicateKeybindError
-	if !errors.As(err, &dupErr) {
-		t.Fatalf("want DuplicateKeybindError, got %T", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for rel, content := range tc.files {
+				writePrompt(t, dir, rel, content)
+			}
+
+			store := NewFS(dir, tc.reserved, []rune("123"))
+			err := store.Discover()
+			if err == nil {
+				t.Fatal("want error, got nil")
+			}
+			tc.assert(t, err)
+		})
 	}
 }
 

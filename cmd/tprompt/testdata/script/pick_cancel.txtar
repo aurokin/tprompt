@@ -1,0 +1,14 @@
+# `tprompt pick` treats external picker cancellation as success and prints
+# nothing. Picker exit 1 is the common fzf cancellation code.
+
+mkdir prompts
+tprompt pick --config config.toml
+! stdout .
+! stderr .
+
+-- config.toml --
+prompts_dir = "prompts"
+picker_command = "sh -c 'exit 1'"
+
+-- prompts/alpha.md --
+Alpha body.
