@@ -352,6 +352,9 @@ func TestQueueReplaceSameTargetCancelsOldAndBanners(t *testing.T) {
 	if !strings.Contains(logged, "job_id=j-1") {
 		t.Fatalf("replaced log should reference the displaced job, got: %q", logged)
 	}
+	if !strings.Contains(logged, "prompt_id=code-review") {
+		t.Fatalf("replaced log should include prompt_id for prompt jobs, got: %q", logged)
+	}
 
 	runner.release("j-2")
 	q.Wait()

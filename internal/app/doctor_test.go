@@ -11,6 +11,7 @@ import (
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
+	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
 )
@@ -25,7 +26,9 @@ func TestDoctorHealthy(t *testing.T) {
 		return config.Resolved{
 			PromptsDir:    dir,
 			ConfigPath:    "/etc/tprompt/config.toml",
+			SocketPath:    "/tmp/tprompt-test.sock",
 			ClipboardArgv: []string{"custom-paste"},
+			PickerArgv:    []string{"fzf"},
 		}, nil
 	}
 	deps.Env = func(key string) string {
@@ -35,10 +38,20 @@ func TestDoctorHealthy(t *testing.T) {
 		return ""
 	}
 	deps.LookPath = func(name string) (string, error) {
-		if name == "custom-paste" {
+		switch name {
+		case "custom-paste":
 			return "/usr/bin/custom-paste", nil
+		case "fzf":
+			return "/usr/bin/fzf", nil
 		}
 		return "", exec.ErrNotFound
+	}
+	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+		return &fakeDaemonClient{
+			statusFn: func() (daemon.StatusResponse, error) {
+				return daemon.StatusResponse{Socket: "/tmp/tprompt-test.sock"}, nil
+			},
+		}, nil
 	}
 
 	stdout, _, err := executeRootWith(t, deps, "doctor")
@@ -47,8 +60,8 @@ func TestDoctorHealthy(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 5 {
-		t.Fatalf("want 5 lines, got %d:\n%s", len(lines), stdout)
+	if len(lines) != 7 {
+		t.Fatalf("want 7 lines, got %d:\n%s", len(lines), stdout)
 	}
 	assertPrefix(t, lines[0], "ok")
 	assertContains(t, lines[0], "config loaded")
@@ -61,6 +74,10 @@ func TestDoctorHealthy(t *testing.T) {
 	assertContains(t, lines[3], "inside tmux")
 	assertPrefix(t, lines[4], "ok")
 	assertContains(t, lines[4], "clipboard reader: custom-paste (override)")
+	assertPrefix(t, lines[5], "ok")
+	assertContains(t, lines[5], "picker command: fzf")
+	assertPrefix(t, lines[6], "ok")
+	assertContains(t, lines[6], "daemon reachable")
 }
 
 func TestDoctorNoTmux(t *testing.T) {
@@ -68,7 +85,7 @@ func TestDoctorNoTmux(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir}, nil
+		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
 	}
 	deps.LookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 
@@ -80,6 +97,113 @@ func TestDoctorNoTmux(t *testing.T) {
 	assertContains(t, stdout, "warn not inside tmux")
 }
 
+func TestDoctorDaemonReachable(t *testing.T) {
+	dir := t.TempDir()
+	fs := &fakeStore{summaries: []store.Summary{}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
+	}
+	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+		return &fakeDaemonClient{
+			statusFn: func() (daemon.StatusResponse, error) {
+				return daemon.StatusResponse{Socket: "/tmp/tprompt-test.sock"}, nil
+			},
+		}, nil
+	}
+
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertContains(t, stdout, "ok   daemon reachable (/tmp/tprompt-test.sock)")
+}
+
+func TestDoctorDaemonMissingIsWarning(t *testing.T) {
+	dir := t.TempDir()
+	fs := &fakeStore{summaries: []store.Summary{}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
+	}
+	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+		return &fakeDaemonClient{
+			statusFn: func() (daemon.StatusResponse, error) {
+				return daemon.StatusResponse{}, &daemon.SocketUnavailableError{
+					Path:   "/tmp/tprompt-test.sock",
+					Reason: "connection refused",
+				}
+			},
+		}, nil
+	}
+
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertContains(t, stdout, "warn daemon not running (/tmp/tprompt-test.sock): connection refused")
+}
+
+func TestDoctorInvalidDaemonConfigFails(t *testing.T) {
+	dir := t.TempDir()
+	fs := &fakeStore{summaries: []store.Summary{}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{PromptsDir: dir}, nil
+	}
+	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+		t.Fatal("NewDaemonClient should not be called with invalid daemon config")
+		return nil, nil
+	}
+
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	var ve *config.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want ValidationError, got %T: %v", err, err)
+	}
+	if ve.Field != "socket_path" {
+		t.Fatalf("Field = %q, want socket_path", ve.Field)
+	}
+	assertContains(t, stdout, "FAIL config: socket_path: must be set")
+}
+
+func TestDoctorPickerPresent(t *testing.T) {
+	dir := t.TempDir()
+	fs := &fakeStore{summaries: []store.Summary{}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock", PickerArgv: []string{"fzf"}}, nil
+	}
+	deps.LookPath = func(name string) (string, error) {
+		if name == "fzf" {
+			return "/usr/bin/fzf", nil
+		}
+		return "", exec.ErrNotFound
+	}
+
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertContains(t, stdout, "ok   picker command: fzf")
+}
+
+func TestDoctorPickerMissingIsWarning(t *testing.T) {
+	dir := t.TempDir()
+	fs := &fakeStore{summaries: []store.Summary{}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock", PickerArgv: []string{"fzf"}}, nil
+	}
+	deps.LookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertContains(t, stdout, "warn picker command: fzf not found on $PATH (tprompt pick unavailable)")
+}
+
 func TestDoctorClipboardAutoDetectWayland(t *testing.T) {
 	if isDarwin() {
 		t.Skip("darwin always auto-detects pbpaste")
@@ -88,7 +212,7 @@ func TestDoctorClipboardAutoDetectWayland(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir}, nil
+		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
 	}
 	deps.Env = func(key string) string {
 		if key == "WAYLAND_DISPLAY" {
@@ -118,7 +242,7 @@ func TestDoctorClipboardAutoDetectX11(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir}, nil
+		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
 	}
 	deps.Env = func(key string) string {
 		if key == "DISPLAY" {
@@ -145,7 +269,7 @@ func TestDoctorClipboardOverrideMissing(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, ClipboardArgv: []string{"not-on-path"}}, nil
+		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock", ClipboardArgv: []string{"not-on-path"}}, nil
 	}
 	deps.LookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 
@@ -164,7 +288,7 @@ func TestDoctorClipboardNoneAvailable(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir}, nil
+		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
 	}
 	// No env hints, no PATH hits.
 	deps.Env = func(string) string { return "" }
@@ -218,7 +342,7 @@ func TestDoctorDiscoveryFailure(t *testing.T) {
 	fs := &fakeStore{discoverErr: dupErr}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir}, nil
+		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
 	}
 
 	stdout, _, err := executeRootWith(t, deps, "doctor")
@@ -237,7 +361,7 @@ func TestDoctorDefaultsConfig(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, ConfigPath: ""}, nil
+		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock", ConfigPath: ""}, nil
 	}
 
 	stdout, _, err := executeRootWith(t, deps, "doctor")
@@ -252,7 +376,7 @@ func TestDoctorPromptsDirMissing(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: missingDir}, nil
+		return config.Resolved{PromptsDir: missingDir, SocketPath: "/tmp/tprompt-test.sock"}, nil
 	}
 
 	stdout, _, err := executeRootWith(t, deps, "doctor")
@@ -261,8 +385,8 @@ func TestDoctorPromptsDirMissing(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("want 4 lines (config ok, dir fail, tmux warn, clipboard), got %d:\n%s", len(lines), stdout)
+	if len(lines) != 6 {
+		t.Fatalf("want 6 lines (config ok, dir fail, tmux warn, clipboard, picker, daemon), got %d:\n%s", len(lines), stdout)
 	}
 	assertPrefix(t, lines[0], "ok")
 	assertContains(t, lines[0], "config loaded")
@@ -271,4 +395,6 @@ func TestDoctorPromptsDirMissing(t *testing.T) {
 	assertPrefix(t, lines[2], "warn")
 	assertContains(t, lines[2], "not inside tmux")
 	assertContains(t, lines[3], "clipboard reader")
+	assertContains(t, lines[4], "picker command")
+	assertContains(t, lines[5], "daemon unreachable")
 }

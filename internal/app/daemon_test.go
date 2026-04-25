@@ -78,17 +78,39 @@ func TestDaemonStatusPrintsFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, want := range []string{
-		"pid:          12345",
-		"socket:       /tmp/x.sock",
-		"log:          /tmp/x.log",
-		"uptime:       42s",
-		"pending jobs: 3",
-		"version:      0.1.0",
-	} {
-		if !strings.Contains(stdout, want) {
-			t.Errorf("stdout missing %q\ngot:\n%s", want, stdout)
-		}
+	want := strings.Join([]string{
+		"tprompt daemon",
+		"  pid:          12345",
+		"  socket:       /tmp/x.sock",
+		"  log:          /tmp/x.log",
+		"  uptime:       42s",
+		"  version:      0.1.0",
+		"  pending jobs: 3",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("daemon status output mismatch\ngot:\n%s\nwant:\n%s", stdout, want)
+	}
+}
+
+func TestFormatUptime(t *testing.T) {
+	tests := []struct {
+		name    string
+		seconds int64
+		want    string
+	}{
+		{name: "zero", seconds: 0, want: "0s"},
+		{name: "seconds", seconds: 42, want: "42s"},
+		{name: "minutes", seconds: 125, want: "2m5s"},
+		{name: "hours", seconds: 3661, want: "1h1m1s"},
+		{name: "negative", seconds: -1, want: "0s"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := formatUptime(tc.seconds); got != tc.want {
+				t.Fatalf("formatUptime(%d) = %q, want %q", tc.seconds, got, tc.want)
+			}
+		})
 	}
 }
 

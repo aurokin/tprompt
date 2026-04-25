@@ -14,13 +14,14 @@ import (
 func TestFormatLineFullEntry(t *testing.T) {
 	ts := time.Date(2026, 4, 16, 12, 30, 45, 0, time.UTC)
 	got := formatLine(ts, Entry{
-		JobID:   "j-1",
-		Pane:    "%5",
-		Source:  SourcePrompt,
-		Outcome: OutcomeDelivered,
-		Msg:     "delivery succeeded",
+		JobID:    "j-1",
+		Pane:     "%5",
+		Source:   SourcePrompt,
+		PromptID: "code-review",
+		Outcome:  OutcomeDelivered,
+		Msg:      "delivery succeeded",
 	})
-	want := `time=2026-04-16T12:30:45Z job_id=j-1 pane=%5 source=prompt outcome=delivered msg="delivery succeeded"` + "\n"
+	want := `time=2026-04-16T12:30:45Z job_id=j-1 pane=%5 source=prompt prompt_id=code-review outcome=delivered msg="delivery succeeded"` + "\n"
 	if got != want {
 		t.Fatalf("formatLine mismatch\ngot:  %q\nwant: %q", got, want)
 	}

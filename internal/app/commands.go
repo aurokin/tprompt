@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -517,14 +518,25 @@ func runDaemonStatus(deps Deps) error {
 		return err
 	}
 
-	w := deps.Stdout
-	_, _ = fmt.Fprintf(w, "pid:          %d\n", status.PID)
-	_, _ = fmt.Fprintf(w, "socket:       %s\n", status.Socket)
-	_, _ = fmt.Fprintf(w, "log:          %s\n", status.LogPath)
-	_, _ = fmt.Fprintf(w, "uptime:       %ds\n", status.UptimeSec)
-	_, _ = fmt.Fprintf(w, "pending jobs: %d\n", status.PendingJobs)
-	_, _ = fmt.Fprintf(w, "version:      %s\n", status.Version)
+	writeDaemonStatus(deps.Stdout, status)
 	return nil
+}
+
+func writeDaemonStatus(w io.Writer, status daemon.StatusResponse) {
+	_, _ = fmt.Fprintln(w, "tprompt daemon")
+	_, _ = fmt.Fprintf(w, "  pid:          %d\n", status.PID)
+	_, _ = fmt.Fprintf(w, "  socket:       %s\n", status.Socket)
+	_, _ = fmt.Fprintf(w, "  log:          %s\n", status.LogPath)
+	_, _ = fmt.Fprintf(w, "  uptime:       %s\n", formatUptime(status.UptimeSec))
+	_, _ = fmt.Fprintf(w, "  version:      %s\n", status.Version)
+	_, _ = fmt.Fprintf(w, "  pending jobs: %d\n", status.PendingJobs)
+}
+
+func formatUptime(seconds int64) string {
+	if seconds < 0 {
+		seconds = 0
+	}
+	return (time.Duration(seconds) * time.Second).String()
 }
 
 func validateDaemonStatusConfig(cfg config.Resolved) error {
