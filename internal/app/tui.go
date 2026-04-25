@@ -2,11 +2,15 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/hsadler/tprompt/internal/config"
+	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
 	"github.com/hsadler/tprompt/internal/tui"
@@ -14,10 +18,18 @@ import (
 
 // tuiFlags captures the --target-pane / --client-tty / --session-id inputs.
 type tuiFlags struct {
-	targetPane string
-	clientTTY  string
-	sessionID  string
+	targetPane         string
+	clientTTY          string
+	sessionID          string
+	daemonAutoStart    bool
+	daemonAutoStartSet bool
 }
+
+var (
+	daemonAutoStartReadyTimeout = 2 * time.Second
+	daemonAutoStartPollInterval = 50 * time.Millisecond
+	daemonAutoStartMu           sync.Mutex
+)
 
 func newTUICmd(deps Deps) *cobra.Command {
 	var f tuiFlags
@@ -32,8 +44,12 @@ func newTUICmd(deps Deps) *cobra.Command {
 	cmd.Flags().StringVar(&f.targetPane, "target-pane", "", "tmux pane ID to deliver into (required)")
 	cmd.Flags().StringVar(&f.clientTTY, "client-tty", "", "tmux client TTY for failure banners")
 	cmd.Flags().StringVar(&f.sessionID, "session-id", "", "tmux session ID for delivery context")
+	cmd.Flags().BoolVar(&f.daemonAutoStart, "daemon-auto-start", false, "auto-start daemon for this TUI run if unreachable")
 	if err := cmd.MarkFlagRequired("target-pane"); err != nil {
 		panic(fmt.Sprintf("tui: mark --target-pane required: %v", err))
+	}
+	cmd.PreRun = func(c *cobra.Command, _ []string) {
+		f.daemonAutoStartSet = c.Flags().Changed("daemon-auto-start")
 	}
 	return cmd
 }
@@ -59,7 +75,8 @@ func runTUI(deps Deps, f tuiFlags) error {
 	if err != nil {
 		return err
 	}
-	if _, err := client.Status(); err != nil {
+
+	if err := ensureTUIDaemonReady(deps, cfg, client, f.daemonAutoStartEnabled(cfg)); err != nil {
 		return err
 	}
 
@@ -107,6 +124,70 @@ func runTUI(deps Deps, f tuiFlags) error {
 	default:
 		return fmt.Errorf("tui: unknown renderer action %q", result.Action)
 	}
+}
+
+func (f tuiFlags) daemonAutoStartEnabled(cfg config.Resolved) bool {
+	if f.daemonAutoStartSet {
+		return f.daemonAutoStart
+	}
+	return cfg.DaemonAutoStart
+}
+
+func ensureTUIDaemonReady(deps Deps, cfg config.Resolved, client daemon.Client, autoStart bool) error {
+	if _, err := client.Status(); err != nil {
+		var socketErr *daemon.SocketUnavailableError
+		if !autoStart || !errors.As(err, &socketErr) {
+			return err
+		}
+		return autoStartTUIDaemon(deps, cfg, client)
+	}
+	return nil
+}
+
+func autoStartTUIDaemon(deps Deps, cfg config.Resolved, client daemon.Client) error {
+	daemonAutoStartMu.Lock()
+	defer daemonAutoStartMu.Unlock()
+
+	if _, err := client.Status(); err == nil {
+		return nil
+	} else {
+		var socketErr *daemon.SocketUnavailableError
+		if !errors.As(err, &socketErr) {
+			return err
+		}
+	}
+	if err := validateDaemonStartConfig(cfg); err != nil {
+		return err
+	}
+	if err := deps.StartDaemon(cfg, explicitConfigPath(deps)); err != nil {
+		return &daemon.IPCError{Path: cfg.SocketPath, Op: "auto-start daemon", Reason: err.Error()}
+	}
+	return waitForTUIDaemonReady(client, cfg.SocketPath)
+}
+
+func waitForTUIDaemonReady(client daemon.Client, socketPath string) error {
+	deadline := time.Now().Add(daemonAutoStartReadyTimeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		if _, err := client.Status(); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		time.Sleep(daemonAutoStartPollInterval)
+	}
+	reason := "daemon did not become ready"
+	if lastErr != nil {
+		reason = lastErr.Error()
+	}
+	return &daemon.IPCError{Path: socketPath, Op: "auto-start readiness", Reason: reason}
+}
+
+func explicitConfigPath(deps Deps) string {
+	if deps.ConfigPath == nil {
+		return ""
+	}
+	return *deps.ConfigPath
 }
 
 // buildTUIState assembles the State the Renderer sees: pinned clipboard row,

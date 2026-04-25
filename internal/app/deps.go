@@ -3,8 +3,10 @@ package app
 import (
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
@@ -35,6 +37,7 @@ type Deps struct {
 	NewClip          func(cfg config.Resolved) (clipboard.Reader, error)
 	NewPicker        func(cfg config.Resolved) (picker.Picker, error)
 	NewDaemonClient  func(cfg config.Resolved) (daemon.Client, error)
+	StartDaemon      func(cfg config.Resolved, explicitConfigPath string) error
 	NewRenderer      func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error)
 	NewSubmitter     func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter
 }
@@ -66,6 +69,7 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 		NewDaemonClient: func(cfg config.Resolved) (daemon.Client, error) {
 			return daemon.NewSocketClient(cfg.SocketPath), nil
 		},
+		StartDaemon: productionStartDaemon,
 		NewRenderer: func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error) {
 			// Stub renderers (TPROMPT_TEST_RENDERER) never touch the real
 			// clipboard, so build the Reader only for the production path.
@@ -95,6 +99,24 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 			return submitter.New(prompts, client, cfg, target)
 		},
 	}
+}
+
+func productionStartDaemon(_ config.Resolved, explicitConfigPath string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable: %w", err)
+	}
+	var args []string
+	if explicitConfigPath != "" {
+		args = append(args, "--config", explicitConfigPath)
+	}
+	args = append(args, "daemon", "start")
+	cmd := exec.Command(exe, args...)
+	cmd.Stdin = nil
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	return cmd.Start()
 }
 
 func productionLoadConfig(explicitPath string) (config.Resolved, error) {

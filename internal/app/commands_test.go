@@ -183,6 +183,9 @@ func workingDeps(t *testing.T, fs *fakeStore) Deps {
 		NewDaemonClient: func(config.Resolved) (daemon.Client, error) {
 			return nil, ErrNotImplemented
 		},
+		StartDaemon: func(config.Resolved, string) error {
+			return ErrNotImplemented
+		},
 		NewRenderer: func(config.Resolved, store.Store, submitter.Submitter) (tui.Renderer, error) {
 			return cancelRenderer{}, nil
 		},

@@ -20,6 +20,7 @@ type Config struct {
 	DefaultEnter               bool              `toml:"default_enter"`
 	SocketPath                 string            `toml:"socket_path"`
 	LogPath                    string            `toml:"log_path"`
+	DaemonAutoStart            bool              `toml:"daemon_auto_start"`
 	PickerCommand              string            `toml:"picker_command"`
 	VerificationTimeoutMS      int               `toml:"verification_timeout_ms"`
 	VerificationPollIntervalMS int               `toml:"verification_poll_interval_ms"`
@@ -37,6 +38,7 @@ func Default() Config {
 		DefaultEnter:               false,
 		SocketPath:                 "~/.local/state/tprompt/daemon.sock",
 		LogPath:                    "~/.local/state/tprompt/daemon.log",
+		DaemonAutoStart:            false,
 		PickerCommand:              "fzf",
 		VerificationTimeoutMS:      5000,
 		VerificationPollIntervalMS: 100,
@@ -69,6 +71,7 @@ type Resolved struct {
 	DefaultEnter               bool
 	SocketPath                 string
 	LogPath                    string
+	DaemonAutoStart            bool
 	PickerCommand              string
 	VerificationTimeoutMS      int
 	VerificationPollIntervalMS int
@@ -89,10 +92,11 @@ type Resolved struct {
 // validation.
 func ResolveDaemon(cfg Config, configPath string) Resolved {
 	return Resolved{
-		SocketPath:    expandHome(cfg.SocketPath),
-		LogPath:       expandHome(cfg.LogPath),
-		MaxPasteBytes: cfg.MaxPasteBytes,
-		ConfigPath:    configPath,
+		SocketPath:      expandHome(cfg.SocketPath),
+		LogPath:         expandHome(cfg.LogPath),
+		DaemonAutoStart: cfg.DaemonAutoStart,
+		MaxPasteBytes:   cfg.MaxPasteBytes,
+		ConfigPath:      configPath,
 	}
 }
 
@@ -173,6 +177,7 @@ func Normalize(cfg Config, configPath string) (Resolved, error) {
 		PickerCommand:              cfg.PickerCommand,
 		VerificationTimeoutMS:      cfg.VerificationTimeoutMS,
 		VerificationPollIntervalMS: cfg.VerificationPollIntervalMS,
+		DaemonAutoStart:            cfg.DaemonAutoStart,
 		ClipboardReadCommand:       cfg.ClipboardReadCommand,
 		MaxPasteBytes:              cfg.MaxPasteBytes,
 		Sanitize:                   cfg.Sanitize,
