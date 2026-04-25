@@ -16,6 +16,7 @@ import (
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/sanitize"
+	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
 )
 
@@ -44,7 +45,7 @@ func newListCmd(deps Deps) *cobra.Command {
 				return err
 			}
 			for _, summary := range summaries {
-				_, _ = fmt.Fprintln(deps.Stdout, summary.ID)
+				_, _ = fmt.Fprintf(deps.Stdout, "%s  %s\n", summary.ID, keybindSummary(summary))
 			}
 			return nil
 		},
@@ -81,13 +82,31 @@ func newShowCmd(deps Deps) *cobra.Command {
 			if len(p.Tags) > 0 {
 				_, _ = fmt.Fprintf(w, "Tags: %s\n", strings.Join(p.Tags, ", "))
 			}
-			if p.Key != "" {
-				_, _ = fmt.Fprintf(w, "Key: %s\n", p.Key)
-			}
+			_, _ = fmt.Fprintf(w, "Key: %s\n", keybindValue(p.Summary))
 			_, _ = fmt.Fprintln(w)
 			_, _ = fmt.Fprint(w, p.Body)
 			return nil
 		},
+	}
+}
+
+func keybindSummary(summary store.Summary) string {
+	return "key " + keybindValue(summary)
+}
+
+func keybindValue(summary store.Summary) string {
+	switch summary.KeySource {
+	case store.KeySourceExplicit:
+		return fmt.Sprintf("%s (explicit)", summary.Key)
+	case store.KeySourceAuto:
+		return fmt.Sprintf("%s (auto)", summary.Key)
+	case store.KeySourceOverflow:
+		return "none (overflow, not on board)"
+	default:
+		if summary.Key != "" {
+			return summary.Key
+		}
+		return "none (not assigned to board)"
 	}
 }
 

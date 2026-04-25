@@ -70,6 +70,7 @@ Go deeper.
 			Description: "Deep review",
 			Tags:        []string{"review", "code"},
 			Key:         "c",
+			KeySource:   KeySourceExplicit,
 			Path:        filepath.Join(dir, "code-review.md"),
 		},
 		{
@@ -77,6 +78,7 @@ Go deeper.
 			Title:       "Deep Review",
 			Description: "Multi-pass review",
 			Key:         "1",
+			KeySource:   KeySourceAuto,
 			Path:        filepath.Join(dir, "nested", "deep-review.md"),
 		},
 	}
@@ -387,8 +389,8 @@ func TestFSStoreIncludesOverflowPromptsWithoutAssignedKeys(t *testing.T) {
 	}
 
 	want := []Summary{
-		{ID: "alpha", Key: "1", Path: filepath.Join(dir, "alpha.md")},
-		{ID: "bravo", Key: "", Path: filepath.Join(dir, "bravo.md")},
+		{ID: "alpha", Key: "1", KeySource: KeySourceAuto, Path: filepath.Join(dir, "alpha.md")},
+		{ID: "bravo", Key: "", KeySource: KeySourceOverflow, Path: filepath.Join(dir, "bravo.md")},
 	}
 	if diff := cmp.Diff(want, summaries); diff != "" {
 		t.Fatalf("List() mismatch (-want +got):\n%s", diff)

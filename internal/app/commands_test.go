@@ -208,16 +208,21 @@ func (noopSubmitter) Submit(tui.Result) error { return nil }
 func TestListPrintsIDsAlphabetically(t *testing.T) {
 	fs := &fakeStore{
 		summaries: []store.Summary{
-			{ID: "alpha"},
-			{ID: "beta"},
-			{ID: "gamma"},
+			{ID: "alpha", Key: "1", KeySource: store.KeySourceAuto},
+			{ID: "beta", Key: "b", KeySource: store.KeySourceExplicit},
+			{ID: "gamma", KeySource: store.KeySourceOverflow},
 		},
 	}
 	stdout, _, err := executeRootWith(t, workingDeps(t, fs), "list")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := "alpha\nbeta\ngamma\n"
+	want := strings.Join([]string{
+		"alpha  key 1 (auto)",
+		"beta  key b (explicit)",
+		"gamma  key none (overflow, not on board)",
+		"",
+	}, "\n")
 	if stdout != want {
 		t.Fatalf("stdout mismatch\ngot:  %q\nwant: %q", stdout, want)
 	}
@@ -305,6 +310,7 @@ func TestShowFullMetadata(t *testing.T) {
 					Description: "Deep review prompt",
 					Tags:        []string{"review", "code"},
 					Key:         "c",
+					KeySource:   store.KeySourceExplicit,
 					Path:        "/prompts/code-review.md",
 				},
 				Body: "Review this code.\n",
@@ -326,7 +332,7 @@ func TestShowFullMetadata(t *testing.T) {
 		"Title: Code Review",
 		"Description: Deep review prompt",
 		"Tags: review, code",
-		"Key: c",
+		"Key: c (explicit)",
 		"",
 		"Review this code.",
 		"",
@@ -341,8 +347,9 @@ func TestShowMinimalMetadata(t *testing.T) {
 		prompts: map[string]store.Prompt{
 			"bare": {
 				Summary: store.Summary{
-					ID:   "bare",
-					Path: "/prompts/bare.md",
+					ID:        "bare",
+					Path:      "/prompts/bare.md",
+					KeySource: store.KeySourceOverflow,
 				},
 				Body: "Just a body.\n",
 			},
@@ -353,20 +360,21 @@ func TestShowMinimalMetadata(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	want := "ID: bare\nSource: /prompts/bare.md\n\nJust a body.\n"
+	want := "ID: bare\nSource: /prompts/bare.md\nKey: none (overflow, not on board)\n\nJust a body.\n"
 	if stdout != want {
 		t.Fatalf("stdout mismatch\ngot:\n%s\nwant:\n%s", stdout, want)
 	}
 }
 
-func TestShowMinimalWithKey(t *testing.T) {
+func TestShowMinimalWithAutoAssignedKey(t *testing.T) {
 	fs := &fakeStore{
 		prompts: map[string]store.Prompt{
 			"bare": {
 				Summary: store.Summary{
-					ID:   "bare",
-					Path: "/prompts/bare.md",
-					Key:  "b",
+					ID:        "bare",
+					Path:      "/prompts/bare.md",
+					Key:       "b",
+					KeySource: store.KeySourceAuto,
 				},
 				Body: "Just a body.\n",
 			},
@@ -376,7 +384,7 @@ func TestShowMinimalWithKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := "ID: bare\nSource: /prompts/bare.md\nKey: b\n\nJust a body.\n"
+	want := "ID: bare\nSource: /prompts/bare.md\nKey: b (auto)\n\nJust a body.\n"
 	if stdout != want {
 		t.Fatalf("stdout mismatch\ngot:\n%s\nwant:\n%s", stdout, want)
 	}

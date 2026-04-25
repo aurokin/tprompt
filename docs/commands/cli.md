@@ -12,17 +12,15 @@ Because rewriting happens before flag parsing, `tui`'s required `--target-pane` 
 
 ### `tprompt list`
 
-Lists all available prompt IDs.
+Lists all available prompt IDs with their resolved TUI board key state.
 
 Current output shape:
 
 ```text
-code-review
-bug-hunt
-deep-review
+code-review  key c (explicit)
+bug-hunt  key 1 (auto)
+deep-review  key none (overflow, not on board)
 ```
-
-Additional output fields should be introduced through a scoped Linear issue.
 
 ### `tprompt show <id>`
 
@@ -32,7 +30,8 @@ Recommended default output:
 
 - prompt ID
 - source file path
-- metadata summary (title, description, tags, declared key) if present
+- metadata summary (title, description, tags) if present
+- resolved board key state (`explicit`, `auto`, or `overflow`)
 - body
 
 ### `tprompt send <id>`
