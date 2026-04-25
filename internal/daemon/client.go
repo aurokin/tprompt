@@ -22,10 +22,16 @@ const DefaultClientReadTimeout = 5 * time.Second
 // domain socket at the given path. The returned client opens a fresh
 // connection for each call (the protocol is one request per connection).
 func NewSocketClient(path string) Client {
+	return NewSocketClientWithTimeouts(path, DefaultDialTimeout, DefaultClientReadTimeout)
+}
+
+// NewSocketClientWithTimeouts returns a Unix socket Client with caller-owned
+// dial and read deadlines. Non-positive durations disable that deadline.
+func NewSocketClientWithTimeouts(path string, dialTimeout, readTimeout time.Duration) Client {
 	return &socketClient{
 		path:        path,
-		dialTimeout: DefaultDialTimeout,
-		readTimeout: DefaultClientReadTimeout,
+		dialTimeout: dialTimeout,
+		readTimeout: readTimeout,
 	}
 }
 

@@ -162,13 +162,15 @@ func autoStartTUIDaemon(deps Deps, cfg config.Resolved, client daemon.Client) er
 	if err := deps.StartDaemon(cfg, explicitConfigPath(deps)); err != nil {
 		return &daemon.IPCError{Path: cfg.SocketPath, Op: "auto-start daemon", Reason: err.Error()}
 	}
-	return waitForTUIDaemonReady(client, cfg.SocketPath)
+	return waitForTUIDaemonReady(deps, cfg)
 }
 
-func waitForTUIDaemonReady(client daemon.Client, socketPath string) error {
+func waitForTUIDaemonReady(deps Deps, cfg config.Resolved) error {
 	deadline := time.Now().Add(daemonAutoStartReadyTimeout)
 	var lastErr error
 	for time.Now().Before(deadline) {
+		remaining := time.Until(deadline)
+		client := deps.NewDaemonReadinessClient(cfg, remaining)
 		if _, err := client.Status(); err == nil {
 			return nil
 		} else {
@@ -180,7 +182,7 @@ func waitForTUIDaemonReady(client daemon.Client, socketPath string) error {
 	if lastErr != nil {
 		reason = lastErr.Error()
 	}
-	return &daemon.IPCError{Path: socketPath, Op: "auto-start readiness", Reason: reason}
+	return &daemon.IPCError{Path: cfg.SocketPath, Op: "auto-start readiness", Reason: reason}
 }
 
 func explicitConfigPath(deps Deps) string {
