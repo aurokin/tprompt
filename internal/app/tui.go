@@ -36,15 +36,31 @@ func newTUICmd(deps Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tui",
 		Short: "Launch the interactive TUI (typically from a tmux popup)",
-		Args:  cobra.NoArgs,
+		Long: `Launch the interactive TUI for prompt selection and clipboard delivery.
+Selections are submitted to the local daemon, which injects into the
+target pane after the TUI process exits (daemon-backed deferred
+delivery). This is distinct from 'send' and 'paste', which deliver
+synchronously without the daemon.
+
+--target-pane is required so the daemon knows where to deliver. The
+target pane must still exist when the daemon injects. Typically invoked
+from a tmux popup binding that passes the originating context, e.g.:
+
+  tprompt tui --target-pane '#{pane_id}' --client-tty '#{client_tty}' \
+    --session-id '#{session_id}'
+
+Daemon auto-start is opt-in: pass --daemon-auto-start (or set
+'daemon_auto_start = true' in config) to start the daemon once if it is
+unreachable when the TUI runs.`,
+		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			return runTUI(deps, f)
 		},
 	}
 	cmd.Flags().StringVar(&f.targetPane, "target-pane", "", "tmux pane ID to deliver into (required)")
-	cmd.Flags().StringVar(&f.clientTTY, "client-tty", "", "tmux client TTY for failure banners")
-	cmd.Flags().StringVar(&f.sessionID, "session-id", "", "tmux session ID for delivery context")
-	cmd.Flags().BoolVar(&f.daemonAutoStart, "daemon-auto-start", false, "auto-start daemon for this TUI run if unreachable")
+	cmd.Flags().StringVar(&f.clientTTY, "client-tty", "", "originating tmux client TTY for failure banners")
+	cmd.Flags().StringVar(&f.sessionID, "session-id", "", "originating tmux session ID for delivery context")
+	cmd.Flags().BoolVar(&f.daemonAutoStart, "daemon-auto-start", false, "opt in to auto-starting the daemon for this TUI run if unreachable")
 	if err := cmd.MarkFlagRequired("target-pane"); err != nil {
 		panic(fmt.Sprintf("tui: mark --target-pane required: %v", err))
 	}

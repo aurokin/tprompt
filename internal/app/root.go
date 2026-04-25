@@ -25,8 +25,19 @@ var stdinIsTTY = func() bool {
 // NewRootCmd builds the root cobra command with all subcommands registered.
 func NewRootCmd(deps Deps) *cobra.Command {
 	root := &cobra.Command{
-		Use:           "tprompt",
-		Short:         "Deliver markdown prompts into tmux panes",
+		Use:   "tprompt",
+		Short: "Deliver markdown prompts into tmux panes",
+		Long: `tprompt delivers markdown prompts into tmux panes. Pick a workflow:
+
+  send <id>   Direct synchronous delivery of a prompt by ID.
+  paste       Direct synchronous delivery of the host clipboard.
+  pick        Print a prompt ID chosen via an external picker (no delivery).
+  tui         Interactive TUI; selections are delivered by the local daemon
+              after the TUI exits (daemon-backed deferred delivery).
+  daemon      Manage the local daemon lifecycle (start, status, stop).
+
+Inside tmux with a tty, bare 'tprompt' dispatches to 'tprompt tui'. Outside
+tmux (or without a tty), bare 'tprompt' prints this help.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
