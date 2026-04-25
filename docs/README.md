@@ -50,6 +50,7 @@ contracts, invariants, test seams, failure semantics, and proof surfaces.
 ## I Want To Add Tests
 
 - [Testing harness](testing/harness.md) - what to test and where.
+- [Phase 6 coverage audit](testing/phase-6-coverage.md) - release-hardening checklist mapped to proof.
 - [Interfaces](implementation/interfaces.md) - seams designed for isolation.
 - [Error handling](implementation/error-handling.md) - failure contracts to assert.
 
