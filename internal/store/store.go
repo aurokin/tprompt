@@ -23,8 +23,18 @@ type Summary struct {
 	Description string
 	Tags        []string
 	Key         string
+	KeySource   KeySource
 	Path        string
 }
+
+// KeySource identifies how a prompt's resolved board key was assigned.
+type KeySource string
+
+const (
+	KeySourceExplicit KeySource = "explicit"
+	KeySourceAuto     KeySource = "auto"
+	KeySourceOverflow KeySource = "overflow"
+)
 
 // DeliveryDefaults captures per-prompt delivery defaults from frontmatter.
 type DeliveryDefaults struct {
@@ -146,6 +156,13 @@ func (s *FSStore) Discover() error {
 	for _, entry := range entries {
 		if resolvedKey, ok := resolvedKeyForPrompt(assignment.Bindings, entry.prompt.ID); ok {
 			entry.prompt.Key = string(resolvedKey)
+			if entry.hasKey {
+				entry.prompt.KeySource = KeySourceExplicit
+			} else {
+				entry.prompt.KeySource = KeySourceAuto
+			}
+		} else {
+			entry.prompt.KeySource = KeySourceOverflow
 		}
 		promptsByID[entry.prompt.ID] = entry.prompt
 		summaries = append(summaries, entry.prompt.Summary)

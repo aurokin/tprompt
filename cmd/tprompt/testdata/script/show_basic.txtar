@@ -7,7 +7,7 @@ stdout 'Source: .*/prompts/code-review\.md'
 stdout 'Title: Code Review'
 stdout 'Description: Deep review prompt'
 stdout 'Tags: review, code'
-stdout 'Key: c'
+stdout 'Key: c \(explicit\)'
 stdout 'Review this code\.'
 ! stderr .
 
