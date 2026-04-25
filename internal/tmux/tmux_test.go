@@ -20,7 +20,7 @@ func (stubAdapter) IsTargetSelected(context.Context, TargetContext) (bool, error
 	return false, nil
 }
 
-func (stubAdapter) CapturePaneTail(string, int) (string, error) { return "", nil }
+func (stubAdapter) CapturePaneTail(context.Context, string, int) (string, error) { return "", nil }
 
 func (stubAdapter) Paste(context.Context, TargetContext, string, bool) error {
 	return nil

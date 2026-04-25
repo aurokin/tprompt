@@ -283,7 +283,7 @@ func (stubTmuxAdapter) IsTargetSelected(context.Context, tmux.TargetContext) (bo
 	return true, nil
 }
 
-func (stubTmuxAdapter) CapturePaneTail(string, int) (string, error) { return "", nil }
+func (stubTmuxAdapter) CapturePaneTail(context.Context, string, int) (string, error) { return "", nil }
 
 func (stubTmuxAdapter) Paste(context.Context, tmux.TargetContext, string, bool) error { return nil }
 

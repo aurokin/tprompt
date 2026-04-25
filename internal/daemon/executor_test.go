@@ -30,6 +30,7 @@ type executorAdapter struct {
 	captureCalls int
 	captureTails []string
 	captureErrs  []error
+	captureHook  func(context.Context, string, int) (string, error)
 
 	paneExists      bool
 	paneExistsErr   error
@@ -59,8 +60,14 @@ func (a *executorAdapter) IsTargetSelected(context.Context, tmux.TargetContext) 
 	return a.targetSelected, a.targetSelectErr
 }
 
-func (a *executorAdapter) CapturePaneTail(string, int) (string, error) {
+func (a *executorAdapter) CapturePaneTail(ctx context.Context, paneID string, lines int) (string, error) {
 	a.mu.Lock()
+	hook := a.captureHook
+	if hook != nil {
+		a.captureCalls++
+		a.mu.Unlock()
+		return hook(ctx, paneID, lines)
+	}
 	defer a.mu.Unlock()
 	call := a.captureCalls
 	a.captureCalls++
@@ -595,6 +602,44 @@ func TestExecutorCancellationBeforePreCaptureIsSilent(t *testing.T) {
 	}
 }
 
+func TestExecutorCancellationDuringPreCaptureIsSilent(t *testing.T) {
+	a := newExecutorAdapter()
+	started := make(chan struct{})
+	a.captureHook = func(ctx context.Context, _ string, _ int) (string, error) {
+		close(started)
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+	e.EnablePostInjectionVerification(true)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- e.deliver(ctx, makeDeliveryJob("hi", "paste"), []byte("hi"))
+	}()
+
+	<-started
+	cancel()
+
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("deliver error = %v, want context.Canceled", err)
+	}
+	if got := a.snapshotCaptureCalls(); got != 1 {
+		t.Fatalf("capture calls = %d, want 1", got)
+	}
+	if len(a.pasteCalls) != 0 {
+		t.Fatalf("canceled delivery should not paste, got %d calls", len(a.pasteCalls))
+	}
+	if displays := a.snapshotDisplays(); len(displays) != 0 {
+		t.Fatalf("cancellation should be silent, got banners: %+v", displays)
+	}
+	if logBuf.Len() != 0 {
+		t.Fatalf("cancellation should be silent, got log: %q", logBuf.String())
+	}
+}
+
 func TestExecutorCancellationBeforePostCaptureIsSilent(t *testing.T) {
 	a := newExecutorAdapter()
 	var cancel context.CancelFunc
@@ -615,6 +660,48 @@ func TestExecutorCancellationBeforePostCaptureIsSilent(t *testing.T) {
 	}
 	if got := a.snapshotCaptureCalls(); got != 1 {
 		t.Fatalf("canceled delivery should skip post-capture, got %d captures", got)
+	}
+	if displays := a.snapshotDisplays(); len(displays) != 0 {
+		t.Fatalf("cancellation should be silent, got banners: %+v", displays)
+	}
+	if logBuf.Len() != 0 {
+		t.Fatalf("cancellation should be silent, got log: %q", logBuf.String())
+	}
+}
+
+func TestExecutorCancellationDuringPostCaptureIsSilent(t *testing.T) {
+	a := newExecutorAdapter()
+	captureStarted := make(chan struct{})
+	captureRelease := make(chan struct{})
+	var cancel context.CancelFunc
+	a.captureHook = func(ctx context.Context, _ string, _ int) (string, error) {
+		if a.snapshotCaptureCalls() == 1 {
+			return "before", nil
+		}
+		close(captureStarted)
+		<-captureRelease
+		return "", ctx.Err()
+	}
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+	e.EnablePostInjectionVerification(true)
+
+	ctx, cancelFn := context.WithCancel(context.Background())
+	cancel = cancelFn
+	done := make(chan error, 1)
+	go func() {
+		done <- e.deliver(ctx, makeDeliveryJob("hi", "paste"), []byte("hi"))
+	}()
+
+	<-captureStarted
+	cancel()
+	close(captureRelease)
+
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("deliver error = %v, want context.Canceled", err)
+	}
+	if got := a.snapshotCaptureCalls(); got != 2 {
+		t.Fatalf("capture calls = %d, want 2", got)
 	}
 	if displays := a.snapshotDisplays(); len(displays) != 0 {
 		t.Fatalf("cancellation should be silent, got banners: %+v", displays)

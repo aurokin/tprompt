@@ -18,7 +18,7 @@ TmuxAdapter
 - CurrentContext() -> TargetContext | error
 - PaneExists(paneID string) -> bool, error
 - IsTargetSelected(target TargetContext) -> bool, error
-- CapturePaneTail(paneID string, lines int) -> string, error
+- CapturePaneTail(ctx context.Context, paneID string, lines int) -> string, error
 - Paste(target TargetContext, body string, pressEnter bool) -> error
 - Type(target TargetContext, body string, pressEnter bool) -> error
 - DisplayMessage(target MessageTarget, message string) -> error

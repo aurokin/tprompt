@@ -119,7 +119,10 @@ func (e *Executor) deliver(ctx context.Context, job Job, cleaned []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	before, captureErr := e.captureBeforeDelivery(job)
+	before, captureErr := e.captureBeforeDelivery(ctx, job)
+	if isContextDone(ctx, captureErr) {
+		return captureErr
+	}
 
 	var err error
 	if job.Mode == "paste" {
@@ -134,8 +137,7 @@ func (e *Executor) deliver(ctx context.Context, job Job, cleaned []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	e.verifyPostInjection(job, before, captureErr)
-	return nil
+	return e.verifyPostInjection(ctx, job, before, captureErr)
 }
 
 func canceled(ctx context.Context) (bool, error) {
@@ -149,6 +151,14 @@ func canceled(ctx context.Context) (bool, error) {
 	return true, err
 }
 
+func isContextDone(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, context.Canceled) ||
+		(ctx != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()))
+}
+
 func (e *Executor) handleFailure(job Job, err error) {
 	_ = e.logger.Log(jobEntry(job, failureOutcome(err), err.Error()))
 	if target, ok := bannerTarget(job.messageTarget(), err); ok {
@@ -156,33 +166,40 @@ func (e *Executor) handleFailure(job Job, err error) {
 	}
 }
 
-func (e *Executor) captureBeforeDelivery(job Job) (string, error) {
+func (e *Executor) captureBeforeDelivery(ctx context.Context, job Job) (string, error) {
 	if !e.postInjectionVerification {
 		return "", nil
 	}
-	tail, err := e.adapter.CapturePaneTail(job.PaneID, postInjectionCaptureLines)
+	tail, err := e.adapter.CapturePaneTail(ctx, job.PaneID, postInjectionCaptureLines)
 	if err != nil {
+		if isContextDone(ctx, err) {
+			return "", err
+		}
 		return "", fmt.Errorf("post-injection verification: capture before delivery failed")
 	}
 	return tail, nil
 }
 
-func (e *Executor) verifyPostInjection(job Job, before string, beforeErr error) {
+func (e *Executor) verifyPostInjection(ctx context.Context, job Job, before string, beforeErr error) error {
 	if !e.postInjectionVerification {
-		return
+		return nil
 	}
 	if beforeErr != nil {
 		e.handleWarning(job, beforeErr.Error())
-		return
+		return nil
 	}
-	after, err := e.adapter.CapturePaneTail(job.PaneID, postInjectionCaptureLines)
+	after, err := e.adapter.CapturePaneTail(ctx, job.PaneID, postInjectionCaptureLines)
 	if err != nil {
+		if isContextDone(ctx, err) {
+			return err
+		}
 		e.handleWarning(job, "post-injection verification: capture after delivery failed")
-		return
+		return nil
 	}
 	if after == before {
 		e.handleWarning(job, "post-injection verification: pane output appeared unchanged after delivery; this is a diagnostic warning, not proof that the target application ignored the input")
 	}
+	return nil
 }
 
 func (e *Executor) handleWarning(job Job, msg string) {

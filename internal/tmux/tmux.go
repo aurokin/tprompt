@@ -65,7 +65,7 @@ type Adapter interface {
 	CurrentContext() (TargetContext, error)
 	PaneExists(ctx context.Context, paneID string) (bool, error)
 	IsTargetSelected(ctx context.Context, target TargetContext) (bool, error)
-	CapturePaneTail(paneID string, lines int) (string, error)
+	CapturePaneTail(ctx context.Context, paneID string, lines int) (string, error)
 	Paste(ctx context.Context, target TargetContext, body string, pressEnter bool) error
 	Type(ctx context.Context, target TargetContext, body string, pressEnter bool) error
 	DisplayMessage(target MessageTarget, message string) error

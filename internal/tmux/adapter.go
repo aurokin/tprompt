@@ -92,14 +92,14 @@ func (e *Exec) IsTargetSelected(parent context.Context, target TargetContext) (b
 	return e.isPaneForegroundSelected(parent, target)
 }
 
-func (e *Exec) CapturePaneTail(paneID string, lines int) (string, error) {
-	ctx, cancel := e.timedCtx(context.Background())
+func (e *Exec) CapturePaneTail(parent context.Context, paneID string, lines int) (string, error) {
+	ctx, cancel := e.timedCtx(parent)
 	defer cancel()
 	out, err := e.runner.Run(ctx, []string{
 		"capture-pane", "-p", "-t", paneID, "-S", fmt.Sprintf("-%d", lines),
 	}, nil)
 	if err != nil {
-		return "", &DeliveryError{Op: "capture-pane", Target: paneID, Message: runnerMessage(err)}
+		return "", &DeliveryError{Op: "capture-pane", Target: paneID, Message: runnerMessage(err), Cause: err}
 	}
 	return string(out), nil
 }

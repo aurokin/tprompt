@@ -48,7 +48,7 @@ func (f *fakeAdapter) IsTargetSelected(context.Context, tmux.TargetContext) (boo
 	return true, nil
 }
 
-func (f *fakeAdapter) CapturePaneTail(string, int) (string, error) { return "", nil }
+func (f *fakeAdapter) CapturePaneTail(context.Context, string, int) (string, error) { return "", nil }
 
 func (f *fakeAdapter) Paste(_ context.Context, t tmux.TargetContext, body string, enter bool) error {
 	f.pasteCalls = append(f.pasteCalls, pasteCall{Target: t, Body: body, Enter: enter})
