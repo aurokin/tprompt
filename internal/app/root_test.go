@@ -39,6 +39,17 @@ func TestDaemonStartCommandExists(t *testing.T) {
 	}
 }
 
+func TestDaemonStopCommandExists(t *testing.T) {
+	root := NewRootCmd(fakeDeps(t))
+	cmd, _, err := root.Find([]string{"daemon", "stop"})
+	if err != nil {
+		t.Fatalf("find daemon stop: %v", err)
+	}
+	if cmd == nil || cmd.CommandPath() != "tprompt daemon stop" {
+		t.Fatalf("want tprompt daemon stop, got %v", cmd)
+	}
+}
+
 func TestDaemonRunAliasExists(t *testing.T) {
 	root := NewRootCmd(fakeDeps(t))
 	cmd, _, err := root.Find([]string{"daemon", "run"})

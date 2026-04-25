@@ -9,12 +9,14 @@ package daemon
 const (
 	kindSubmit = "submit"
 	kindStatus = "status"
+	kindStop   = "stop"
 )
 
 type wireRequest struct {
 	Kind   string         `json:"kind"`
 	Submit *SubmitRequest `json:"submit,omitempty"`
 	Status *StatusRequest `json:"status,omitempty"`
+	Stop   *StopRequest   `json:"stop,omitempty"`
 }
 
 type wireResponse struct {
@@ -22,4 +24,5 @@ type wireResponse struct {
 	Error  string          `json:"error,omitempty"`
 	Submit *SubmitResponse `json:"submit,omitempty"`
 	Status *StatusResponse `json:"status,omitempty"`
+	Stop   *StopResponse   `json:"stop,omitempty"`
 }

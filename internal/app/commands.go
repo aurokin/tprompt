@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -23,6 +24,8 @@ import (
 const appVersion = "0.1.0"
 
 var runDaemon = daemon.Run
+
+const daemonStopTimeout = 2 * time.Second
 
 func newListCmd(deps Deps) *cobra.Command {
 	return &cobra.Command{
@@ -421,6 +424,14 @@ func newDaemonCmd(deps Deps) *cobra.Command {
 				return runDaemonStatus(deps)
 			},
 		},
+		&cobra.Command{
+			Use:   "stop",
+			Short: "Request graceful daemon shutdown",
+			Args:  cobra.NoArgs,
+			RunE: func(*cobra.Command, []string) error {
+				return runDaemonStop(deps, daemonStopTimeout)
+			},
+		},
 	)
 	return cmd
 }
@@ -447,10 +458,14 @@ func runDaemonStart(parent context.Context, deps Deps) error {
 	queue := daemon.NewQueue(adapter, logger, executor.Run)
 	started := time.Now()
 
+	ctx, stop := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	server := daemon.NewServer(daemon.ServerConfig{
 		SocketPath: cfg.SocketPath,
 		Queue:      queue,
 		Logger:     logger,
+		ShutdownFn: stop,
 		StatusFn: func() daemon.StatusResponse {
 			return daemon.StatusResponse{
 				PID:         os.Getpid(),
@@ -462,9 +477,6 @@ func runDaemonStart(parent context.Context, deps Deps) error {
 			}
 		},
 	})
-
-	ctx, stop := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	runResult, runErr := runDaemon(ctx, server, func() {
 		_, _ = fmt.Fprintf(deps.Stdout, "tprompt daemon listening on %s\n", cfg.SocketPath)
@@ -506,6 +518,42 @@ func runDaemonStatus(deps Deps) error {
 	_, _ = fmt.Fprintf(w, "pending jobs: %d\n", status.PendingJobs)
 	_, _ = fmt.Fprintf(w, "version:      %s\n", status.Version)
 	return nil
+}
+
+func runDaemonStop(deps Deps, timeout time.Duration) error {
+	cfg, err := deps.LoadDaemonConfig(*deps.ConfigPath)
+	if err != nil {
+		return err
+	}
+	if err := validateDaemonStatusConfig(cfg); err != nil {
+		return err
+	}
+	client, err := deps.NewDaemonClient(cfg)
+	if err != nil {
+		return err
+	}
+	if _, err := client.Stop(); err != nil {
+		var socketErr *daemon.SocketUnavailableError
+		if errors.As(err, &socketErr) {
+			_, _ = fmt.Fprintln(deps.Stdout, "daemon not running")
+			return nil
+		}
+		return err
+	}
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := client.Status(); err != nil {
+			var socketErr *daemon.SocketUnavailableError
+			if errors.As(err, &socketErr) {
+				_, _ = fmt.Fprintln(deps.Stdout, "tprompt daemon stopped")
+				return nil
+			}
+			return err
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return &daemon.ShutdownTimeoutError{Path: cfg.SocketPath, TimeoutMS: int(timeout / time.Millisecond)}
 }
 
 func validateDaemonStatusConfig(cfg config.Resolved) error {

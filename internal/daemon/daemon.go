@@ -107,10 +107,19 @@ type StatusResponse struct {
 	Version     string `json:"version"`
 }
 
+// StopRequest asks the server to begin graceful shutdown.
+type StopRequest struct{}
+
+// StopResponse acknowledges that the daemon accepted the shutdown request.
+type StopResponse struct {
+	Accepted bool `json:"accepted"`
+}
+
 // Client is the TUI- and CLI-facing handle to the daemon socket.
 type Client interface {
 	Submit(req SubmitRequest) (SubmitResponse, error)
 	Status() (StatusResponse, error)
+	Stop() (StopResponse, error)
 }
 
 // SocketUnavailableError reports that the daemon socket cannot be reached:
@@ -150,6 +159,20 @@ func (e *IPCError) Error() string {
 		return base
 	}
 	return fmt.Sprintf("%s: %s", base, e.Reason)
+}
+
+// ShutdownTimeoutError reports that `daemon stop` was acknowledged but the
+// daemon socket was still reachable after the bounded graceful wait.
+type ShutdownTimeoutError struct {
+	Path      string
+	TimeoutMS int
+}
+
+func (e *ShutdownTimeoutError) Error() string {
+	if e.Path == "" {
+		return fmt.Sprintf("daemon shutdown not confirmed after %dms", e.TimeoutMS)
+	}
+	return fmt.Sprintf("daemon shutdown not confirmed for %s after %dms", e.Path, e.TimeoutMS)
 }
 
 // TimeoutError reports that verification did not complete within the policy

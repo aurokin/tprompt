@@ -35,6 +35,7 @@ type ServerConfig struct {
 	Queue      *Queue
 	Logger     *Logger
 	StatusFn   StatusFunc
+	ShutdownFn func()
 }
 
 // Server accepts JSON-framed daemon requests on a Unix domain socket.
@@ -44,6 +45,7 @@ type Server struct {
 	queue      *Queue
 	logger     *Logger
 	statusFn   StatusFunc
+	shutdownFn func()
 
 	jobCounter atomic.Uint64
 	now        func() time.Time
@@ -73,6 +75,7 @@ func NewServer(cfg ServerConfig) *Server {
 		queue:      cfg.Queue,
 		logger:     cfg.Logger,
 		statusFn:   cfg.StatusFn,
+		shutdownFn: cfg.ShutdownFn,
 		now:        time.Now,
 		dial:       net.DialTimeout,
 	}
@@ -251,6 +254,16 @@ func (s *Server) handle(conn net.Conn) {
 	case kindStatus:
 		status := s.statusFn()
 		s.writeResponse(conn, wireResponse{Kind: kindStatus, Status: &status})
+	case kindStop:
+		if req.Stop == nil {
+			s.writeError(conn, "stop request missing payload")
+			return
+		}
+		resp := StopResponse{Accepted: true}
+		s.writeResponse(conn, wireResponse{Kind: kindStop, Stop: &resp})
+		if s.shutdownFn != nil {
+			go s.shutdownFn()
+		}
 	default:
 		s.writeError(conn, fmt.Sprintf("unknown request kind: %q", req.Kind))
 	}

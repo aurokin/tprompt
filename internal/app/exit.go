@@ -112,6 +112,10 @@ func ExitCode(err error) int {
 	if errors.As(err, &ipcErr) {
 		return ExitDaemon
 	}
+	var shutdownTimeoutErr *daemon.ShutdownTimeoutError
+	if errors.As(err, &shutdownTimeoutErr) {
+		return ExitDaemon
+	}
 	var timeoutErr *daemon.TimeoutError
 	if errors.As(err, &timeoutErr) {
 		return ExitDaemon

@@ -25,6 +25,7 @@ tprompt pick
 tprompt tui --target-pane '#{pane_id}'
 tprompt daemon start
 tprompt daemon status
+tprompt daemon stop
 tprompt doctor
 ```
 

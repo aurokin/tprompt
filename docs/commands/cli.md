@@ -102,10 +102,13 @@ Checks:
 
 ### `tprompt daemon start`
 ### `tprompt daemon status`
+### `tprompt daemon stop`
 
 Used for local daemon lifecycle.
 
-`start` and `status` are the current daemon lifecycle commands.
+`start`, `status`, and `stop` are the current daemon lifecycle commands. `stop`
+requests graceful shutdown over local daemon IPC and reports `daemon not
+running` when the configured socket is unreachable.
 
 ## Cancel semantics
 

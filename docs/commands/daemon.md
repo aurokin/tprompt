@@ -25,7 +25,13 @@ This is simple and appropriate for per-user local communication.
 Current lifecycle behavior:
 
 - daemon can be started explicitly (`tprompt daemon start`)
+- daemon can be stopped gracefully (`tprompt daemon stop`)
 - CLI auto-start is outside the current contract
+
+`tprompt daemon stop` sends an explicit shutdown request over the daemon's
+local socket. If no daemon is reachable, it reports `daemon not running`. If
+shutdown is acknowledged but the socket remains reachable past the bounded
+graceful wait, the command exits with a daemon/IPC error.
 
 ## Job handling
 
