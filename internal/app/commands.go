@@ -123,7 +123,14 @@ func newSendCmd(deps Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "send <id>",
 		Short: "Deliver a prompt into a tmux pane synchronously",
-		Args:  cobra.ExactArgs(1),
+		Long: `Send delivers a prompt body synchronously to a tmux pane. Delivery is
+direct via the tmux adapter in this process — it does not use the daemon
+and is not affected by pending TUI jobs.
+
+If --target-pane is omitted, the current tmux pane is used; outside tmux
+this fails with a clear error. Delivery settings resolve in this order:
+CLI flags, prompt frontmatter, config file, built-in defaults.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			f := sendFlags{targetPane: targetPane}
 			if c.Flags().Changed("mode") {
@@ -241,7 +248,14 @@ func newPasteCmd(deps Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "paste",
 		Short: "Deliver the host clipboard into a tmux pane synchronously",
-		Args:  cobra.NoArgs,
+		Long: `Paste reads the host clipboard once and delivers it synchronously to a
+tmux pane. Same-host only: the clipboard reader, daemon, and tmux pane
+all run on the same machine.
+
+If --target-pane is omitted, the current tmux pane is used. Like 'send',
+this command does not use the daemon and delivers directly. Flag set
+mirrors 'send' for consistency.`,
+		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			f := pasteFlags{targetPane: targetPane}
 			if c.Flags().Changed("mode") {
@@ -377,7 +391,13 @@ func newPickCmd(deps Deps) *cobra.Command {
 	return &cobra.Command{
 		Use:   "pick",
 		Short: "Select a prompt via an external picker (picker_command)",
-		Args:  cobra.NoArgs,
+		Long: `Pick runs the configured external picker (picker_command, default 'fzf')
+over the available prompt IDs and prints the selected ID to stdout. It
+does not deliver the prompt — pipe the ID into 'tprompt send' or use it
+in shell composition. Cancellation exits 0 with no output.
+
+For interactive selection that delivers, use 'tprompt tui' instead.`,
+		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			return runPick(deps)
 		},
@@ -425,13 +445,25 @@ func newDaemonCmd(deps Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Manage the deferred-delivery daemon",
+		Long: `Manage the local tprompt daemon, which performs deferred delivery of
+TUI-selected prompts after the TUI process exits. Lifecycle is explicit:
+
+  start    Run the daemon in the foreground listening on the socket.
+  status   Read-only status check; does not start the daemon implicitly.
+  stop     Request graceful shutdown over the local IPC socket.
+
+'tprompt send' and 'tprompt paste' do not use the daemon.`,
 	}
 	cmd.AddCommand(
 		&cobra.Command{
 			Use:     "start",
 			Aliases: []string{"run"},
 			Short:   "Start the daemon in the foreground",
-			Args:    cobra.NoArgs,
+			Long: `Start the daemon in the foreground. The daemon listens on the configured
+socket and processes deferred delivery jobs submitted by 'tprompt tui'.
+Send SIGINT or SIGTERM (or run 'tprompt daemon stop' from another shell)
+to request graceful shutdown.`,
+			Args: cobra.NoArgs,
 			RunE: func(c *cobra.Command, _ []string) error {
 				return runDaemonStart(c.Context(), deps)
 			},
@@ -439,7 +471,10 @@ func newDaemonCmd(deps Deps) *cobra.Command {
 		&cobra.Command{
 			Use:   "status",
 			Short: "Report daemon status",
-			Args:  cobra.NoArgs,
+			Long: `Print the running daemon's pid, socket, log path, uptime, version, and
+pending job count. This is a read-only check — it does not start the
+daemon if it is not running.`,
+			Args: cobra.NoArgs,
 			RunE: func(*cobra.Command, []string) error {
 				return runDaemonStatus(deps)
 			},
@@ -447,7 +482,11 @@ func newDaemonCmd(deps Deps) *cobra.Command {
 		&cobra.Command{
 			Use:   "stop",
 			Short: "Request graceful daemon shutdown",
-			Args:  cobra.NoArgs,
+			Long: `Request graceful shutdown of the running daemon over the local IPC
+socket. If no daemon is reachable on the configured socket, prints
+'daemon not running' and exits 0. If the daemon does not finish shutting
+down within a short bounded wait, exits with a daemon/IPC error.`,
+			Args: cobra.NoArgs,
 			RunE: func(*cobra.Command, []string) error {
 				return runDaemonStop(deps, daemonStopTimeout)
 			},
