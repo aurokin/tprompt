@@ -116,6 +116,9 @@ func (e *Executor) deliver(ctx context.Context, job Job, cleaned []byte) error {
 		return fmt.Errorf("unresolved delivery mode %q", job.Mode)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	before, captureErr := e.captureBeforeDelivery(job)
 
 	var err error
@@ -128,6 +131,9 @@ func (e *Executor) deliver(ctx context.Context, job Job, cleaned []byte) error {
 		return err
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	e.verifyPostInjection(job, before, captureErr)
 	return nil
 }

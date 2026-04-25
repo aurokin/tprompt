@@ -568,6 +568,62 @@ func TestExecutorCancellationAfterVerifySkipsDelivery(t *testing.T) {
 	}
 }
 
+func TestExecutorCancellationBeforePreCaptureIsSilent(t *testing.T) {
+	a := newExecutorAdapter()
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+	e.EnablePostInjectionVerification(true)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := e.deliver(ctx, makeDeliveryJob("hi", "paste"), []byte("hi"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("deliver error = %v, want context.Canceled", err)
+	}
+	if got := a.snapshotCaptureCalls(); got != 0 {
+		t.Fatalf("canceled delivery should not capture, got %d captures", got)
+	}
+	if len(a.pasteCalls) != 0 {
+		t.Fatalf("canceled delivery should not paste, got %d calls", len(a.pasteCalls))
+	}
+	if displays := a.snapshotDisplays(); len(displays) != 0 {
+		t.Fatalf("cancellation should be silent, got banners: %+v", displays)
+	}
+	if logBuf.Len() != 0 {
+		t.Fatalf("cancellation should be silent, got log: %q", logBuf.String())
+	}
+}
+
+func TestExecutorCancellationBeforePostCaptureIsSilent(t *testing.T) {
+	a := newExecutorAdapter()
+	var cancel context.CancelFunc
+	a.captureTails = []string{"before", "same"}
+	a.pasteHook = func(context.Context, tmux.TargetContext, string, bool) error {
+		cancel()
+		return nil
+	}
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+	e.EnablePostInjectionVerification(true)
+
+	ctx, cancelFn := context.WithCancel(context.Background())
+	cancel = cancelFn
+	err := e.deliver(ctx, makeDeliveryJob("hi", "paste"), []byte("hi"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("deliver error = %v, want context.Canceled", err)
+	}
+	if got := a.snapshotCaptureCalls(); got != 1 {
+		t.Fatalf("canceled delivery should skip post-capture, got %d captures", got)
+	}
+	if displays := a.snapshotDisplays(); len(displays) != 0 {
+		t.Fatalf("cancellation should be silent, got banners: %+v", displays)
+	}
+	if logBuf.Len() != 0 {
+		t.Fatalf("cancellation should be silent, got log: %q", logBuf.String())
+	}
+}
+
 func TestExecutorCancellationDuringPasteIsSilent(t *testing.T) {
 	a := newExecutorAdapter()
 	started := make(chan struct{})
