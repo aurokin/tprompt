@@ -124,15 +124,20 @@ func canceled(ctx context.Context) (bool, error) {
 }
 
 func (e *Executor) handleFailure(job Job, err error) {
-	_ = e.logger.Log(Entry{
-		JobID:   job.JobID,
-		Pane:    job.PaneID,
-		Source:  job.Source,
-		Outcome: failureOutcome(err),
-		Msg:     err.Error(),
-	})
+	_ = e.logger.Log(jobEntry(job, failureOutcome(err), err.Error()))
 	if target, ok := bannerTarget(job.messageTarget(), err); ok {
 		_ = e.adapter.DisplayMessage(target, BannerPrefix+err.Error())
+	}
+}
+
+func jobEntry(job Job, outcome, msg string) Entry {
+	return Entry{
+		JobID:    job.JobID,
+		Pane:     job.PaneID,
+		Source:   job.Source,
+		PromptID: job.PromptID,
+		Outcome:  outcome,
+		Msg:      msg,
 	}
 }
 

@@ -316,6 +316,66 @@ func TestExecutorAdapterDeliveryError(t *testing.T) {
 	}
 }
 
+func TestExecutorFailureLogIncludesCorrelationMetadataAndRedactsPromptBody(t *testing.T) {
+	a := newExecutorAdapter()
+	a.pasteErr = &tmux.DeliveryError{Op: "paste-buffer", Target: "%5", Message: "tmux server died"}
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+
+	job := makeDeliveryJob("SECRET PROMPT BODY", "paste")
+	job.JobID = "j-prompt"
+	job.PromptID = "code-review"
+	e.Run(context.Background(), job)
+
+	logged := logBuf.String()
+	for _, want := range []string{
+		"job_id=j-prompt",
+		"pane=%5",
+		"source=prompt",
+		"prompt_id=code-review",
+		"outcome=delivery_error",
+		`msg="tmux paste-buffer into %5 failed: tmux server died"`,
+	} {
+		if !strings.Contains(logged, want) {
+			t.Fatalf("failure log missing %q\ngot: %q", want, logged)
+		}
+	}
+	if strings.Contains(logged, "SECRET PROMPT BODY") {
+		t.Fatalf("failure log leaked prompt body: %q", logged)
+	}
+}
+
+func TestExecutorFailureLogRedactsClipboardBody(t *testing.T) {
+	a := newExecutorAdapter()
+	a.typeErr = &tmux.DeliveryError{Op: "send-keys", Target: "%5", Message: "tmux server died"}
+	var logBuf bytes.Buffer
+	e := NewExecutor(a, NewLoggerWriter(&logBuf), 1<<20)
+
+	job := makeDeliveryJob("SECRET CLIPBOARD BYTES", "type")
+	job.JobID = "j-clip"
+	job.Source = SourceClipboard
+	job.PromptID = ""
+	e.Run(context.Background(), job)
+
+	logged := logBuf.String()
+	for _, want := range []string{
+		"job_id=j-clip",
+		"pane=%5",
+		"source=clipboard",
+		"outcome=delivery_error",
+	} {
+		if !strings.Contains(logged, want) {
+			t.Fatalf("clipboard failure log missing %q\ngot: %q", want, logged)
+		}
+	}
+	if strings.Contains(logged, "prompt_id=") {
+		t.Fatalf("clipboard failure log should omit prompt_id: %q", logged)
+	}
+	if strings.Contains(logged, "SECRET CLIPBOARD BYTES") {
+		t.Fatalf("failure log leaked clipboard body: %q", logged)
+	}
+}
+
 func TestExecutorCancellationIsSilent(t *testing.T) {
 	a := newExecutorAdapter()
 	a.targetSelected = false // never ready, so verify keeps polling

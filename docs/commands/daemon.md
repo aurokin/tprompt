@@ -25,6 +25,7 @@ This is simple and appropriate for per-user local communication.
 Current lifecycle behavior:
 
 - daemon can be started explicitly (`tprompt daemon start`)
+- daemon status can be checked explicitly (`tprompt daemon status`)
 - daemon can be stopped gracefully (`tprompt daemon stop`)
 - CLI auto-start is outside the current contract
 
@@ -97,7 +98,26 @@ The banner appears in the tmux status area of the originating client when `clien
 
 Default path: `~/.local/state/tprompt/daemon.log`.
 
-Log entries include job ID, timestamp, target pane, failure class, and message. Payload bodies are **never** logged — sanitizer rejections record only class + byte offset.
+Log entries are single-line logfmt records. Failure entries include timestamp, job ID, target pane, source, prompt ID when the source is a prompt, outcome, and message. Payload bodies are **never** logged — prompt bodies and clipboard bytes stay out of the log, and sanitizer rejections record only class + byte offset.
+
+Example failure log entries:
+
+```text
+time=2026-04-16T12:30:45Z job_id=j-1 pane=%5 source=prompt prompt_id=code-review outcome=timeout msg="verification timed out after 5000ms"
+time=2026-04-16T12:31:03Z job_id=j-2 pane=%5 source=clipboard outcome=delivery_error msg="tmux paste-buffer into %5 failed: tmux server died"
+```
+
+`tprompt daemon status` reports the running daemon in a deterministic, scan-friendly block:
+
+```text
+tprompt daemon
+  pid:          12345
+  socket:       /run/user/1000/tprompt/daemon.sock
+  log:          /home/user/.local/state/tprompt/daemon.log
+  uptime:       1h2m3s
+  version:      0.1.0
+  pending jobs: 0
+```
 
 Success is not logged by default. A future confirmation mode would need an explicit product contract before implementation.
 
