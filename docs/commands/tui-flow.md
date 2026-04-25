@@ -63,7 +63,7 @@ If job submission fails:
 
 - the TUI exits non-zero through the command error path
 - the CLI surfaces the submit error on stderr with the normal exit-code mapping
-- no background retry logic is required for MVP
+- background retry logic is outside the current contract
 
 Inline TUI footer errors are reserved for recoverable, pre-submit choices such as empty clipboard content or an oversized prompt body. Once submission to the daemon has started, failures are not recoverable from inside the TUI.
 

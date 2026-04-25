@@ -98,7 +98,7 @@ Search results use the same visible-height limit and scroll with `↑`/`↓`, in
 
 ## Non-goals
 
-- modifier-key combos for keybinds (MVP is single printable char only)
+- modifier-key combos for keybinds (current contract is single printable char only)
 - live preview of clipboard content (read-on-select only)
 - inline prompt editing
 - re-ordering the board at runtime

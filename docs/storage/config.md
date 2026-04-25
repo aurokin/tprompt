@@ -2,7 +2,7 @@
 
 ## Goal
 
-Keep configuration small for MVP.
+Keep configuration small and explicit.
 
 ## Suggested config file
 
@@ -39,14 +39,14 @@ cancel    = "Esc"
 select    = "Enter"
 ```
 
-## Required config fields for MVP
+## Required config fields
 
 - prompts directory
 - socket path
 - default delivery mode
 - default enter behavior
 
-## Optional config fields for MVP
+## Optional config fields
 
 - picker command (affects `tprompt pick`; does not affect the built-in TUI)
 - verification timeout

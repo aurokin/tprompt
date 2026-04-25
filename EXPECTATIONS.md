@@ -1,149 +1,109 @@
-# Expectations
+# Behavior Contract
 
-This file defines the MVP contract for the coding agent.
+This file defines the current product contract for `tprompt`. It is not a work
+tracker; planned work lives in Linear.
 
-## Success criteria
+## Prompt Resolution
 
-A correct MVP implementation should satisfy all of the following.
+- Prompt files are markdown files under the configured prompt directory.
+- Prompt IDs are derived from the filename stem only.
+- Directories are organizational only and do not namespace IDs.
+- Duplicate filename-stem IDs are invalid and must fail with clear conflicting paths.
+- Optional YAML frontmatter may define metadata such as `title`,
+  `description`, `tags`, delivery defaults, and `key`.
+- Frontmatter is metadata only. Delivery injects the markdown body, not the frontmatter.
+- Duplicate, reserved, or malformed `key:` values are invalid.
 
-### Prompt resolution
+## CLI Behavior
 
-- reads markdown files from a configured prompts directory
-- derives ID from filename stem only
-- rejects duplicate filename-stem IDs with a clear error
-- can list prompts and show which file each ID maps to
-- parses optional frontmatter including a `key:` field for TUI keybinds
-- rejects duplicate, reserved, or malformed `key:` values with a clear error
+- `tprompt send <id>` performs direct prompt delivery.
+- `tprompt paste` performs direct clipboard delivery.
+- `tprompt pick` invokes the configured external picker and prints the selected prompt ID.
+- `tprompt tui` launches the built-in TUI and submits delivery through the daemon.
+- Bare `tprompt` dispatches to `tprompt tui` when stdin is a tty and `$TMUX` is set.
+- Bare `tprompt` outside tmux or without a tty prints help.
+- Operational failures return non-zero exit codes.
+- User cancellation in `pick` or the TUI exits with status 0.
+- Errors should be human-readable and specific enough to fix the local environment or prompt data.
 
-### CLI behavior
+## TUI Delivery Behavior
 
-- supports non-interactive send by ID (`tprompt send <id>`)
-- supports clipboard delivery as a separate top-level command (`tprompt paste`)
-- supports interactive selection (`tprompt pick`) with optional external picker
-- supports the built-in TUI command (`tprompt tui`), typically launched from a tmux popup
-- bare `tprompt` (no subcommand) dispatches to `tprompt tui` when stdin is a tty and `$TMUX` is set; otherwise prints help
-- returns non-zero exit codes on operational failure
-- returns **zero** when the user cancels an interactive picker or TUI
-- emits human-readable errors
+- The TUI is built in; it is separate from the external `pick` command.
+- The board shows single-key prompt shortcuts plus a pinned clipboard row when enabled.
+- `/` enters fuzzy search over prompt ID, title, description, and tags.
+- Overflow prompts are not shown on the board but are reachable through search.
+- The TUI reads clipboard content only when the clipboard row is selected.
+- The TUI submits prompt or clipboard content to the daemon, then exits.
+- The daemon verifies target pane readiness using tmux state before injection.
+- The daemon fails cleanly if the target pane vanishes or becomes invalid.
+- A newer deferred job for the same pane replaces the older pending job.
 
-### TUI delivery behavior
+## Delivery Behavior
 
-- the TUI is built-in and interactive (not an external picker)
-- TUI presents a keybind "board" for pinned prompts and a pinned clipboard row
-- TUI supports `/`-search over id, title, description, tags
-- the TUI flow hands work to a daemon
-- the TUI process exits before delivery occurs
-- when the clipboard is selected, the TUI reads the clipboard at keypress and submits content as part of the job
-- daemon verifies target pane readiness using tmux state
-- daemon injects only after verification passes
-- daemon fails cleanly if the target pane vanished or became invalid
-- when a new deferred job targets the same pane as a pending one, the pending job is replaced
+- Default mode is bracketed paste: `load-buffer` plus `paste-buffer -p`.
+- Fallback `type` mode uses `send-keys -l` with rune-safe chunking.
+- `--enter` sends Enter as a separate tmux command after content delivery.
+- Default behavior is no trailing Enter.
+- Direct sends never touch the daemon queue.
+- A configurable `max_paste_bytes` limit rejects oversized prompt or clipboard content before tmux delivery.
 
-### Delivery behavior
+## Clipboard Reader
 
-- default mode is bracketed paste (`load-buffer` + `paste-buffer -p`)
-- fallback `type` mode uses `send-keys -l` with chunking for large payloads
-- can optionally send Enter **outside** the bracketed-paste wrapper (`--enter`)
-- default is **no** trailing Enter
-- injects the prompt body, not frontmatter
-- supports a configurable max paste size with clear rejection when exceeded
+- Clipboard scope is the host running `tprompt` and tmux.
+- Auto-detection prefers platform and environment-specific tools:
+  `pbpaste`, `wl-paste`, `xclip`, or `xsel`.
+- `clipboard_read_command` overrides auto-detection.
+- Empty, non-UTF-8, and oversized clipboard content is rejected before delivery.
+- The daemon never reads the clipboard. Clipboard bytes are captured by the submitting process.
 
-### Clipboard reader
+## Sanitization
 
-- auto-detects a reader by platform and env (pbpaste / wl-paste / xclip / xsel)
-- respects `clipboard_read_command` config override
-- scope is always the host running tmux; cross-host clipboard is not supported
-- rejects empty, non-UTF-8, or oversized clipboard content with clear errors
+- Supported modes are `off`, `safe`, and `strict`.
+- Default mode is `off`.
+- `safe` strips dangerous terminal control classes while preserving cosmetic sequences.
+- `strict` rejects any escape sequence and reports class plus byte offset.
+- The same sanitization contract applies to `send`, `paste`, and daemon-executed TUI jobs.
 
-### Sanitization
+## Error Feedback
 
-- implements three modes: `strict`, `safe`, `off`
-- default is `off`
-- same rule applies uniformly to `tprompt paste` and `tprompt send <id>`
+- Deferred-job failures are shown through `tmux display-message` when there is a scoped target.
+- Deferred-job failures are appended to the daemon log.
+- Daemon logs must not include prompt bodies or clipboard bytes.
+- Success is silent by default.
 
-### Error feedback
+## Reliability
 
-- deferred-job failures are surfaced via `tmux display-message` **and** appended to the daemon log
-- log path is stable and documented (`~/.local/state/tprompt/daemon.log` by default)
+- TUI-flow correctness must not depend on fixed sleeps.
+- Target readiness is based on tmux pane and selection state.
+- Direct sends must not block on daemon state.
+- Config, prompt, tmux, daemon, and delivery failures should remain distinguishable through exit-code mapping.
 
-### Reliability
+## Behavioral Boundary
 
-- does not depend on fixed sleeps for TUI-flow correctness
-- can detect tmux pane disappearance
-- can detect duplicate prompt IDs and duplicate keybinds
-- can surface daemon connectivity problems clearly
-- direct sends never block on daemon state
-
-### Testing
-
-- unit tests for prompt discovery, duplicate detection, and keybind validation
-- unit tests for frontmatter/body parsing
-- unit tests for job validation
-- unit tests for sanitizer modes against fixture escape sequences
-- unit tests for fuzzy search ranking
-- integration-ish tests for tmux command construction (bracketed paste and `send-keys -l`)
-- model/view tests for TUI row layout and overflow
-- test coverage for error conditions
-
-## Non-goals for MVP
-
-Do not expand scope into these features during MVP:
-
-- prompt templating variables
-- snippets/composition
-- cross-host clipboard sync (laptop ↔ remote)
-- per-application readiness adapters
-- remote targets
-- distributed daemon
-- editing UI
-- history browser
-- analytics dashboard
-- multi-user support
-- modifier-key combos (`ctrl+x`, `alt+p`, etc.) for prompt keybinds
-- live clipboard preview inside the TUI
-
-## Behavioral contract
-
-`tprompt` guarantees **verified tmux-targeted delivery**, not semantic confirmation that the target application interpreted the input as intended.
+`tprompt` guarantees verified tmux-targeted delivery. It does not guarantee that
+the target application semantically interpreted the injected input as intended.
 
 Examples:
 
-- If the target pane is a shell prompt, delivery is likely to behave as expected.
-- If the target pane is Vim in normal mode, the injection may technically succeed but not semantically do what the user wanted.
+- A shell prompt is likely to receive the text as expected.
+- Vim in normal mode may receive the text but treat it as commands.
 
-That is acceptable for MVP.
+That boundary is intentional.
 
-## Preferred operator experience
+## Platform And Packaging
 
-### Direct prompt send
+- Primary platforms are Linux and macOS.
+- Packaging target is a single CLI binary plus a per-user local daemon.
+- Windows is outside the current tmux-first workflow.
 
-```bash
-tprompt send code-review
-```
+## Non-Goals
 
-### Clipboard send
-
-```bash
-tprompt paste
-```
-
-### TUI use (typical: launched from a tmux popup)
-
-- user opens a tmux popup running `tprompt` via a tmux key binding
-- built-in TUI renders the keybind board plus the clipboard row
-- user presses a single key (prompt keybind, `P` for clipboard, or `/` to search)
-- TUI closes (tmux tears down the popup)
-- daemon verifies the target pane and injects
-
-## Packaging expectation
-
-Prefer a single binary plus a per-user local daemon.
-
-## Platform expectation
-
-Primary support target for MVP:
-
-- Linux
-- macOS
-
-Windows support is not required unless tmux workflow is explicitly re-scoped.
+- Prompt templating variables.
+- Prompt snippets or composition.
+- Cross-host clipboard sync.
+- Per-application readiness adapters.
+- Remote targets.
+- Distributed daemon behavior.
+- Editing UI, history browser, analytics, or multi-user features.
+- Modifier-key prompt keybinds such as `ctrl+x` or `alt+p`.
+- Live clipboard preview inside the TUI.

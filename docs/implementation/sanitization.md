@@ -12,7 +12,7 @@ Three modes, locked at `config.toml` or overridden per-invocation with `--saniti
 | `safe` | Strip a **denylist** of known-dangerous sequences; leave cosmetic sequences (SGR colors, cursor move) alone. |
 | `strict` | Reject the delivery if **any** escape sequence is present. |
 
-Both `safe` and `strict` require tested implementations before release (see `docs/testing/test-plan.md`). `off` requires no logic beyond pass-through.
+Both `safe` and `strict` require fixture-backed tests (see `docs/testing/harness.md`). `off` requires no logic beyond pass-through.
 
 ## Scope
 
@@ -136,13 +136,13 @@ Sanitization is therefore layered on top of bracketed paste, not a substitute fo
 
 ## Non-goals
 
-- per-prompt sanitize overrides via frontmatter — deferred post-MVP
+- per-prompt sanitize overrides via frontmatter — deferred
 - content transformation beyond the dangerous-denylist (no URL allowlisting, no HTML escaping, etc.)
 - auditing historical clipboard content
 
 ## Test expectations
 
-See `docs/testing/test-plan.md`. At minimum, the sanitizer must be tested against a fixture corpus of:
+See `docs/testing/harness.md`. At minimum, the sanitizer must be tested against a fixture corpus of:
 
 - each dangerous class (one positive case each)
 - each cosmetic class (confirmed preserved in `safe`, rejected in `strict`)

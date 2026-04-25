@@ -1,6 +1,6 @@
 # Verification
 
-This file defines what “verified delivery” means for MVP.
+This file defines what "verified delivery" means for `tprompt`.
 
 ## Goal
 
@@ -39,7 +39,7 @@ Implemented contract:
 
 ## Post-injection check
 
-Deferred beyond the current MVP:
+Deferred beyond the current contract:
 
 - capture pane tail before injection
 - inject content
@@ -66,4 +66,4 @@ Example strategy:
 
 ## Important contract
 
-MVP verification is about **tmux state readiness**, not target-application readiness.
+Verification is about **tmux state readiness**, not target-application readiness.

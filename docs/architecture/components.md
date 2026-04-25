@@ -75,7 +75,7 @@ Single-method service returning cleaned bytes or a rejection. One instance per c
 
 ## Concurrency guidance
 
-MVP can keep daemon execution simple.
+Daemon execution should stay simple unless the behavior contract requires more.
 
 Recommended default:
 

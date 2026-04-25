@@ -1,37 +1,27 @@
-# Future Phases
+# Deferred Ideas
 
-These ideas are intentionally deferred.
+Execution tracking and prioritized roadmap work live in Linear. This file only
+records product ideas that are intentionally outside the current repo contract.
 
-## Near-term post-MVP
+## Deferred Product Ideas
 
 - recent prompt history
-- favorites/pinned prompts
-- aliases
-- richer `list` and `show` output
-- auto-start daemon if missing
-- opt-in success banner (`confirm_delivery = true`) for users who want positive confirmation
-
-## Medium-term
-
+- favorites or aliases
 - prompt templating variables
-- prompt composition/snippets
+- prompt composition or snippets
 - shell completions
-- **project-specific prompt folders** — when invoked inside a project, also load prompts from a per-project directory (e.g. `.tprompt/` in CWD or nearest ancestor) merged with the global store. Needs rules for precedence on stem/`key:` collisions.
-- **modifier-key combos for TUI keybinds** (`ctrl+x`, `alt+p`, etc.) — MVP is single printable char only
-- **live clipboard preview inside the TUI** (read on TUI open, show size/first-line) — MVP is read-on-select with no preview
+- project-specific prompt folders merged with the global prompt store
+- modifier-key combos for TUI keybinds
+- live clipboard preview inside the TUI
 - per-prompt sanitize override via frontmatter
-- tmux-popup singleton enforcement (reject a second tmux popup running `tprompt` if one is already open)
-
-## Advanced
-
-- application-aware adapters for agent CLIs
+- tmux-popup singleton enforcement
+- application-aware adapters
 - stronger readiness checks for specific terminal apps
-- **cross-host clipboard** (laptop → remote via OSC-52 read or a custom relay) — MVP reads the tmux host's clipboard only
+- cross-host clipboard
 - remote multi-host delivery
-- optional job persistence/replay
+- optional job persistence or replay
 - web or desktop management UI
-- stdin as a source for `tprompt send -` (pipe arbitrary content)
+- stdin as a source for arbitrary delivery
 
-## Explicit caution
-
-Do not implement these during MVP unless the user explicitly asks for a scope expansion.
+Do not implement these from repo docs alone. Promote an idea into Linear first,
+with a scoped contract and proof surface.

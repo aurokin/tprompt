@@ -101,7 +101,7 @@ Rejected: `testify`. Its `assert.Equal` style is fine, but stdlib `testing` + `g
 - `mise install` → installs the pinned project-local Go/tool versions from `mise.toml`
 - `make tools` → installs pinned versions of `golangci-lint`, `gofumpt`, `goimports` into `$(go env GOPATH)/bin`
 
-Release tooling (`goreleaser`, signed builds, Homebrew tap) is deferred to post-MVP.
+Release tooling (`goreleaser`, signed builds, Homebrew tap) is deferred.
 
 ## Version pinning
 

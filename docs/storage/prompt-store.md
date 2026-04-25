@@ -4,7 +4,7 @@ Prompts are markdown files on disk.
 
 ## Discovery rules
 
-For MVP:
+Current discovery behavior:
 
 - recurse through the configured prompts directory
 - accept `.md` files only
@@ -31,7 +31,7 @@ This is a hard error, not a warning.
 
 Optional YAML frontmatter may define metadata.
 
-Supported keys for MVP:
+Supported keys:
 
 - `title` — short human-readable name
 - `description` — one-line explanation, shown in the TUI row (soft-truncated with ellipsis)
@@ -40,7 +40,7 @@ Supported keys for MVP:
 - `enter` — delivery default (bool)
 - `key` — single printable character for the TUI keybind board
 
-Unsupported keys should be ignored for MVP.
+Unsupported keys are ignored.
 Invalid `mode` values are a hard error at load time.
 
 ## `key:` validation
@@ -98,6 +98,6 @@ Board row rendering:
 
 ## Reloading strategy
 
-MVP may re-scan the prompt directory on each command if implementation simplicity is better than caching.
+The implementation may re-scan the prompt directory on each command if implementation simplicity is better than caching.
 
 That is acceptable unless performance becomes meaningfully bad.

@@ -1,6 +1,6 @@
 # Error Handling
 
-MVP should prefer explicit operational errors over silent fallback behavior.
+`tprompt` should prefer explicit operational errors over silent fallback behavior.
 
 ## Errors that must be clear
 

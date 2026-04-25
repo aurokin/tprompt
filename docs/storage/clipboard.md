@@ -4,7 +4,7 @@ Clipboard content is a first-class delivery source via `tprompt paste` and the T
 
 ## Scope rule
 
-The clipboard is always read on the host running `tprompt`. Since tmux runs on the same host, this is also the host where delivery lands. Cross-host clipboard (laptop → remote) is **not** an MVP feature.
+The clipboard is always read on the host running `tprompt`. Since tmux runs on the same host, this is also the host where delivery lands. Cross-host clipboard (laptop → remote) is outside the current contract.
 
 If the user is SSH'd into a server and runs `tprompt paste`, they read **that server's** clipboard, not their laptop's. This is documented as a known limitation, not something the tool attempts to work around.
 
@@ -105,4 +105,4 @@ warn clipboard reader: none available (install pbpaste, wl-paste, xclip, or xsel
 
 - OSC-52 read (cross-host clipboard) — deferred
 - automatic clipboard polling / preview — deferred (see `docs/commands/tui.md`)
-- writing back to the clipboard — out of scope for MVP
+- writing back to the clipboard — out of scope

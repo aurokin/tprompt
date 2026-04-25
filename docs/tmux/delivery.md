@@ -49,7 +49,7 @@ Sequence:
 
 - split on UTF-8 **rune** boundaries, not byte boundaries, to avoid splitting a multi-byte character
 - default chunk size: 4096 bytes (conservative; safe across platforms)
-- chunk size is a compile-time constant for MVP; config exposure is deferred
+- chunk size is a compile-time constant; config exposure is deferred
 
 ## Target resolution
 
@@ -82,4 +82,4 @@ For `type` mode, there is no wrapper — Enter can be part of the payload or a s
 
 ## Testing
 
-See `docs/testing/test-plan.md` for the command-construction test matrix.
+See `docs/testing/harness.md` for the command-construction proof surface.

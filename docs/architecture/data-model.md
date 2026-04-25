@@ -107,7 +107,7 @@ VerificationPolicy {
 }
 ```
 
-The require-style behavior is baked into the MVP daemon rather than expressed as wire fields: verify target pane existence, wait for the submitter process to exit when `submitter_pid` is present, then verify pane selection before delivery. Post-injection capture-pane verification is deferred.
+The require-style behavior is baked into the daemon rather than expressed as wire fields: verify target pane existence, wait for the submitter process to exit when `submitter_pid` is present, then verify pane selection before delivery. Post-injection capture-pane verification is deferred.
 
 ## Replacement semantics
 
@@ -115,7 +115,7 @@ When a new `DeferredJob` arrives with the same `request.pane_id` as a pending jo
 
 ## Notes
 
-- MVP should keep the in-memory model straightforward.
-- Persisted job queues are not required for MVP.
-- If the daemon restarts, in-flight TUI-submitted jobs may be lost. That is acceptable for MVP if documented clearly.
+- Keep the in-memory model straightforward.
+- Persisted job queues are not part of the current contract.
+- If the daemon restarts, in-flight TUI-submitted jobs may be lost.
 - Clipboard bytes embedded in a `DeliveryRequest.body` are transient — they live only for the lifetime of the job and must not be written to logs.

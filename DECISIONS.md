@@ -68,9 +68,9 @@ Two delivery modes are required:
 
 If markdown files include YAML frontmatter, only the markdown body is injected. Frontmatter is metadata only.
 
-### 10. MVP is tmux-first
+### 10. `tprompt` is tmux-first
 
-Outside-tmux support is not required for MVP.
+Outside-tmux support is not part of the current product contract.
 
 ## Rationale for filename-stem IDs
 
@@ -87,7 +87,7 @@ Tradeoff:
 
 - duplicate filenames become invalid across the whole prompt store
 
-This tradeoff is acceptable for MVP.
+This tradeoff is accepted for the current product contract.
 
 ## Required duplicate-ID behavior
 
@@ -101,11 +101,11 @@ Duplicate prompt ID detected: code-review
 - /home/user/.config/tprompt/prompts/reviews/code-review.md
 ```
 
-The coding agent should not try to silently disambiguate duplicate IDs in MVP.
+Implementations must not silently disambiguate duplicate IDs.
 
-## Phase 2 locks
+## Command And Interaction Locks
 
-These decisions were locked after the initial spec and extend the MVP contract. They are constraints, not suggestions.
+These decisions extend the product contract. They are constraints, not suggestions.
 
 ### 11. Clipboard is a separate command, not a flag
 
@@ -128,7 +128,7 @@ Default behavior is **no** automatic Enter. Users finish and submit themselves. 
 
 ### 14. Same-host scope only
 
-Clipboard reader, daemon, and tmux pane all run on the same host. Cross-host clipboard (laptop → remote via OSC-52 read or similar) is an explicit non-goal for MVP.
+Clipboard reader, daemon, and tmux pane all run on the same host. Cross-host clipboard (laptop → remote via OSC-52 read or similar) is an explicit non-goal.
 
 ### 15. TUI is built-in and first-class
 
@@ -151,7 +151,7 @@ Frontmatter `key:` field assigns a single printable character to a prompt. Rules
 - **Duplicate `key:` across prompts** is a **hard error**, same strictness as duplicate IDs.
 - **Collision with a reserved key** (`P`, `/`, `Esc`, `Enter`) is a **hard error**.
 - **Malformed key** (multi-char, empty, symbolic like `ctrl+x`) is a **hard error**.
-- Modifier-key combinations are **not supported** in MVP.
+- Modifier-key combinations are **not supported**.
 
 ### 17. Auto-assign pool for unbound prompts
 
@@ -220,7 +220,7 @@ When a new deferred job arrives for the **same target pane** as one already pend
 
 ### 27. TUI singletons are not enforced
 
-Multiple TUI instances (including multiple tmux popups) can be open simultaneously — across clients or even on the same client. This may be revisited post-MVP; for now, the simpler "any TUI may submit a job" rule applies.
+Multiple TUI instances (including multiple tmux popups) can be open simultaneously — across clients or even on the same client. The simpler "any TUI may submit a job" rule applies unless a future Linear-scoped change introduces singleton behavior.
 
 ### 28. Direct sends bypass the daemon queue entirely
 

@@ -14,7 +14,7 @@ It is a local per-user process that:
 
 ## IPC
 
-Recommended MVP IPC mechanism:
+Current IPC mechanism:
 
 - Unix domain socket
 
@@ -22,10 +22,10 @@ This is simple and appropriate for per-user local communication.
 
 ## Lifecycle
 
-Recommended MVP behavior:
+Current lifecycle behavior:
 
 - daemon can be started explicitly (`tprompt daemon start`)
-- CLI can optionally auto-start it later, but this is not required for initial MVP
+- CLI auto-start is outside the current contract
 
 ## Job handling
 
@@ -93,11 +93,11 @@ Default path: `~/.local/state/tprompt/daemon.log`.
 
 Log entries include job ID, timestamp, target pane, failure class, and message. Payload bodies are **never** logged — sanitizer rejections record only class + byte offset.
 
-Success is not logged by default. Users who want confirmation can enable a verbose flag or future `confirm_delivery = true` setting (not in MVP).
+Success is not logged by default. A future confirmation mode would need an explicit product contract before implementation.
 
 ## Persistence
 
-Not required for MVP.
+No persisted queue is part of the current contract.
 
 If the daemon dies, queued jobs may be lost. Document this clearly.
 

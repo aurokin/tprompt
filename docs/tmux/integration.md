@@ -2,7 +2,7 @@
 
 Conceptual responsibilities of the tmux adapter. Concrete command construction (flag choices, chunking, Enter placement) lives in `docs/tmux/delivery.md`.
 
-## Tmux assumptions for MVP
+## Tmux Assumptions
 
 - target workflow is inside tmux
 - the TUI flow typically runs inside a tmux popup (but the TUI itself is not popup-specific)

@@ -1,6 +1,6 @@
 # CLI Commands
 
-This file describes the command surface for MVP.
+This file describes the current command surface.
 
 ## Commands
 
@@ -14,7 +14,7 @@ Because rewriting happens before flag parsing, `tui`'s required `--target-pane` 
 
 Lists all available prompt IDs.
 
-Recommended output shape:
+Current output shape:
 
 ```text
 code-review
@@ -22,9 +22,7 @@ bug-hunt
 deep-review
 ```
 
-Optional later enhancement:
-
-- include path, title, or resolved keybind in verbose mode
+Additional output fields should be introduced through a scoped Linear issue.
 
 ### `tprompt show <id>`
 
@@ -34,14 +32,14 @@ Recommended default output:
 
 - prompt ID
 - source file path
-- metadata summary (title, description, tags, resolved keybind) if present
+- metadata summary (title, description, tags, declared key) if present
 - body
 
 ### `tprompt send <id>`
 
 Resolves the prompt and sends it to a tmux pane.
 
-Flags for MVP:
+Flags:
 
 - `--mode paste|type`
 - `--enter`
@@ -76,11 +74,11 @@ See `docs/commands/paste.md` for full behavior, exit codes, and failure modes.
 
 Interactive prompt selection in the current process using the configured external picker (`picker_command`, default `fzf`).
 
-Recommended behavior:
+Behavior:
 
 - list prompts
 - let user choose one via the external picker
-- print the selected ID on stdout (caller pipes into `tprompt send -` or similar)
+- print the selected ID on stdout for shell composition
 
 This is distinct from the built-in TUI, which is not configurable. `pick` is a scripting hook, not an end-user UX.
 
@@ -92,27 +90,22 @@ Launches the built-in interactive TUI, which submits a delivery job to the daemo
 
 Checks environment and configuration.
 
-Suggested checks:
+Checks:
 
-- baseline checks for the first implementation pass:
-  - config loads and validates
-  - prompt directory exists
-  - prompt files discoverable
-  - duplicate IDs absent
-  - duplicate or reserved keybinds absent
-  - inside tmux or not
-- later checks once those subsystems exist:
-  - daemon socket reachable or daemon status known
-  - clipboard reader resolved and installed
-  - picker command availability if an external picker is configured
+- config loads and validates
+- prompt directory exists
+- prompt files discoverable
+- duplicate IDs absent
+- duplicate or reserved keybinds absent
+- inside tmux or not
+- clipboard reader resolved and installed when needed
 
 ### `tprompt daemon start`
-### `tprompt daemon stop`
 ### `tprompt daemon status`
 
 Used for local daemon lifecycle.
 
-For MVP, `start` and `status` are the most important. `stop` is optional if lifecycle management is intentionally minimal.
+`start` and `status` are the current daemon lifecycle commands.
 
 ## Cancel semantics
 
@@ -127,4 +120,5 @@ When the user cancels an interactive flow (TUI `Esc`, `pick` external cancel), t
 - `5` daemon/IPC error
 - `6` delivery or verification error
 
-These do not need to be externally guaranteed forever, but should be consistent within MVP.
+These are the current command contract and should remain stable unless the
+behavior contract is explicitly updated.
