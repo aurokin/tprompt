@@ -107,7 +107,7 @@ VerificationPolicy {
 }
 ```
 
-The require-style behavior is baked into the daemon rather than expressed as wire fields: verify target pane existence, wait for the submitter process to exit when `submitter_pid` is present, then verify pane selection before delivery. Post-injection capture-pane verification is deferred.
+The require-style behavior is baked into the daemon rather than expressed as wire fields: verify target pane existence, wait for the submitter process to exit when `submitter_pid` is present, then verify pane selection before delivery. Post-injection capture-pane comparison is an opt-in daemon diagnostic controlled by config, and remains warning-only.
 
 ## Replacement semantics
 

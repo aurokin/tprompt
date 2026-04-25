@@ -13,15 +13,18 @@ import (
 // from the daemon (docs/commands/daemon.md "Error feedback").
 const BannerPrefix = "tprompt: "
 
+const postInjectionCaptureLines = 20
+
 // Executor runs verification, the pre-sanitize byte cap, the sanitizer, and
 // the tmux adapter for a single Job. It is the JobRunner the queue calls on
 // each enqueued worker. Failures surface via the logger and tmux display-
 // message; success is silent (no log, no banner) per
 // docs/commands/daemon.md.
 type Executor struct {
-	adapter       tmux.Adapter
-	logger        *Logger
-	maxPasteBytes int64
+	adapter                   tmux.Adapter
+	logger                    *Logger
+	maxPasteBytes             int64
+	postInjectionVerification bool
 }
 
 var sanitizeProcess = func(mode string, body []byte) ([]byte, error) {
@@ -35,6 +38,13 @@ func NewExecutor(adapter tmux.Adapter, logger *Logger, maxPasteBytes int64) *Exe
 		logger:        logger,
 		maxPasteBytes: maxPasteBytes,
 	}
+}
+
+// EnablePostInjectionVerification turns on warning-only capture-pane tail
+// comparison after successful delivery. The check is diagnostic only: warnings
+// do not change the job success result.
+func (e *Executor) EnablePostInjectionVerification(enabled bool) {
+	e.postInjectionVerification = enabled
 }
 
 // Run is the JobRunner entrypoint. Verification first; then the
@@ -102,14 +112,24 @@ func (e *Executor) deliver(ctx context.Context, job Job, cleaned []byte) error {
 	target := job.deliveryTarget()
 	body := string(cleaned)
 
-	switch job.Mode {
-	case "paste":
-		return e.adapter.Paste(ctx, target, body, job.Enter)
-	case "type":
-		return e.adapter.Type(ctx, target, body, job.Enter)
-	default:
+	if job.Mode != "paste" && job.Mode != "type" {
 		return fmt.Errorf("unresolved delivery mode %q", job.Mode)
 	}
+
+	before, captureErr := e.captureBeforeDelivery(job)
+
+	var err error
+	if job.Mode == "paste" {
+		err = e.adapter.Paste(ctx, target, body, job.Enter)
+	} else {
+		err = e.adapter.Type(ctx, target, body, job.Enter)
+	}
+	if err != nil {
+		return err
+	}
+
+	e.verifyPostInjection(job, before, captureErr)
+	return nil
 }
 
 func canceled(ctx context.Context) (bool, error) {
@@ -128,6 +148,40 @@ func (e *Executor) handleFailure(job Job, err error) {
 	if target, ok := bannerTarget(job.messageTarget(), err); ok {
 		_ = e.adapter.DisplayMessage(target, BannerPrefix+err.Error())
 	}
+}
+
+func (e *Executor) captureBeforeDelivery(job Job) (string, error) {
+	if !e.postInjectionVerification {
+		return "", nil
+	}
+	tail, err := e.adapter.CapturePaneTail(job.PaneID, postInjectionCaptureLines)
+	if err != nil {
+		return "", fmt.Errorf("post-injection verification: capture before delivery failed")
+	}
+	return tail, nil
+}
+
+func (e *Executor) verifyPostInjection(job Job, before string, beforeErr error) {
+	if !e.postInjectionVerification {
+		return
+	}
+	if beforeErr != nil {
+		e.handleWarning(job, beforeErr.Error())
+		return
+	}
+	after, err := e.adapter.CapturePaneTail(job.PaneID, postInjectionCaptureLines)
+	if err != nil {
+		e.handleWarning(job, "post-injection verification: capture after delivery failed")
+		return
+	}
+	if after == before {
+		e.handleWarning(job, "post-injection verification: pane output appeared unchanged after delivery; this is a diagnostic warning, not proof that the target application ignored the input")
+	}
+}
+
+func (e *Executor) handleWarning(job Job, msg string) {
+	_ = e.logger.Log(jobEntry(job, OutcomeWarning, msg))
+	_ = e.adapter.DisplayMessage(job.messageTarget(), BannerPrefix+"warning: "+msg)
 }
 
 func jobEntry(job Job, outcome, msg string) Entry {

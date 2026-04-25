@@ -39,14 +39,16 @@ Implemented contract:
 
 ## Post-injection check
 
-Deferred beyond the current contract:
+The daemon can run an opt-in diagnostic check after injection:
 
 - capture pane tail before injection
 - inject content
 - capture pane tail after injection
-- verify the captured text changed
+- warn if the captured text appears unchanged
 
-This does **not** prove semantic success. It only proves that the pane output changed after delivery. The tmux adapter exposes capture support, but the daemon does not currently run this post-injection check.
+This is disabled by default and enabled with `post_injection_verification = true`.
+
+This does **not** prove semantic success. A changed tail only proves that pane output changed after delivery. An unchanged tail is a warning, not a delivery failure, and capture failures do not turn an otherwise successful delivery into a failed delivery.
 
 ## Timeout guidance
 
