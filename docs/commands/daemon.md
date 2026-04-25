@@ -27,12 +27,22 @@ Current lifecycle behavior:
 - daemon can be started explicitly (`tprompt daemon start`)
 - daemon status can be checked explicitly (`tprompt daemon status`)
 - daemon can be stopped gracefully (`tprompt daemon stop`)
-- CLI auto-start is outside the current contract
+- TUI daemon auto-start is available only when explicitly enabled
 
 `tprompt daemon stop` sends an explicit shutdown request over the daemon's
 local socket. If no daemon is reachable, it reports `daemon not running`. If
 shutdown is acknowledged but the socket remains reachable past the bounded
 graceful wait, the command exits with a daemon/IPC error.
+
+`tprompt tui` keeps daemon lifecycle explicit by default. If
+`daemon_auto_start = true` is configured, or `tprompt tui --daemon-auto-start`
+is passed, a daemon-unreachable TUI preflight starts the daemon once, waits
+briefly for readiness, and retries the daemon status check. Duplicate daemon
+processes are prevented by the same socket ownership behavior used by explicit
+`tprompt daemon start`: a live socket is treated as already owned, while a
+definitively stale socket can be removed during daemon startup. `tprompt daemon
+status` remains a read-only lifecycle check and never starts the daemon
+implicitly.
 
 ## Job handling
 

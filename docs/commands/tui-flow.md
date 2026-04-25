@@ -22,6 +22,12 @@ Allow the user to select a prompt **or** paste the clipboard from the TUI, then 
 7. Daemon runs the sanitizer over the request body.
 8. Daemon injects via the tmux adapter.
 
+Daemon auto-start is opt-in. By default, the TUI exits with a daemon/IPC error
+when the configured daemon socket is unreachable. When `daemon_auto_start =
+true` is configured, or `--daemon-auto-start` is passed to `tprompt tui`, the
+TUI attempts one daemon start, waits briefly for readiness, then retries the
+daemon preflight before rendering.
+
 ## Cancellation
 
 If the user cancels (`Esc` or equivalent):
@@ -63,7 +69,7 @@ If job submission fails:
 
 - the TUI exits non-zero through the command error path
 - the CLI surfaces the submit error on stderr with the normal exit-code mapping
-- background retry logic is outside the current contract
+- background retry logic after submission is outside the current contract
 
 Inline TUI footer errors are reserved for recoverable, pre-submit choices such as empty clipboard content or an oversized prompt body. Once submission to the daemon has started, failures are not recoverable from inside the TUI.
 
