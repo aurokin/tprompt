@@ -163,6 +163,144 @@ func TestParseTrimsOnlyOneLeadingLineBreakAfterFence(t *testing.T) {
 	}
 }
 
+func TestParseTreatsEmptyKeyAsAbsent(t *testing.T) {
+	tests := map[string]string{
+		"implicit-null": "---\nkey:\n---\nbody\n",
+		"explicit-null": "---\nkey: null\n---\nbody\n",
+		"empty-string":  "---\nkey: \"\"\n---\nbody\n",
+	}
+
+	for name, content := range tests {
+		t.Run(name, func(t *testing.T) {
+			parsed, err := Parse([]byte(content))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if parsed.Meta.Key != nil {
+				t.Fatalf("Key = %v, want nil", parsed.Meta.Key)
+			}
+			if parsed.Meta.KeyDeclared {
+				t.Fatal("KeyDeclared = true, want false")
+			}
+		})
+	}
+}
+
+func TestParseTreatsEmptyModeAsAbsent(t *testing.T) {
+	tests := map[string]string{
+		"implicit-null": "---\nmode:\n---\nbody\n",
+		"empty-string":  "---\nmode: \"\"\n---\nbody\n",
+	}
+
+	for name, content := range tests {
+		t.Run(name, func(t *testing.T) {
+			parsed, err := Parse([]byte(content))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if parsed.Meta.Mode != "" {
+				t.Fatalf("Mode = %q, want %q", parsed.Meta.Mode, "")
+			}
+		})
+	}
+}
+
+func TestParseTreatsEmptyAndElidedTagsIdentically(t *testing.T) {
+	tests := map[string]string{
+		"implicit-null": "---\ntags:\n---\nbody\n",
+		"empty-list":    "---\ntags: []\n---\nbody\n",
+	}
+
+	for name, content := range tests {
+		t.Run(name, func(t *testing.T) {
+			parsed, err := Parse([]byte(content))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(parsed.Meta.Tags) != 0 {
+				t.Fatalf("Tags = %#v, want empty", parsed.Meta.Tags)
+			}
+		})
+	}
+}
+
+func TestParseEnterEmptyValueRemainsNil(t *testing.T) {
+	parsed, err := Parse([]byte("---\nenter:\n---\nbody\n"))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if parsed.Meta.Enter != nil {
+		t.Fatalf("Enter = %v, want nil", parsed.Meta.Enter)
+	}
+}
+
+func TestParseStubEmptyFixtureLoadsCleanly(t *testing.T) {
+	content := readFixture(t, "stub-empty.md")
+
+	parsed, err := Parse(content)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	if parsed.Meta.Title != "" || parsed.Meta.Description != "" {
+		t.Fatalf("display fields not empty: %#v", parsed.Meta)
+	}
+	if len(parsed.Meta.Tags) != 0 {
+		t.Fatalf("Tags = %#v, want empty", parsed.Meta.Tags)
+	}
+	if parsed.Meta.Key != nil || parsed.Meta.KeyDeclared {
+		t.Fatalf("Key = %v, KeyDeclared = %v, want absent", parsed.Meta.Key, parsed.Meta.KeyDeclared)
+	}
+	if parsed.Meta.Mode != "" {
+		t.Fatalf("Mode = %q, want empty", parsed.Meta.Mode)
+	}
+	if parsed.Meta.Enter != nil {
+		t.Fatalf("Enter = %v, want nil", parsed.Meta.Enter)
+	}
+	if parsed.Body != "Stubbed-empty body.\n" {
+		t.Fatalf("Body = %q", parsed.Body)
+	}
+}
+
+func TestParseEmptyKeyMixedWithPopulatedFields(t *testing.T) {
+	content := []byte("---\ntitle: Mixed\ndescription: hi\ntags: [one]\nkey:\nmode: paste\nenter: false\n---\nbody\n")
+
+	parsed, err := Parse(content)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if parsed.Meta.Title != "Mixed" || parsed.Meta.Description != "hi" {
+		t.Fatalf("display fields = %#v", parsed.Meta)
+	}
+	if len(parsed.Meta.Tags) != 1 || parsed.Meta.Tags[0] != "one" {
+		t.Fatalf("Tags = %#v", parsed.Meta.Tags)
+	}
+	if parsed.Meta.Key != nil || parsed.Meta.KeyDeclared {
+		t.Fatalf("Key = %v, KeyDeclared = %v, want absent", parsed.Meta.Key, parsed.Meta.KeyDeclared)
+	}
+	if parsed.Meta.Mode != "paste" {
+		t.Fatalf("Mode = %q, want paste", parsed.Meta.Mode)
+	}
+	if parsed.Meta.Enter == nil || *parsed.Meta.Enter {
+		t.Fatalf("Enter = %v, want false", parsed.Meta.Enter)
+	}
+}
+
+func TestParseEmptyTitleAndDescriptionRemainAcceptedAsDisplayValues(t *testing.T) {
+	content := []byte("---\ntitle: \"\"\ndescription: \"\"\n---\nbody\n")
+
+	parsed, err := Parse(content)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if parsed.Meta.Title != "" {
+		t.Fatalf("Title = %q, want empty", parsed.Meta.Title)
+	}
+	if parsed.Meta.Description != "" {
+		t.Fatalf("Description = %q, want empty", parsed.Meta.Description)
+	}
+}
+
 func readFixture(t *testing.T, name string) []byte {
 	t.Helper()
 

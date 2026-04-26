@@ -207,7 +207,7 @@ func TestFSStoreRejectsInvalidPromptMode(t *testing.T) {
 	}
 }
 
-func TestFSStoreRejectsExplicitEmptyOrNullKeys(t *testing.T) {
+func TestFSStoreTreatsEmptyOrNullKeysAsAbsent(t *testing.T) {
 	tests := map[string]string{
 		"implicit-null": "---\nkey:\n---\na\n",
 		"explicit-null": "---\nkey: null\n---\na\n",
@@ -220,16 +220,89 @@ func TestFSStoreRejectsExplicitEmptyOrNullKeys(t *testing.T) {
 			writePrompt(t, dir, "alpha.md", content)
 
 			store := NewFS(dir, nil, []rune("123"))
-			err := store.Discover()
-			if err == nil {
-				t.Fatal("want error, got nil")
+			summaries, err := store.List()
+			if err != nil {
+				t.Fatalf("List: %v", err)
 			}
-
-			var malformed *keybind.MalformedKeybindError
-			if !errors.As(err, &malformed) {
-				t.Fatalf("want MalformedKeybindError, got %T", err)
+			if len(summaries) != 1 {
+				t.Fatalf("len(List()) = %d, want 1", len(summaries))
+			}
+			if summaries[0].KeySource != KeySourceAuto {
+				t.Fatalf("KeySource = %q, want %q", summaries[0].KeySource, KeySourceAuto)
+			}
+			if summaries[0].Key != "1" {
+				t.Fatalf("Key = %q, want %q", summaries[0].Key, "1")
 			}
 		})
+	}
+}
+
+func TestFSStoreLoadsFullyStubbedEmptyPrompt(t *testing.T) {
+	dir := t.TempDir()
+	writePrompt(t, dir, "stub.md", `---
+title:
+description:
+tags: []
+key:
+mode:
+enter:
+---
+
+Stubbed body.
+`)
+
+	store := NewFS(dir, nil, []rune("123"))
+	prompt, err := store.Resolve("stub")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	if prompt.Title != "" || prompt.Description != "" {
+		t.Fatalf("display fields populated: %#v", prompt.Summary)
+	}
+	if len(prompt.Tags) != 0 {
+		t.Fatalf("Tags = %#v, want empty", prompt.Tags)
+	}
+	if prompt.KeySource != KeySourceAuto {
+		t.Fatalf("KeySource = %q, want %q", prompt.KeySource, KeySourceAuto)
+	}
+	if prompt.Key != "1" {
+		t.Fatalf("Key = %q, want %q", prompt.Key, "1")
+	}
+	if prompt.Defaults.Mode != "" {
+		t.Fatalf("Defaults.Mode = %q, want empty", prompt.Defaults.Mode)
+	}
+	if prompt.Defaults.Enter != nil {
+		t.Fatalf("Defaults.Enter = %v, want nil", prompt.Defaults.Enter)
+	}
+	if prompt.Body != "Stubbed body.\n" {
+		t.Fatalf("Body = %q", prompt.Body)
+	}
+}
+
+func TestFSStoreEmptyKeyDoesNotCollideWithExplicitKey(t *testing.T) {
+	dir := t.TempDir()
+	writePrompt(t, dir, "alpha.md", "---\nkey: c\n---\nbody\n")
+	writePrompt(t, dir, "bravo.md", "---\nkey: \"\"\n---\nbody\n")
+
+	store := NewFS(dir, nil, []rune("1c2"))
+	summaries, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("len(List()) = %d, want 2", len(summaries))
+	}
+
+	byID := map[string]Summary{}
+	for _, s := range summaries {
+		byID[s.ID] = s
+	}
+	if byID["alpha"].KeySource != KeySourceExplicit || byID["alpha"].Key != "c" {
+		t.Fatalf("alpha = %#v, want explicit c", byID["alpha"])
+	}
+	if byID["bravo"].KeySource != KeySourceAuto || byID["bravo"].Key != "1" {
+		t.Fatalf("bravo = %#v, want auto 1", byID["bravo"])
 	}
 }
 

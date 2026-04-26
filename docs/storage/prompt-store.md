@@ -43,13 +43,30 @@ Supported keys:
 Unsupported keys are ignored.
 Invalid `mode` values are a hard error at load time.
 
+### Empty-value tolerance
+
+Any supported field present with an empty value is treated as if the field
+were absent:
+
+- `key:` (no value), `key: null`, and `key: ""` all behave as if no `key:`
+  line existed — the prompt is auto-assigned a board key.
+- `mode:` and `mode: ""` behave as if no `mode:` line existed — the
+  config-level delivery default applies. Non-empty values still validate
+  against `{paste, type}` (anything else remains a hard error).
+- `tags:` (no value) and `tags: []` both decode to an empty list.
+- `enter:` (no value) decodes to nil — config-level default applies.
+- `title: ""` and `description: ""` are still accepted as legal display
+  values; behaviour is unchanged.
+
+This rule is a strict relaxation: nothing previously valid becomes invalid.
+
 ## `key:` validation
 
 `key` accepts **a single printable character**. The following are hard errors at load time:
 
 - **Duplicate across prompts.** Two prompts declaring the same `key:` value (case-insensitive). Surfaced as `DuplicateKeybind`. `tprompt doctor`, `list`, `send`, and `tui` all fail.
 - **Reserved key collision.** A prompt declaring a key that is currently reserved (defaults: `P`, `/`, `Esc`, `Enter`; configurable).
-- **Malformed value.** Empty string, multi-character string, non-printable character, or symbolic forms like `ctrl+x` / `alt-p`.
+- **Malformed value.** Multi-character string, non-printable character, or symbolic forms like `ctrl+x` / `alt-p`. (Empty/null values are treated as absent — see "Empty-value tolerance" above.)
 
 Case sensitivity: `key: c` and `key: C` are the **same** key. The system normalizes to lower-case internally.
 

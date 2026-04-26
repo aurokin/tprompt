@@ -66,7 +66,12 @@ func (m *Meta) UnmarshalYAML(value *yaml.Node) error {
 	}
 
 	*m = Meta(alias)
-	m.KeyDeclared = hasTopLevelKey(value, "key")
+	// Empty or null `key:` is equivalent to no `key:` line — the prompt
+	// is auto-assigned a board key instead of failing the keybind parser.
+	if m.Key != nil && *m.Key == "" {
+		m.Key = nil
+	}
+	m.KeyDeclared = m.Key != nil
 	return nil
 }
 
@@ -114,22 +119,6 @@ func nextLine(content []byte, start int) ([]byte, int) {
 		line = line[:len(line)-1]
 	}
 	return line, len(content)
-}
-
-func hasTopLevelKey(node *yaml.Node, key string) bool {
-	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
-		node = node.Content[0]
-	}
-	if node.Kind != yaml.MappingNode {
-		return false
-	}
-
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		if node.Content[i].Value == key {
-			return true
-		}
-	}
-	return false
 }
 
 func looksLikeYAMLFrontmatter(content []byte) bool {
