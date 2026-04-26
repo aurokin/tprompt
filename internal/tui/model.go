@@ -411,98 +411,122 @@ func (m Model) refilter() Model {
 // selects; ↑/↓ navigate; Backspace pops one rune; any other single-rune
 // keypress appends to the query.
 func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Esc always exits search mode back to the board — even if Cancel is
-	// bound to Esc at the config level. Per ticket: "Esc does NOT exit the
-	// TUI in search mode".
-	if msg.Type == tea.KeyEsc {
-		if m.pendingSubmit || m.pendingClipboard {
-			return m, nil
-		}
-		m.mode = modeBoard
-		m.query = ""
-		m.results = nil
-		m.highlightedPromptID = ""
-		m.searchCursor = 0
-		m.searchScrollOffset = 0
-		m.inlineError = ""
-		return m, nil
+	// Esc and literal Ctrl+C are not user-remappable in search mode: Esc
+	// always exits search, and literal Ctrl+C always cancels (a Cancel
+	// binding remapped to a printable rune must remain searchable).
+	switch msg.Type {
+	case tea.KeyEsc:
+		return m.searchExitToBoard()
+	case tea.KeyCtrlC:
+		return m.searchCancel()
 	}
 
-	// Ctrl+C: cancel + Quit. Literal Ctrl+C only — remapped printable Cancel
-	// bindings go into the search query like any other printable rune so the
-	// user can actually search for that character.
-	if msg.Type == tea.KeyCtrlC {
-		if m.pendingSubmit {
-			return m, nil
-		}
-		m.inlineError = ""
-		m.result = Result{Action: ActionCancel}
-		return m, tea.Quit
-	}
-
-	// Enter (or remapped Select): select the highlighted row.
+	// A remapped Select binding wins over default rune/space handling so a
+	// printable or Space-symbolic Select still selects in search mode rather
+	// than appending to the query.
 	if matchesReserved(msg, m.state.Reserved.Select) {
-		if m.pendingSubmit || m.pendingClipboard {
-			return m, nil
-		}
-		if m.searchCursor < 0 || m.searchCursor >= len(m.results) {
-			return m, nil
-		}
-		row := m.results[m.searchCursor].Row
-		if row.PromptID == "" {
-			return m.selectClipboard()
-		}
-		return m.selectPrompt(row.PromptID)
+		return m.searchSelectHighlighted()
 	}
 
-	// ↑/↓: navigate within results. Navigation preserves inlineError (§19).
-	if msg.Type == tea.KeyUp {
-		if m.searchCursor > 0 {
-			m.searchCursor--
-			m.searchScrollOffset = clampScrollOffset(m.searchCursor, m.searchScrollOffset, len(m.results), m.rowsPerFrame())
-			m.highlightedPromptID = m.results[m.searchCursor].Row.PromptID
+	switch msg.Type {
+	case tea.KeyUp:
+		return m.searchMoveCursor(-1), nil
+	case tea.KeyDown:
+		return m.searchMoveCursor(+1), nil
+	case tea.KeyBackspace:
+		return m.searchBackspace(), nil
+	case tea.KeySpace:
+		if !msg.Alt {
+			return m.searchAppendRune(' '), nil
 		}
-		return m, nil
-	}
-	if msg.Type == tea.KeyDown {
-		if m.searchCursor < len(m.results)-1 {
-			m.searchCursor++
-			m.searchScrollOffset = clampScrollOffset(m.searchCursor, m.searchScrollOffset, len(m.results), m.rowsPerFrame())
-			m.highlightedPromptID = m.results[m.searchCursor].Row.PromptID
+	case tea.KeyRunes:
+		if len(msg.Runes) == 1 && !msg.Alt {
+			return m.searchAppendRune(msg.Runes[0]), nil
 		}
-		return m, nil
-	}
-
-	// Backspace: pop one rune and re-filter. A query edit is a real action,
-	// so inlineError clears.
-	if msg.Type == tea.KeyBackspace {
-		if len(m.query) > 0 {
-			runes := []rune(m.query)
-			m.query = string(runes[:len(runes)-1])
-			m = m.refilter()
-			m.inlineError = ""
-		}
-		return m, nil
-	}
-
-	// Any other single-rune keypress (no Alt modifier): append to query.
-	// Bubble Tea can emit a standalone space as either tea.KeySpace or a
-	// tea.KeyRunes with Runes[0] == ' ', so accept both forms — otherwise
-	// multi-word queries like "code review" would drop the space.
-	if msg.Type == tea.KeySpace && !msg.Alt {
-		m.query += " "
-		m = m.refilter()
-		m.inlineError = ""
-		return m, nil
-	}
-	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && !msg.Alt {
-		m.query += string(msg.Runes[0])
-		m = m.refilter()
-		m.inlineError = ""
-		return m, nil
 	}
 
 	return m, nil
+}
+
+// searchExitToBoard handles Esc in search mode. Esc always exits search mode
+// back to the board — even if Cancel is bound to Esc at the config level.
+// Per ticket: "Esc does NOT exit the TUI in search mode".
+func (m Model) searchExitToBoard() (tea.Model, tea.Cmd) {
+	if m.pendingSubmit || m.pendingClipboard {
+		return m, nil
+	}
+	m.mode = modeBoard
+	m.query = ""
+	m.results = nil
+	m.highlightedPromptID = ""
+	m.searchCursor = 0
+	m.searchScrollOffset = 0
+	m.inlineError = ""
+	return m, nil
+}
+
+// searchCancel handles Ctrl+C in search mode: cancel + Quit. Literal Ctrl+C
+// only — remapped printable Cancel bindings go into the search query like
+// any other printable rune so the user can actually search for that character.
+func (m Model) searchCancel() (tea.Model, tea.Cmd) {
+	if m.pendingSubmit {
+		return m, nil
+	}
+	m.inlineError = ""
+	m.result = Result{Action: ActionCancel}
+	return m, tea.Quit
+}
+
+// searchSelectHighlighted resolves the highlighted search result.
+func (m Model) searchSelectHighlighted() (tea.Model, tea.Cmd) {
+	if m.pendingSubmit || m.pendingClipboard {
+		return m, nil
+	}
+	if m.searchCursor < 0 || m.searchCursor >= len(m.results) {
+		return m, nil
+	}
+	row := m.results[m.searchCursor].Row
+	if row.PromptID == "" {
+		return m.selectClipboard()
+	}
+	return m.selectPrompt(row.PromptID)
+}
+
+// searchMoveCursor advances the search cursor by delta (±1) within bounds.
+// Navigation preserves inlineError (§19).
+func (m Model) searchMoveCursor(delta int) Model {
+	next := m.searchCursor + delta
+	if next < 0 || next >= len(m.results) {
+		return m
+	}
+	m.searchCursor = next
+	m.searchScrollOffset = clampScrollOffset(m.searchCursor, m.searchScrollOffset, len(m.results), m.rowsPerFrame())
+	m.highlightedPromptID = m.results[m.searchCursor].Row.PromptID
+	return m
+}
+
+// searchBackspace pops one rune from the query and re-filters. A query edit
+// is a real action, so inlineError clears.
+func (m Model) searchBackspace() Model {
+	if len(m.query) == 0 {
+		return m
+	}
+	runes := []rune(m.query)
+	m.query = string(runes[:len(runes)-1])
+	m = m.refilter()
+	m.inlineError = ""
+	return m
+}
+
+// searchAppendRune appends a single rune to the query and re-filters. Bubble
+// Tea can emit a standalone space as either tea.KeySpace or a tea.KeyRunes
+// with Runes[0] == ' ', so the dispatcher routes both forms here — otherwise
+// multi-word queries like "code review" would drop the space.
+func (m Model) searchAppendRune(r rune) Model {
+	m.query += string(r)
+	m = m.refilter()
+	m.inlineError = ""
+	return m
 }
 
 // View renders the mode-appropriate body and footer hint.

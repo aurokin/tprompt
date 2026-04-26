@@ -249,6 +249,71 @@ func TestUpdate_SearchEnterOnOversizePromptSetsInlineError(t *testing.T) {
 	}
 }
 
+// Remapped Select bindings must still trigger selection in search mode
+// rather than being treated as printable query input. Regression coverage
+// for the updateSearch dispatcher: matchesReserved(Select) is checked
+// before KeyRunes/KeySpace fall through to query append.
+func TestUpdate_SearchRemappedPrintableSelectSelectsHighlightedRow(t *testing.T) {
+	deps, sub, _ := promptDeps(map[string]string{"alpha": "body"}, nil, nil)
+	state := searchStateWithRows([]Row{{Key: '1', PromptID: "alpha"}}, nil)
+	state.Reserved.Select = ReservedBinding{Printable: 'g'}
+	m := NewModel(state, deps)
+	m = enterSearchViaSlash(t, m)
+
+	// Catalog is [clip, alpha]. Move cursor to alpha so 'g' selects a prompt.
+	next1, _ := m.Update(keyMsg("down"))
+	m = next1.(Model)
+
+	next2, cmd := m.Update(keyMsg("g"))
+	got := next2.(Model)
+
+	if got.query != "" {
+		t.Fatalf("remapped Select must not append to query, got %q", got.query)
+	}
+	if !got.pendingSubmit {
+		t.Fatal("remapped Select on prompt must set pendingSubmit")
+	}
+	if cmd == nil {
+		t.Fatal("remapped Select on prompt must return a cmd")
+	}
+	if msg := runCmd(cmd); msg == nil {
+		t.Fatal("submit cmd must produce a result message")
+	}
+	if len(sub.calls) != 1 {
+		t.Fatalf("Submit called %d times, want 1", len(sub.calls))
+	}
+}
+
+func TestUpdate_SearchRemappedSpaceSelectSelectsHighlightedRow(t *testing.T) {
+	deps, sub, _ := promptDeps(map[string]string{"alpha": "body"}, nil, nil)
+	state := searchStateWithRows([]Row{{Key: '1', PromptID: "alpha"}}, nil)
+	state.Reserved.Select = ReservedBinding{Symbolic: "Space"}
+	m := NewModel(state, deps)
+	m = enterSearchViaSlash(t, m)
+
+	next1, _ := m.Update(keyMsg("down"))
+	m = next1.(Model)
+
+	next2, cmd := m.Update(keyMsg("space"))
+	got := next2.(Model)
+
+	if got.query != "" {
+		t.Fatalf("Space-symbolic Select must not append space to query, got %q", got.query)
+	}
+	if !got.pendingSubmit {
+		t.Fatal("Space-symbolic Select on prompt must set pendingSubmit")
+	}
+	if cmd == nil {
+		t.Fatal("Space-symbolic Select on prompt must return a cmd")
+	}
+	if msg := runCmd(cmd); msg == nil {
+		t.Fatal("submit cmd must produce a result message")
+	}
+	if len(sub.calls) != 1 {
+		t.Fatalf("Submit called %d times, want 1", len(sub.calls))
+	}
+}
+
 func TestUpdate_SearchEnterOnClipboardRowTriggersClipboardPath(t *testing.T) {
 	deps, _, _ := promptDeps(nil, nil, nil)
 	deps.Clip = clipboard.NewStatic([]byte("pasted"))

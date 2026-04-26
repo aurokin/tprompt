@@ -122,7 +122,9 @@ func productionStartDaemon(_ config.Resolved, explicitConfigPath string) error {
 		args = append(args, "--config", explicitConfigPath)
 	}
 	args = append(args, "daemon", "start")
-	cmd := exec.Command(exe, args...)
+	// G204: exe is our own binary from os.Executable(); explicitConfigPath
+	// is the user-supplied --config flag we forward to the auto-started daemon.
+	cmd := exec.Command(exe, args...) //nolint:gosec
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
