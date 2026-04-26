@@ -5,7 +5,10 @@ tracker; planned work lives in Linear.
 
 ## Prompt Resolution
 
-- Prompt files are markdown files under the configured prompt directory.
+- Prompt files are markdown files under the resolved prompt directory
+  (`prompts_dir` when set, otherwise the default
+  `$XDG_CONFIG_HOME/tprompt/prompts` with `~/.config/tprompt/prompts` as a
+  fallback; the default directory is auto-created on first access).
 - Prompt IDs are derived from the filename stem only.
 - Directories are organizational only and do not namespace IDs.
 - Duplicate filename-stem IDs are invalid and must fail with clear conflicting paths.

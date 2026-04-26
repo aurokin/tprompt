@@ -1,0 +1,14 @@
+# XDG_CONFIG_HOME wins over $HOME when resolving the default prompts dir.
+# The XDG path is auto-created on first access.
+
+env HOME=$WORK/home
+env XDG_CONFIG_HOME=$WORK/xdg
+
+tprompt list
+! stdout .
+! stderr .
+
+exists $WORK/xdg/tprompt/prompts
+
+# The home fallback path must NOT be created when XDG is set.
+! exists $WORK/home/.config/tprompt/prompts

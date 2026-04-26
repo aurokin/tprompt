@@ -253,10 +253,13 @@ func parseCommandArgv(field, command string) ([]string, error) {
 }
 
 // Validate checks a Resolved config for semantic errors. Call after Normalize.
+//
+// prompts_dir is optional: when empty, the prompt-source resolver fills in a
+// default ($XDG_CONFIG_HOME/tprompt/prompts, falling back to
+// ~/.config/tprompt/prompts) and auto-creates it on first access. An explicit
+// value is used verbatim and a missing directory remains a hard error at
+// discovery time.
 func Validate(r Resolved) error {
-	if r.PromptsDir == "" {
-		return &ValidationError{Field: "prompts_dir", Message: "must be set"}
-	}
 	if err := validateDeliveryConfig(r); err != nil {
 		return err
 	}

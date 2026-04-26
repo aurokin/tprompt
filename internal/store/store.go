@@ -98,15 +98,17 @@ func (e *PromptsDirMissingError) Error() string {
 
 // FSStore is the filesystem-backed Phase 1 store implementation.
 type FSStore struct {
-	root     string
-	reserved map[rune]string
-	pool     []rune
+	root       string
+	reserved   map[rune]string
+	pool       []rune
+	autoCreate bool
 
 	promptsByID map[string]Prompt
 	summaries   []Summary
 }
 
 // NewFS returns a store that discovers prompts from the given directory.
+// A missing root remains a PromptsDirMissingError on Discover.
 func NewFS(root string, reserved map[rune]string, pool []rune) *FSStore {
 	reservedCopy := make(map[rune]string, len(reserved))
 	for key, action := range reserved {
@@ -121,17 +123,42 @@ func NewFS(root string, reserved map[rune]string, pool []rune) *FSStore {
 	}
 }
 
-func (s *FSStore) Discover() error {
+// NewFSWithAutoCreate is like NewFS but creates the prompts directory if it
+// does not exist on Discover. Use it for the default-resolved global path;
+// explicit user paths must continue to use NewFS so a missing directory
+// remains a hard error.
+func NewFSWithAutoCreate(root string, reserved map[rune]string, pool []rune) *FSStore {
+	s := NewFS(root, reserved, pool)
+	s.autoCreate = true
+	return s
+}
+
+// prepareRoot canonicalizes the configured root, optionally creates it when
+// auto-create is enabled, and confirms it is a directory. A missing
+// non-auto-create root surfaces as PromptsDirMissingError so the existing
+// contract for explicit prompts_dir is preserved.
+func (s *FSStore) prepareRoot() (string, error) {
 	root, err := filepath.Abs(s.root)
 	if err != nil {
-		s.clearCache()
-		return fmt.Errorf("resolve prompts directory: %w", err)
+		return "", fmt.Errorf("resolve prompts directory: %w", err)
 	}
+	if s.autoCreate {
+		if err := os.MkdirAll(root, 0o700); err != nil {
+			return "", fmt.Errorf("create prompts directory %s: %w", root, err)
+		}
+	}
+	info, statErr := os.Stat(root)
+	if statErr != nil || !info.IsDir() {
+		return "", &PromptsDirMissingError{Path: root}
+	}
+	return root, nil
+}
 
-	info, err := os.Stat(root)
-	if err != nil || !info.IsDir() {
+func (s *FSStore) Discover() error {
+	root, err := s.prepareRoot()
+	if err != nil {
 		s.clearCache()
-		return &PromptsDirMissingError{Path: root}
+		return err
 	}
 
 	entries, err := discoverPromptFiles(root)

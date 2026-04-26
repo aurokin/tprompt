@@ -13,6 +13,7 @@ import (
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/picker"
+	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/submitter"
 	"github.com/hsadler/tprompt/internal/tmux"
@@ -56,8 +57,14 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 		LoadPasteConfig:  productionLoadPasteConfig,
 		LoadDaemonConfig: productionLoadDaemonConfig,
 		NewStore: func(cfg config.Resolved) (store.Store, error) {
-			s := store.NewFS(cfg.PromptsDir, cfg.ReservedPrintable, cfg.KeybindPool)
-			return s, nil
+			source, err := primaryPromptSource(cfg)
+			if err != nil {
+				return nil, err
+			}
+			if source.AutoCreateOnAccess {
+				return store.NewFSWithAutoCreate(source.Path, cfg.ReservedPrintable, cfg.KeybindPool), nil
+			}
+			return store.NewFS(source.Path, cfg.ReservedPrintable, cfg.KeybindPool), nil
 		},
 		NewTmux: func() (tmux.Adapter, error) {
 			return tmux.New(tmux.NewExecRunner("")), nil
@@ -167,6 +174,24 @@ func productionLoadDaemonConfig(explicitPath string) (config.Resolved, error) {
 		return config.Resolved{}, err
 	}
 	return config.ResolveDaemon(cfg, path), nil
+}
+
+// primaryPromptSource resolves the primary global prompt source for cfg.
+// homeDir is read from the host environment via os.UserHomeDir; if it is
+// unavailable and prompts_dir is unset, the resolver returns a clear error.
+func primaryPromptSource(cfg config.Resolved) (promptsource.Source, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	sources, err := promptsource.Resolve(cfg, lookupEnv, home)
+	if err != nil {
+		return promptsource.Source{}, err
+	}
+	if len(sources) == 0 {
+		return promptsource.Source{}, fmt.Errorf("promptsource: resolver returned no sources")
+	}
+	return sources[0], nil
 }
 
 // newClipboardReader builds the clipboard.Reader used by both `Deps.NewClip`

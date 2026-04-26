@@ -1,0 +1,10 @@
+# doctor on a fresh install reports the resolved default prompts directory
+# and tags it [default] so users can see where their prompts live.
+
+env HOME=$WORK/home
+
+tprompt doctor
+stdout 'ok   prompts directory exists \(.*home/\.config/tprompt/prompts\) \[default\]'
+stdout 'ok   0 prompts discovered'
+
+exists $WORK/home/.config/tprompt/prompts
