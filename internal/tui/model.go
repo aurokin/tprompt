@@ -411,11 +411,24 @@ func (m Model) refilter() Model {
 // selects; ↑/↓ navigate; Backspace pops one rune; any other single-rune
 // keypress appends to the query.
 func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Esc and literal Ctrl+C are not user-remappable in search mode: Esc
+	// always exits search, and literal Ctrl+C always cancels (a Cancel
+	// binding remapped to a printable rune must remain searchable).
 	switch msg.Type {
 	case tea.KeyEsc:
 		return m.searchExitToBoard()
 	case tea.KeyCtrlC:
 		return m.searchCancel()
+	}
+
+	// A remapped Select binding wins over default rune/space handling so a
+	// printable or Space-symbolic Select still selects in search mode rather
+	// than appending to the query.
+	if matchesReserved(msg, m.state.Reserved.Select) {
+		return m.searchSelectHighlighted()
+	}
+
+	switch msg.Type {
 	case tea.KeyUp:
 		return m.searchMoveCursor(-1), nil
 	case tea.KeyDown:
@@ -430,12 +443,6 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(msg.Runes) == 1 && !msg.Alt {
 			return m.searchAppendRune(msg.Runes[0]), nil
 		}
-	}
-
-	// Enter (or remapped Select): select the highlighted row. Checked after
-	// the Type switch because Select is a reserved binding, not a fixed key.
-	if matchesReserved(msg, m.state.Reserved.Select) {
-		return m.searchSelectHighlighted()
 	}
 
 	return m, nil
