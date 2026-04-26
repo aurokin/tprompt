@@ -56,6 +56,7 @@ entrypoint for users, maintainers, and implementation agents.
 
 High-value references:
 
+- [AGENTS.md](AGENTS.md) - agent / contributor entry point (also linked as CLAUDE.md).
 - [DECISIONS.md](DECISIONS.md) - locked product and engineering decisions.
 - [docs/architecture/overview.md](docs/architecture/overview.md) - system shape and data flow.
 - [docs/commands/cli.md](docs/commands/cli.md) - command behavior and exit codes.

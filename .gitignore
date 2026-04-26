@@ -1,6 +1,7 @@
 /bin/
 /dist/
 .tmp-review/
+.ws/
 *.out
 coverage.txt
 .idea/
