@@ -74,6 +74,13 @@ func TestExitCodeUnresolvedDefaultDir(t *testing.T) {
 	}
 }
 
+func TestExitCodePromptsDirCreate(t *testing.T) {
+	err := &store.PromptsDirCreateError{Path: "/nope", Err: errors.New("read-only fs")}
+	if got := ExitCode(err); got != ExitUsage {
+		t.Fatalf("ExitCode(PromptsDirCreateError) = %d, want %d", got, ExitUsage)
+	}
+}
+
 func TestExitCodeDaemonErrors(t *testing.T) {
 	tests := []struct {
 		name string

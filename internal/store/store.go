@@ -96,6 +96,21 @@ func (e *PromptsDirMissingError) Error() string {
 	return fmt.Sprintf("prompts directory missing: %s", e.Path)
 }
 
+// PromptsDirCreateError reports that the auto-created default prompts
+// directory could not be created (e.g. read-only filesystem, blocking file).
+// Surfaced as a usage error (exit 2) so default-dir failures stay consistent
+// with explicit prompts_dir failures.
+type PromptsDirCreateError struct {
+	Path string
+	Err  error
+}
+
+func (e *PromptsDirCreateError) Error() string {
+	return fmt.Sprintf("create prompts directory %s: %v", e.Path, e.Err)
+}
+
+func (e *PromptsDirCreateError) Unwrap() error { return e.Err }
+
 // FSStore is the filesystem-backed Phase 1 store implementation.
 type FSStore struct {
 	root       string
@@ -144,7 +159,7 @@ func (s *FSStore) prepareRoot() (string, error) {
 	}
 	if s.autoCreate {
 		if err := os.MkdirAll(root, 0o700); err != nil {
-			return "", fmt.Errorf("create prompts directory %s: %w", root, err)
+			return "", &PromptsDirCreateError{Path: root, Err: err}
 		}
 	}
 	info, statErr := os.Stat(root)

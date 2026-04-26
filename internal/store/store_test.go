@@ -386,6 +386,21 @@ func TestFSStoreAutoCreateLeavesExistingFilesAlone(t *testing.T) {
 	}
 }
 
+func TestFSStoreAutoCreateReportsCreateError(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(blocker, "prompts")
+
+	store := NewFSWithAutoCreate(root, nil, []rune("123"))
+	err := store.Discover()
+	var createErr *PromptsDirCreateError
+	if !errors.As(err, &createErr) {
+		t.Fatalf("want PromptsDirCreateError, got %T: %v", err, err)
+	}
+}
+
 func TestFSStoreNewFSDoesNotAutoCreate(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "fresh")
 	store := NewFS(missing, nil, []rune("123"))

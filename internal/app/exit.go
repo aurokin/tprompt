@@ -44,6 +44,11 @@ func ExitCode(err error) int {
 		return ExitUsage
 	}
 
+	var createDir *store.PromptsDirCreateError
+	if errors.As(err, &createDir) {
+		return ExitUsage
+	}
+
 	var unresolvedDefault *promptsource.UnresolvedDefaultDirError
 	if errors.As(err, &unresolvedDefault) {
 		return ExitUsage
