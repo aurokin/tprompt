@@ -1,6 +1,7 @@
 package promptsource
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -104,6 +105,10 @@ func TestResolveTable(t *testing.T) {
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("Resolve: want error, got nil (sources=%v)", got)
+				}
+				var unresolved *UnresolvedDefaultDirError
+				if !errors.As(err, &unresolved) {
+					t.Fatalf("Resolve: want *UnresolvedDefaultDirError, got %T: %v", err, err)
 				}
 				return
 			}

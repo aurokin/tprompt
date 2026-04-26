@@ -8,12 +8,20 @@
 package promptsource
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
 
 	"github.com/hsadler/tprompt/internal/config"
 )
+
+// UnresolvedDefaultDirError reports that prompts_dir was unset and no default
+// could be derived because both XDG_CONFIG_HOME and the home directory were
+// unavailable. Surfaced as a usage error (exit code 2) by app.ExitCode.
+type UnresolvedDefaultDirError struct{}
+
+func (e *UnresolvedDefaultDirError) Error() string {
+	return "promptsource: cannot resolve default prompts directory: XDG_CONFIG_HOME unset and home directory unknown"
+}
 
 // Scope identifies which tier a source belongs to. Today only ScopeGlobal is
 // produced; ScopeProject lands with the project-overlay slice.
@@ -74,5 +82,5 @@ func Resolve(cfg config.Resolved, getenv func(string) string, homeDir string) ([
 		}}, nil
 	}
 
-	return nil, fmt.Errorf("promptsource: cannot resolve default prompts directory: XDG_CONFIG_HOME unset and home directory unknown")
+	return nil, &UnresolvedDefaultDirError{}
 }
