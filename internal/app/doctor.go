@@ -77,8 +77,9 @@ func checkPromptsDir(w io.Writer, cfg config.Resolved) error {
 	}
 	if source.AutoCreateOnAccess {
 		if mkErr := os.MkdirAll(source.Path, 0o700); mkErr != nil {
-			printFail(w, fmt.Sprintf("create prompts directory %s: %v", source.Path, mkErr))
-			return mkErr
+			createErr := &store.PromptsDirCreateError{Path: source.Path, Err: mkErr}
+			printFail(w, createErr.Error())
+			return createErr
 		}
 	}
 	info, err := os.Stat(source.Path)
