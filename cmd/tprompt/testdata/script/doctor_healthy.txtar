@@ -3,7 +3,7 @@
 mkdir prompts
 tprompt doctor --config config.toml
 stdout 'ok   config loaded'
-stdout 'ok   prompts directory exists'
+stdout 'ok   prompts directory exists .* \[explicit\]'
 stdout 'ok   2 prompts discovered'
 stdout 'warn not inside tmux'
 stdout 'clipboard reader'

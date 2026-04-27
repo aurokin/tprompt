@@ -1,5 +1,0 @@
-# Default config with no prompts_dir set should fail with exit 2.
-
-! tprompt list
-stderr 'prompts_dir'
-stderr 'tprompt - error:'

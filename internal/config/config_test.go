@@ -535,10 +535,12 @@ func TestValidateAcceptsValidResolved(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsEmptyPromptsDir(t *testing.T) {
+func TestValidateAcceptsEmptyPromptsDir(t *testing.T) {
 	r := validResolved(t)
 	r.PromptsDir = ""
-	assertValidationField(t, Validate(r), "prompts_dir")
+	if err := Validate(r); err != nil {
+		t.Fatalf("Validate with empty prompts_dir: %v", err)
+	}
 }
 
 func TestValidateRejectsInvalidMode(t *testing.T) {

@@ -96,17 +96,34 @@ func (e *PromptsDirMissingError) Error() string {
 	return fmt.Sprintf("prompts directory missing: %s", e.Path)
 }
 
+// PromptsDirCreateError reports that the auto-created default prompts
+// directory could not be created (e.g. read-only filesystem, blocking file).
+// Surfaced as a usage error (exit 2) so default-dir failures stay consistent
+// with explicit prompts_dir failures.
+type PromptsDirCreateError struct {
+	Path string
+	Err  error
+}
+
+func (e *PromptsDirCreateError) Error() string {
+	return fmt.Sprintf("create prompts directory %s: %v", e.Path, e.Err)
+}
+
+func (e *PromptsDirCreateError) Unwrap() error { return e.Err }
+
 // FSStore is the filesystem-backed Phase 1 store implementation.
 type FSStore struct {
-	root     string
-	reserved map[rune]string
-	pool     []rune
+	root       string
+	reserved   map[rune]string
+	pool       []rune
+	autoCreate bool
 
 	promptsByID map[string]Prompt
 	summaries   []Summary
 }
 
 // NewFS returns a store that discovers prompts from the given directory.
+// A missing root remains a PromptsDirMissingError on Discover.
 func NewFS(root string, reserved map[rune]string, pool []rune) *FSStore {
 	reservedCopy := make(map[rune]string, len(reserved))
 	for key, action := range reserved {
@@ -121,17 +138,42 @@ func NewFS(root string, reserved map[rune]string, pool []rune) *FSStore {
 	}
 }
 
-func (s *FSStore) Discover() error {
+// NewFSWithAutoCreate is like NewFS but creates the prompts directory if it
+// does not exist on Discover. Use it for the default-resolved global path;
+// explicit user paths must continue to use NewFS so a missing directory
+// remains a hard error.
+func NewFSWithAutoCreate(root string, reserved map[rune]string, pool []rune) *FSStore {
+	s := NewFS(root, reserved, pool)
+	s.autoCreate = true
+	return s
+}
+
+// prepareRoot canonicalizes the configured root, optionally creates it when
+// auto-create is enabled, and confirms it is a directory. A missing
+// non-auto-create root surfaces as PromptsDirMissingError so the existing
+// contract for explicit prompts_dir is preserved.
+func (s *FSStore) prepareRoot() (string, error) {
 	root, err := filepath.Abs(s.root)
 	if err != nil {
-		s.clearCache()
-		return fmt.Errorf("resolve prompts directory: %w", err)
+		return "", fmt.Errorf("resolve prompts directory: %w", err)
 	}
+	if s.autoCreate {
+		if err := os.MkdirAll(root, 0o700); err != nil {
+			return "", &PromptsDirCreateError{Path: root, Err: err}
+		}
+	}
+	info, statErr := os.Stat(root)
+	if statErr != nil || !info.IsDir() {
+		return "", &PromptsDirMissingError{Path: root}
+	}
+	return root, nil
+}
 
-	info, err := os.Stat(root)
-	if err != nil || !info.IsDir() {
+func (s *FSStore) Discover() error {
+	root, err := s.prepareRoot()
+	if err != nil {
 		s.clearCache()
-		return &PromptsDirMissingError{Path: root}
+		return err
 	}
 
 	entries, err := discoverPromptFiles(root)

@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -369,6 +370,33 @@ func TestDoctorDefaultsConfig(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	assertContains(t, stdout, "defaults")
+}
+
+func TestDoctorPromptsDirAutoCreateFails(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", blocker)
+
+	fs := &fakeStore{summaries: []store.Summary{}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{SocketPath: "/tmp/tprompt-test.sock"}, nil
+	}
+
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	var createErr *store.PromptsDirCreateError
+	if !errors.As(err, &createErr) {
+		t.Fatalf("want *store.PromptsDirCreateError, got %T: %v", err, err)
+	}
+	if ExitCode(err) != ExitUsage {
+		t.Fatalf("ExitCode = %d, want %d", ExitCode(err), ExitUsage)
+	}
+	assertContains(t, stdout, "create prompts directory")
 }
 
 func TestDoctorPromptsDirMissing(t *testing.T) {

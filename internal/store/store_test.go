@@ -352,6 +352,69 @@ func TestFSStoreDiscoverReportsMissingRoot(t *testing.T) {
 	}
 }
 
+func TestFSStoreAutoCreateMissingRoot(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "fresh", "prompts")
+
+	store := NewFSWithAutoCreate(missing, nil, []rune("123"))
+	summaries, err := store.List()
+	if err != nil {
+		t.Fatalf("List on auto-create root: %v", err)
+	}
+	if len(summaries) != 0 {
+		t.Fatalf("List() = %d summaries, want 0", len(summaries))
+	}
+	info, err := os.Stat(missing)
+	if err != nil {
+		t.Fatalf("auto-created root not found: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("auto-created path is not a directory: %s", missing)
+	}
+}
+
+func TestFSStoreAutoCreateLeavesExistingFilesAlone(t *testing.T) {
+	dir := t.TempDir()
+	writePrompt(t, dir, "alpha.md", "Alpha body.\n")
+
+	store := NewFSWithAutoCreate(dir, nil, []rune("123"))
+	summaries, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].ID != "alpha" {
+		t.Fatalf("List() = %v, want [alpha]", summaries)
+	}
+}
+
+func TestFSStoreAutoCreateReportsCreateError(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(blocker, "prompts")
+
+	store := NewFSWithAutoCreate(root, nil, []rune("123"))
+	err := store.Discover()
+	var createErr *PromptsDirCreateError
+	if !errors.As(err, &createErr) {
+		t.Fatalf("want PromptsDirCreateError, got %T: %v", err, err)
+	}
+}
+
+func TestFSStoreNewFSDoesNotAutoCreate(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "fresh")
+	store := NewFS(missing, nil, []rune("123"))
+
+	err := store.Discover()
+	var missingErr *PromptsDirMissingError
+	if !errors.As(err, &missingErr) {
+		t.Fatalf("want PromptsDirMissingError, got %T: %v", err, err)
+	}
+	if _, statErr := os.Stat(missing); statErr == nil {
+		t.Fatalf("NewFS unexpectedly created %s", missing)
+	}
+}
+
 func TestFSStoreDiscoverReportsRootIsFile(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "not-a-dir")
 	if err := os.WriteFile(file, nil, 0o644); err != nil {

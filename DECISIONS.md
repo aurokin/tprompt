@@ -232,7 +232,25 @@ When invoked with no subcommand, `tprompt` dispatches to `tprompt tui` if stdin 
 
 The dispatch is a pure arg rewrite at the top of `RunCLI` — cobra still parses flags and enforces `tui`'s required `--target-pane`, so bare `tprompt` with no flags inside tmux+tty errors clearly (exit 2). This is intentional: inside a `display-popup -E` popup, `$TMUX_PANE` resolves to the popup's own pane, not the originating one, so the binding must pass `#{pane_id}` at trigger time for delivery to target the correct pane. See `examples/tmux-bindings.md` for the canonical binding.
 
-### 30. Implementation tech stack
+### 30. Default global prompts directory with auto-create
+
+`prompts_dir` is optional. When unset, it resolves to
+`$XDG_CONFIG_HOME/tprompt/prompts` (falling back to
+`~/.config/tprompt/prompts` when XDG is unset). The default directory is
+auto-created on first access, so a fresh install runs end-to-end without
+hand-editing config.
+
+An explicit `prompts_dir` is used verbatim and is **not** auto-created — a
+missing explicit path remains a `PromptsDirMissingError`. This preserves the
+existing contract for users who already point at a custom path.
+
+Resolution is owned by a pure path-resolver module
+(`internal/promptsource`) over (config, env getter, home directory). Later
+slices extend it with `additional_prompts_dirs` and a project overlay; the
+auto-create asymmetry stays — only the resolved primary global default is
+created on access.
+
+### 31. Implementation tech stack
 
 The implementation language and toolchain are locked for v1:
 

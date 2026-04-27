@@ -9,6 +9,7 @@ import (
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
+	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/store"
 )
 
@@ -69,14 +70,35 @@ func checkConfig(w io.Writer, deps Deps) (config.Resolved, error) {
 }
 
 func checkPromptsDir(w io.Writer, cfg config.Resolved) error {
-	info, err := os.Stat(cfg.PromptsDir)
-	if err != nil || !info.IsDir() {
-		err := &store.PromptsDirMissingError{Path: cfg.PromptsDir}
+	source, err := primaryPromptSource(cfg)
+	if err != nil {
 		printFail(w, err.Error())
 		return err
 	}
-	printOK(w, fmt.Sprintf("prompts directory exists (%s)", cfg.PromptsDir))
+	if source.AutoCreateOnAccess {
+		if mkErr := os.MkdirAll(source.Path, 0o700); mkErr != nil {
+			createErr := &store.PromptsDirCreateError{Path: source.Path, Err: mkErr}
+			printFail(w, createErr.Error())
+			return createErr
+		}
+	}
+	info, err := os.Stat(source.Path)
+	if err != nil || !info.IsDir() {
+		missingErr := &store.PromptsDirMissingError{Path: source.Path}
+		printFail(w, missingErr.Error())
+		return missingErr
+	}
+	printOK(w, fmt.Sprintf("prompts directory exists (%s) %s", source.Path, sourceOriginLabel(source, cfg)))
 	return nil
+}
+
+// sourceOriginLabel describes where source's path came from so doctor output
+// distinguishes a resolved default from an explicit user setting.
+func sourceOriginLabel(source promptsource.Source, cfg config.Resolved) string {
+	if cfg.PromptsDir == "" {
+		return "[default]"
+	}
+	return "[explicit]"
 }
 
 func checkDiscovery(w io.Writer, deps Deps, cfg config.Resolved) error {

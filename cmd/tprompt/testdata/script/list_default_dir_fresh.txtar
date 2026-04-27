@@ -1,0 +1,21 @@
+# Fresh install: no config file, no prompts_dir set. The default
+# $HOME/.config/tprompt/prompts is auto-created and `tprompt list`
+# succeeds with empty output, exit 0.
+
+env HOME=$WORK/home
+
+tprompt list
+! stdout .
+! stderr .
+
+exists $WORK/home/.config/tprompt/prompts
+
+# Writing a prompt into the auto-created default directory makes it
+# visible to subsequent invocations.
+mkdir $WORK/home/.config/tprompt/prompts
+cp prompt.md $WORK/home/.config/tprompt/prompts/alpha.md
+tprompt list
+stdout 'alpha'
+
+-- prompt.md --
+Alpha body.

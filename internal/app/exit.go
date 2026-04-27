@@ -8,6 +8,7 @@ import (
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/keybind"
+	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/sanitize"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/submitter"
@@ -40,6 +41,16 @@ func ExitCode(err error) int {
 
 	var missingDir *store.PromptsDirMissingError
 	if errors.As(err, &missingDir) {
+		return ExitUsage
+	}
+
+	var createDir *store.PromptsDirCreateError
+	if errors.As(err, &createDir) {
+		return ExitUsage
+	}
+
+	var unresolvedDefault *promptsource.UnresolvedDefaultDirError
+	if errors.As(err, &unresolvedDefault) {
 		return ExitUsage
 	}
 

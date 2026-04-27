@@ -8,6 +8,7 @@ import (
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/keybind"
+	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/sanitize"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/submitter"
@@ -63,6 +64,20 @@ func TestExitCodePromptsDirMissing(t *testing.T) {
 	err := &store.PromptsDirMissingError{Path: "/nope"}
 	if got := ExitCode(err); got != ExitUsage {
 		t.Fatalf("ExitCode(PromptsDirMissingError) = %d, want %d", got, ExitUsage)
+	}
+}
+
+func TestExitCodeUnresolvedDefaultDir(t *testing.T) {
+	err := &promptsource.UnresolvedDefaultDirError{}
+	if got := ExitCode(err); got != ExitUsage {
+		t.Fatalf("ExitCode(UnresolvedDefaultDirError) = %d, want %d", got, ExitUsage)
+	}
+}
+
+func TestExitCodePromptsDirCreate(t *testing.T) {
+	err := &store.PromptsDirCreateError{Path: "/nope", Err: errors.New("read-only fs")}
+	if got := ExitCode(err); got != ExitUsage {
+		t.Fatalf("ExitCode(PromptsDirCreateError) = %d, want %d", got, ExitUsage)
 	}
 }
 

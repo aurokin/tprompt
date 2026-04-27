@@ -43,13 +43,14 @@ select    = "Enter"
 
 ## Required config fields
 
-- prompts directory
 - socket path
 - default delivery mode
 - default enter behavior
 
 ## Optional config fields
 
+- prompts directory (defaults to `$XDG_CONFIG_HOME/tprompt/prompts`,
+  falling back to `~/.config/tprompt/prompts`; auto-created on first access)
 - picker command (affects `tprompt pick`; does not affect the built-in TUI)
 - daemon auto-start for TUI flows
 - verification timeout
@@ -60,6 +61,22 @@ select    = "Enter"
 - sanitize mode
 - reserved keys map
 - keybind pool
+
+## Prompts directory resolution
+
+`prompts_dir` is optional. When unset (or omitted from `config.toml`):
+
+1. If `XDG_CONFIG_HOME` is set, the prompts directory resolves to
+   `$XDG_CONFIG_HOME/tprompt/prompts`.
+2. Otherwise it resolves to `~/.config/tprompt/prompts`.
+
+The resolved default directory is auto-created on first access, so a fresh
+install can run `tprompt list` (or any prompt-store command) without any
+manual setup.
+
+When `prompts_dir` is set explicitly, the path is used verbatim and is **not**
+auto-created — a missing explicit directory remains a hard error
+(`prompts directory missing: <path>`).
 
 ## Resolution order
 
@@ -127,7 +144,7 @@ When set to `true`, the daemon captures the target pane tail before and after su
 
 The tool fails clearly if:
 
-- prompts directory is missing
+- prompts directory is set explicitly but missing on disk
 - default mode is invalid
 - socket path is invalid/unusable
 - `sanitize` value is not `off`/`safe`/`strict`
