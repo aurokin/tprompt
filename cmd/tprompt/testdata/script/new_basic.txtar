@@ -1,0 +1,34 @@
+# `tprompt new <id>` writes the scaffold template into prompts_dir,
+# prints the absolute path of the created file, and the result loads
+# cleanly via list/show (exercising AUR-144 empty-value tolerance against
+# every stubbed frontmatter field).
+
+mkdir prompts
+
+tprompt new code-review --config config.toml
+stdout 'prompts/code-review\.md$'
+! stderr .
+
+cmp prompts/code-review.md want.md
+
+# Scaffolded file loads without error and is visible in list/show.
+tprompt list --config config.toml
+stdout '^code-review  key 1 \(auto\)\n$'
+
+tprompt show code-review --config config.toml
+stdout 'ID: code-review'
+stdout 'Source: .*/prompts/code-review\.md'
+stdout 'Key: 1 \(auto\)'
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- want.md --
+---
+title:
+description:
+tags: []
+key:
+mode:
+enter:
+---

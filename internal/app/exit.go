@@ -39,6 +39,11 @@ func ExitCode(err error) int {
 		return ExitUsage
 	}
 
+	var invalidNewID *InvalidNewIDError
+	if errors.As(err, &invalidNewID) {
+		return ExitUsage
+	}
+
 	var missingDir *store.PromptsDirMissingError
 	if errors.As(err, &missingDir) {
 		return ExitUsage
@@ -52,6 +57,11 @@ func ExitCode(err error) int {
 	var unresolvedDefault *promptsource.UnresolvedDefaultDirError
 	if errors.As(err, &unresolvedDefault) {
 		return ExitUsage
+	}
+
+	var fileExists *PromptFileExistsError
+	if errors.As(err, &fileExists) {
+		return ExitPrompt
 	}
 
 	var dupID *store.DuplicatePromptIDError

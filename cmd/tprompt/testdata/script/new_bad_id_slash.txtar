@@ -1,0 +1,13 @@
+# Ids containing path separators are rejected up front. Nothing is written.
+
+mkdir prompts
+
+! tprompt new team/review --config config.toml
+stderr 'invalid prompt id'
+stderr 'path separators'
+! stdout .
+
+! exists prompts/team
+
+-- config.toml --
+prompts_dir = "prompts"

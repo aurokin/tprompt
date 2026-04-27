@@ -1,0 +1,11 @@
+# Empty id (passed as the empty string) is rejected as a usage error.
+
+mkdir prompts
+
+! tprompt new '' --config config.toml
+stderr 'invalid prompt id'
+stderr 'must not be empty'
+! stdout .
+
+-- config.toml --
+prompts_dir = "prompts"

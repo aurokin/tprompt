@@ -81,6 +81,20 @@ func TestExitCodePromptsDirCreate(t *testing.T) {
 	}
 }
 
+func TestExitCodeInvalidNewID(t *testing.T) {
+	err := &InvalidNewIDError{ID: "bad/id", Reason: "must not contain path separators"}
+	if got := ExitCode(err); got != ExitUsage {
+		t.Fatalf("ExitCode(InvalidNewIDError) = %d, want %d", got, ExitUsage)
+	}
+}
+
+func TestExitCodePromptFileExists(t *testing.T) {
+	err := &PromptFileExistsError{Path: "/prompts/existing.md"}
+	if got := ExitCode(err); got != ExitPrompt {
+		t.Fatalf("ExitCode(PromptFileExistsError) = %d, want %d", got, ExitPrompt)
+	}
+}
+
 func TestExitCodeDaemonErrors(t *testing.T) {
 	tests := []struct {
 		name string

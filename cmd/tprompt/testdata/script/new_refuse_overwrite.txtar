@@ -1,0 +1,18 @@
+# When the target file exists, `tprompt new` refuses to overwrite it,
+# names the existing path in the error, and leaves the file untouched.
+
+mkdir prompts
+cp existing.md prompts/code-review.md
+
+! tprompt new code-review --config config.toml
+stderr 'prompts/code-review\.md'
+stderr 'refusing to overwrite'
+
+# Original body is unchanged.
+cmp prompts/code-review.md existing.md
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- existing.md --
+# untouched body

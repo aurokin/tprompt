@@ -1,0 +1,13 @@
+# Ids ending in `.md` are rejected: the user must pass the bare id.
+
+mkdir prompts
+
+! tprompt new code-review.md --config config.toml
+stderr 'invalid prompt id'
+stderr '\.md suffix'
+! stdout .
+
+! exists prompts/code-review.md
+
+-- config.toml --
+prompts_dir = "prompts"
