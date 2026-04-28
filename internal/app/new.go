@@ -43,14 +43,18 @@ func (e *InvalidNewIDError) Error() string {
 	return fmt.Sprintf("invalid prompt id %q: %s", e.ID, e.Reason)
 }
 
-// PromptFileExistsError reports that `tprompt new` refused to overwrite an
-// existing file. Surfaced as a prompt-store error (exit 3) by app.ExitCode.
+// PromptFileExistsError reports that a prompt with the requested id already
+// exists in the resolved prompts source. Path names the existing file —
+// either the same target the scaffolder would have written, or another file
+// elsewhere in the tree whose filename stem matches the id. Surfaced as a
+// prompt-store error (exit 3) by app.ExitCode.
 type PromptFileExistsError struct {
+	ID   string
 	Path string
 }
 
 func (e *PromptFileExistsError) Error() string {
-	return fmt.Sprintf("prompt file already exists: %s (refusing to overwrite)", e.Path)
+	return fmt.Sprintf("prompt id %q already exists at %s (refusing to overwrite)", e.ID, e.Path)
 }
 
 func newNewCmd(deps Deps) *cobra.Command {
@@ -98,7 +102,16 @@ func runNew(deps Deps, id string) error {
 	if err != nil {
 		return fmt.Errorf("resolve prompt file path: %w", err)
 	}
-	if err := writeScaffold(target); err != nil {
+	// Prompt ids are filename stems and the store walks subdirectories, so
+	// any existing `<id>.md` anywhere under source.Path collides — not just
+	// the exact target. Scan first so the user sees a clear error instead
+	// of a silently-broken store on the next list/show.
+	if existing, err := findPromptByID(source.Path, id); err != nil {
+		return err
+	} else if existing != "" {
+		return &PromptFileExistsError{ID: id, Path: existing}
+	}
+	if err := writeScaffold(id, target); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintln(deps.Stdout, target)
@@ -147,10 +160,41 @@ func ensureScaffoldDir(path string, autoCreate bool) error {
 	return nil
 }
 
+// findPromptByID walks root looking for any markdown file whose filename
+// stem matches id, mirroring the discovery rules in internal/store
+// (skip hidden basenames, only `.md` files). Returns the first match or
+// the empty string if none. Walk errors propagate.
+func findPromptByID(root, id string) (string, error) {
+	var found string
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path != root && strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() || filepath.Ext(path) != ".md" {
+			return nil
+		}
+		if strings.TrimSuffix(d.Name(), ".md") == id {
+			found = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return "", walkErr
+	}
+	return found, nil
+}
+
 // writeScaffold creates target with the scaffold template, refusing to
-// overwrite. O_EXCL closes the TOCTOU window between an existence probe and
-// the write so a concurrent author cannot lose work.
-func writeScaffold(target string) error {
+// overwrite. O_EXCL closes the TOCTOU window between findPromptByID and the
+// write so a concurrent author cannot lose work.
+func writeScaffold(id, target string) error {
 	// G304: target is composed from the resolved primary prompts directory
 	// and a validated id (validateNewID rejects path separators, .md
 	// suffix, non-printable runes, empty input), so this is a bounded write
@@ -158,7 +202,7 @@ func writeScaffold(target string) error {
 	f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600) //nolint:gosec
 	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
-			return &PromptFileExistsError{Path: target}
+			return &PromptFileExistsError{ID: id, Path: target}
 		}
 		return fmt.Errorf("create prompt file %s: %w", target, err)
 	}

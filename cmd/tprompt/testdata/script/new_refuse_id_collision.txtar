@@ -1,0 +1,28 @@
+# Prompt ids are filename stems and the store walks subdirectories, so
+# `tprompt new code-review` must refuse when prompts/team/code-review.md
+# already exists. Otherwise the next list/show would fail with a
+# DuplicatePromptIDError from the store.
+
+mkdir prompts/team
+cp existing.md prompts/team/code-review.md
+
+! tprompt new code-review --config config.toml
+stderr 'prompt id "code-review"'
+stderr 'team/code-review\.md'
+stderr 'refusing to overwrite'
+
+# Top-level target file is not created.
+! exists prompts/code-review.md
+
+# Existing nested file is unchanged.
+cmp prompts/team/code-review.md existing.md
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- existing.md --
+---
+title: Team override
+---
+
+team body

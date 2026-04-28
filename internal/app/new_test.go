@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,9 +97,11 @@ func TestNew_RefusesToOverwriteExistingFile(t *testing.T) {
 	if !errors.As(err, &existsErr) {
 		t.Fatalf("err = %T %v, want *PromptFileExistsError", err, err)
 	}
-	abs, _ := filepath.Abs(target)
-	if existsErr.Path != abs {
-		t.Errorf("PromptFileExistsError.Path = %q, want %q", existsErr.Path, abs)
+	if existsErr.ID != "code-review" {
+		t.Errorf("PromptFileExistsError.ID = %q, want %q", existsErr.ID, "code-review")
+	}
+	if existsErr.Path != target {
+		t.Errorf("PromptFileExistsError.Path = %q, want %q", existsErr.Path, target)
 	}
 	if ExitCode(err) != ExitPrompt {
 		t.Errorf("ExitCode = %d, want %d", ExitCode(err), ExitPrompt)
@@ -110,6 +113,63 @@ func TestNew_RefusesToOverwriteExistingFile(t *testing.T) {
 	}
 	if string(body) != string(original) {
 		t.Errorf("file body changed: got %q, want %q", body, original)
+	}
+}
+
+func TestNew_RefusesCrossSubdirIDCollision(t *testing.T) {
+	dir := t.TempDir()
+	// Prompt store walks subdirs and uses filename stem as id; an existing
+	// nested file with the same stem would collide on the next list/show.
+	subdir := filepath.Join(dir, "team")
+	if err := os.MkdirAll(subdir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	existing := filepath.Join(subdir, "code-review.md")
+	if err := os.WriteFile(existing, []byte("# team override\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	deps := newCmdDeps(t, dir)
+	_, _, err := executeRootWith(t, deps, "new", "code-review")
+
+	var existsErr *PromptFileExistsError
+	if !errors.As(err, &existsErr) {
+		t.Fatalf("err = %T %v, want *PromptFileExistsError", err, err)
+	}
+	if existsErr.ID != "code-review" {
+		t.Errorf("ID = %q, want %q", existsErr.ID, "code-review")
+	}
+	if existsErr.Path != existing {
+		t.Errorf("Path = %q, want %q (the colliding file)", existsErr.Path, existing)
+	}
+
+	// Top-level target file must not be created.
+	if _, err := os.Stat(filepath.Join(dir, "code-review.md")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("top-level code-review.md should not exist, stat err = %v", err)
+	}
+}
+
+func TestNew_IgnoresHiddenSiblingsWhenScanningCollisions(t *testing.T) {
+	// Hidden basenames (and files inside hidden dirs) are skipped by the
+	// store's discovery, so they must not block scaffolding.
+	dir := t.TempDir()
+	hiddenDir := filepath.Join(dir, ".cache")
+	if err := os.MkdirAll(hiddenDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(hiddenDir, "code-review.md"), []byte("hidden\n"), 0o600); err != nil {
+		t.Fatalf("seed cached: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".code-review.md"), []byte("dotfile\n"), 0o600); err != nil {
+		t.Fatalf("seed dotfile: %v", err)
+	}
+
+	deps := newCmdDeps(t, dir)
+	if _, _, err := executeRootWith(t, deps, "new", "code-review"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "code-review.md")); err != nil {
+		t.Errorf("scaffold not written: %v", err)
 	}
 }
 
