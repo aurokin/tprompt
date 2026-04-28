@@ -13,9 +13,10 @@ stdout 'home/.config/tprompt/prompts/alpha\.md$'
 exists $WORK/home/.config/tprompt/prompts/alpha.md
 
 tprompt list
-stdout '^alpha  key 1 \(auto\)\n$'
+stdout '^alpha  global  key 1 \(auto\)\n$'
 
 tprompt show alpha
 stdout 'ID: alpha'
 stdout 'Source: .*/home/.config/tprompt/prompts/alpha\.md'
+stdout 'Scope: global'
 stdout 'Key: 1 \(auto\)'

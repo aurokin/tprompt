@@ -15,7 +15,7 @@ exists $WORK/home/.config/tprompt/prompts
 mkdir $WORK/home/.config/tprompt/prompts
 cp prompt.md $WORK/home/.config/tprompt/prompts/alpha.md
 tprompt list
-stdout 'alpha'
+stdout 'alpha  global'
 
 -- prompt.md --
 Alpha body.

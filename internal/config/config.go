@@ -16,6 +16,7 @@ import (
 // Config mirrors the user-facing fields documented in docs/storage/config.md.
 type Config struct {
 	PromptsDir                 string            `toml:"prompts_dir"`
+	AdditionalPromptsDirs      []string          `toml:"additional_prompts_dirs"`
 	DefaultMode                string            `toml:"default_mode"`
 	DefaultEnter               bool              `toml:"default_enter"`
 	SocketPath                 string            `toml:"socket_path"`
@@ -69,6 +70,7 @@ type ReservedKey struct {
 // rest of the application. Produced by Normalize after Load/LoadOrDefault.
 type Resolved struct {
 	PromptsDir                 string
+	AdditionalPromptsDirs      []string
 	DefaultMode                string
 	DefaultEnter               bool
 	SocketPath                 string
@@ -190,6 +192,7 @@ func Normalize(cfg Config, configPath string) (Resolved, error) {
 	}
 
 	r.PromptsDir = expandHome(cfg.PromptsDir)
+	r.AdditionalPromptsDirs = expandHomeSlice(cfg.AdditionalPromptsDirs)
 	r.SocketPath = expandHome(cfg.SocketPath)
 	r.LogPath = expandHome(cfg.LogPath)
 
@@ -359,4 +362,15 @@ func expandHome(path string) string {
 		return filepath.Join(home, path[1:])
 	}
 	return path
+}
+
+func expandHomeSlice(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, expandHome(path))
+	}
+	return out
 }

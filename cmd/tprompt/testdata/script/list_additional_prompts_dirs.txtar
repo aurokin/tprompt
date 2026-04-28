@@ -1,0 +1,17 @@
+# list merges prompts from the primary global dir and additional global dirs.
+
+mkdir prompts
+mkdir team-prompts
+tprompt list --config config.toml
+stdout '^alpha  global  key 1 \(auto\)\nbravo  global  key 2 \(auto\)\n$'
+! stderr .
+
+-- config.toml --
+prompts_dir = "prompts"
+additional_prompts_dirs = ["team-prompts"]
+
+-- prompts/bravo.md --
+Primary body.
+
+-- team-prompts/alpha.md --
+Team body.

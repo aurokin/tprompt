@@ -13,11 +13,12 @@ cmp prompts/code-review.md want.md
 
 # Scaffolded file loads without error and is visible in list/show.
 tprompt list --config config.toml
-stdout '^code-review  key 1 \(auto\)\n$'
+stdout '^code-review  global  key 1 \(auto\)\n$'
 
 tprompt show code-review --config config.toml
 stdout 'ID: code-review'
 stdout 'Source: .*/prompts/code-review\.md'
+stdout 'Scope: global'
 stdout 'Key: 1 \(auto\)'
 
 -- config.toml --

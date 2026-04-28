@@ -57,14 +57,11 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 		LoadPasteConfig:  productionLoadPasteConfig,
 		LoadDaemonConfig: productionLoadDaemonConfig,
 		NewStore: func(cfg config.Resolved) (store.Store, error) {
-			source, err := primaryPromptSource(cfg)
+			sources, err := promptSources(cfg)
 			if err != nil {
 				return nil, err
 			}
-			if source.AutoCreateOnAccess {
-				return store.NewFSWithAutoCreate(source.Path, cfg.ReservedPrintable, cfg.KeybindPool), nil
-			}
-			return store.NewFS(source.Path, cfg.ReservedPrintable, cfg.KeybindPool), nil
+			return store.NewMultiSource(sources, cfg.ReservedPrintable, cfg.KeybindPool), nil
 		},
 		NewTmux: func() (tmux.Adapter, error) {
 			return tmux.New(tmux.NewExecRunner("")), nil
@@ -176,22 +173,15 @@ func productionLoadDaemonConfig(explicitPath string) (config.Resolved, error) {
 	return config.ResolveDaemon(cfg, path), nil
 }
 
-// primaryPromptSource resolves the primary global prompt source for cfg.
+// promptSources resolves all configured prompt sources for cfg.
 // homeDir is read from the host environment via os.UserHomeDir; if it is
 // unavailable and prompts_dir is unset, the resolver returns a clear error.
-func primaryPromptSource(cfg config.Resolved) (promptsource.Source, error) {
+func promptSources(cfg config.Resolved) ([]promptsource.Source, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = ""
 	}
-	sources, err := promptsource.Resolve(cfg, lookupEnv, home)
-	if err != nil {
-		return promptsource.Source{}, err
-	}
-	if len(sources) == 0 {
-		return promptsource.Source{}, fmt.Errorf("promptsource: resolver returned no sources")
-	}
-	return sources[0], nil
+	return promptsource.Resolve(cfg, lookupEnv, home)
 }
 
 // newClipboardReader builds the clipboard.Reader used by both `Deps.NewClip`
