@@ -61,8 +61,8 @@ func newNewCmd(deps Deps) *cobra.Command {
 directory and prints the absolute path of the created file.
 
 The argument is the bare id; the .md extension is implied. Ids with path
-separators, empty ids, ids ending in .md, or ids with non-printable
-characters are rejected up front.
+separators, leading dots, empty ids, ids ending in .md, or ids with
+non-printable characters are rejected up front.
 
 If the target file already exists, new refuses to overwrite it and exits
 non-zero. The parent directory is auto-created on first use when it is
@@ -111,6 +111,12 @@ func validateNewID(id string) error {
 	}
 	if strings.ContainsAny(id, `/\`) {
 		return &InvalidNewIDError{ID: id, Reason: "must not contain path separators"}
+	}
+	// A leading dot would produce a hidden filename; the store's WalkDir
+	// skips hidden basenames (internal/store/store.go shouldSkipPath), so
+	// scaffolding `.foo` would silently create an undiscoverable file.
+	if strings.HasPrefix(id, ".") {
+		return &InvalidNewIDError{ID: id, Reason: "must not start with a dot"}
 	}
 	if strings.HasSuffix(id, ".md") {
 		return &InvalidNewIDError{ID: id, Reason: "must not include the .md suffix; pass the bare id"}

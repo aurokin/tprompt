@@ -25,6 +25,9 @@ func TestValidateNewID(t *testing.T) {
 		{name: "forward-slash", id: "team/review", wantSub: "path separators"},
 		{name: "back-slash", id: `team\review`, wantSub: "path separators"},
 		{name: "md-suffix", id: "review.md", wantSub: ".md suffix"},
+		{name: "leading-dot", id: ".foo", wantSub: "start with a dot"},
+		{name: "single-dot", id: ".", wantSub: "start with a dot"},
+		{name: "double-dot", id: "..", wantSub: "start with a dot"},
 		{name: "non-printable-tab", id: "review\t1", wantSub: "printable"},
 		{name: "non-printable-newline", id: "review\n1", wantSub: "printable"},
 	}

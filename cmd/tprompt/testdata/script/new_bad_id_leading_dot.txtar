@@ -1,0 +1,16 @@
+# Ids starting with `.` are rejected because the prompt store skips
+# hidden basenames during discovery (internal/store/store.go). Scaffolding
+# `.foo` would otherwise succeed silently while leaving the prompt
+# undiscoverable by `list`/`show`.
+
+mkdir prompts
+
+! tprompt new .foo --config config.toml
+stderr 'invalid prompt id'
+stderr 'start with a dot'
+! stdout .
+
+! exists prompts/.foo.md
+
+-- config.toml --
+prompts_dir = "prompts"
