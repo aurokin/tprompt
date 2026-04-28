@@ -1,0 +1,21 @@
+# Fresh install: no config file, no prompts_dir set. `tprompt new alpha`
+# auto-creates the default global path under $HOME/.config/tprompt/prompts
+# (no XDG_CONFIG_HOME) and writes the scaffold template. The result loads
+# cleanly via list/show without any further setup — the empty-frontmatter
+# template (AUR-144) round-trips through the store.
+
+env HOME=$WORK/home
+
+tprompt new alpha
+stdout 'home/.config/tprompt/prompts/alpha\.md$'
+! stderr .
+
+exists $WORK/home/.config/tprompt/prompts/alpha.md
+
+tprompt list
+stdout '^alpha  key 1 \(auto\)\n$'
+
+tprompt show alpha
+stdout 'ID: alpha'
+stdout 'Source: .*/home/.config/tprompt/prompts/alpha\.md'
+stdout 'Key: 1 \(auto\)'

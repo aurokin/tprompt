@@ -1,0 +1,13 @@
+# Ids containing non-printable runes (here, an embedded tab) are rejected.
+# We invoke through `sh -c` so a literal \t can be produced via `printf`
+# without colliding with testscript's whitespace-based arg splitter.
+
+mkdir prompts
+
+! exec sh -c 'tprompt new "$(printf "ab\tcd")" --config config.toml'
+stderr 'invalid prompt id'
+stderr 'printable'
+! stdout .
+
+-- config.toml --
+prompts_dir = "prompts"

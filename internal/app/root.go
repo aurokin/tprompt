@@ -29,6 +29,7 @@ func NewRootCmd(deps Deps) *cobra.Command {
 		Short: "Deliver markdown prompts into tmux panes",
 		Long: `tprompt delivers markdown prompts into tmux panes. Pick a workflow:
 
+  new <id>    Scaffold a new prompt file in the global prompts directory.
   send <id>   Direct synchronous delivery of a prompt by ID.
   paste       Direct synchronous delivery of the host clipboard.
   pick        Print a prompt ID chosen via an external picker (no delivery).
@@ -62,6 +63,7 @@ tmux (or without a tty), bare 'tprompt' prints this help.`,
 		newTUICmd(deps),
 		newPickCmd(deps),
 		newDaemonCmd(deps),
+		newNewCmd(deps),
 	)
 
 	return root

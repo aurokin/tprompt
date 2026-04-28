@@ -11,7 +11,7 @@ func TestRootLongDescribesWorkflows(t *testing.T) {
 	if long == "" {
 		t.Fatal("root.Long is empty")
 	}
-	for _, want := range []string{"send", "paste", "pick", "tui", "daemon"} {
+	for _, want := range []string{"new", "send", "paste", "pick", "tui", "daemon"} {
 		if !strings.Contains(long, want) {
 			t.Errorf("root.Long missing workflow %q\n--- Long ---\n%s", want, long)
 		}
@@ -52,6 +52,11 @@ func TestSubcommandHelpText(t *testing.T) {
 		{
 			path: []string{"pick"},
 			want: []string{"external picker", "prints the selected id", "does not deliver"},
+		},
+		{
+			path:   []string{"new"},
+			want:   []string{"scaffold", "global prompts", "absolute path", "refuses to overwrite"},
+			banned: []string{"--project"},
 		},
 		{
 			path:   []string{"tui"},
