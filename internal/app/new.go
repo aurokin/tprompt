@@ -164,11 +164,13 @@ func ensureScaffoldDir(path string, autoCreate bool) error {
 
 func findPromptByIDInSources(sources []promptsource.Source, id string) (string, error) {
 	for _, source := range sources {
+		if ok, err := promptSourceExists(source); err != nil {
+			return "", err
+		} else if !ok {
+			continue
+		}
 		existing, err := findPromptByID(source.Path, id)
 		if err != nil {
-			if source.Optional && errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
 			return "", err
 		}
 		if existing != "" {
@@ -176,6 +178,20 @@ func findPromptByIDInSources(sources []promptsource.Source, id string) (string, 
 		}
 	}
 	return "", nil
+}
+
+func promptSourceExists(source promptsource.Source) (bool, error) {
+	info, err := os.Stat(source.Path)
+	if err != nil {
+		if source.Optional && errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !info.IsDir() {
+		return false, &store.PromptsDirMissingError{Path: source.Path}
+	}
+	return true, nil
 }
 
 // findPromptByID walks root looking for any markdown file whose filename

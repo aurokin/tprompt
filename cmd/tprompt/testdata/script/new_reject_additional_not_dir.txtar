@@ -1,0 +1,12 @@
+# new refuses to scaffold when an additional global source exists but is not a directory.
+
+mkdir prompts
+exec sh -c 'printf not-a-dir > team-prompts'
+! tprompt new alpha --config config.toml
+stderr 'prompts directory missing: team-prompts'
+! stdout .
+! exists prompts/alpha.md
+
+-- config.toml --
+prompts_dir = "prompts"
+additional_prompts_dirs = ["team-prompts"]

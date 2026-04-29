@@ -209,6 +209,27 @@ func TestNew_ExplicitPromptsDirMissingIsHardError(t *testing.T) {
 	}
 }
 
+func TestNew_AdditionalPromptsDirThatIsFileIsHardError(t *testing.T) {
+	primary := t.TempDir()
+	fileSource := filepath.Join(t.TempDir(), "team-prompts")
+	if err := os.WriteFile(fileSource, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deps := newCmdDepsWithAdditional(t, primary, []string{fileSource})
+
+	_, _, err := executeRootWith(t, deps, "new", "alpha")
+	var dirMissing *store.PromptsDirMissingError
+	if !errors.As(err, &dirMissing) {
+		t.Fatalf("err = %T %v, want *store.PromptsDirMissingError", err, err)
+	}
+	if dirMissing.Path != fileSource {
+		t.Fatalf("Path = %q, want %q", dirMissing.Path, fileSource)
+	}
+	if _, statErr := os.Stat(filepath.Join(primary, "alpha.md")); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Fatalf("primary alpha.md should not exist, stat err = %v", statErr)
+	}
+}
+
 func TestNew_RequiresExactlyOneArg(t *testing.T) {
 	dir := t.TempDir()
 	deps := newCmdDeps(t, dir)
@@ -260,9 +281,17 @@ func TestEnsureScaffoldDir_NoAutoCreateRejectsMissing(t *testing.T) {
 // without consulting XDG/home and without auto-creating it.
 func newCmdDeps(t *testing.T, promptsDir string) Deps {
 	t.Helper()
+	return newCmdDepsWithAdditional(t, promptsDir, nil)
+}
+
+func newCmdDepsWithAdditional(t *testing.T, promptsDir string, additional []string) Deps {
+	t.Helper()
 	deps := workingDeps(t, &fakeStore{})
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: promptsDir}, nil
+		return config.Resolved{
+			PromptsDir:            promptsDir,
+			AdditionalPromptsDirs: additional,
+		}, nil
 	}
 	return deps
 }
