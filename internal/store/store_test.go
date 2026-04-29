@@ -583,6 +583,29 @@ func TestMultiSourceStoreSkipsMissingOptionalSources(t *testing.T) {
 	}
 }
 
+func TestMultiSourceStoreRejectsOptionalSourceThatIsNotDirectory(t *testing.T) {
+	primary := t.TempDir()
+	fileSource := filepath.Join(t.TempDir(), "team-prompts")
+	writePrompt(t, primary, "alpha.md", "alpha\n")
+	if err := os.WriteFile(fileSource, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := NewMultiSource([]promptsource.Source{
+		{Path: primary, Scope: promptsource.ScopeGlobal},
+		{Path: fileSource, Scope: promptsource.ScopeGlobal, Optional: true},
+	}, nil, []rune("1"))
+
+	err := store.Discover()
+	var missingErr *PromptsDirMissingError
+	if !errors.As(err, &missingErr) {
+		t.Fatalf("want PromptsDirMissingError, got %T: %v", err, err)
+	}
+	if missingErr.Path != fileSource {
+		t.Fatalf("Path = %q, want %q", missingErr.Path, fileSource)
+	}
+}
+
 func TestMultiSourceStoreRejectsDuplicateIDsWithinOneSource(t *testing.T) {
 	primary := t.TempDir()
 	additional := t.TempDir()

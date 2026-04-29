@@ -448,3 +448,31 @@ func TestDoctorMissingAdditionalPromptsDirIsWarning(t *testing.T) {
 	assertContains(t, stdout, "warn prompts directory missing (scope global, "+missing+") [additional]")
 	assertContains(t, stdout, "ok   0 prompts discovered")
 }
+
+func TestDoctorAdditionalPromptsDirThatIsFileIsFailure(t *testing.T) {
+	primary := t.TempDir()
+	fileSource := filepath.Join(t.TempDir(), "team-prompts")
+	if err := os.WriteFile(fileSource, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeStore{summaries: []store.Summary{}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{
+			PromptsDir:            primary,
+			AdditionalPromptsDirs: []string{fileSource},
+			SocketPath:            "/tmp/tprompt-test.sock",
+		}, nil
+	}
+
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	var missingErr *store.PromptsDirMissingError
+	if !errors.As(err, &missingErr) {
+		t.Fatalf("want PromptsDirMissingError, got %T: %v", err, err)
+	}
+	assertContains(t, stdout, "ok   prompts directory exists (scope global, "+primary+") [explicit]")
+	assertContains(t, stdout, "FAIL prompts directory missing: "+fileSource)
+}

@@ -76,29 +76,51 @@ func checkPromptsDir(w io.Writer, cfg config.Resolved) error {
 		return err
 	}
 	for _, source := range sources {
-		path := source.Path
-		if source.AutoCreateOnAccess {
-			if mkErr := os.MkdirAll(path, 0o700); mkErr != nil {
-				createErr := &store.PromptsDirCreateError{Path: path, Err: mkErr}
-				printFail(w, createErr.Error())
-				return createErr
-			}
+		if err := checkPromptSource(w, cfg, source); err != nil {
+			return err
 		}
-		info, err := os.Stat(path)
-		if err != nil || !info.IsDir() {
-			if source.Optional {
-				printWarn(w, fmt.Sprintf("prompts directory missing (scope %s, %s) %s",
-					source.Scope, path, sourceOriginLabel(source, cfg)))
-				continue
-			}
-			missingErr := &store.PromptsDirMissingError{Path: path}
-			printFail(w, missingErr.Error())
-			return missingErr
-		}
-		printOK(w, fmt.Sprintf("prompts directory exists (scope %s, %s) %s",
-			source.Scope, path, sourceOriginLabel(source, cfg)))
 	}
 	return nil
+}
+
+func checkPromptSource(w io.Writer, cfg config.Resolved, source promptsource.Source) error {
+	path := source.Path
+	if source.AutoCreateOnAccess {
+		if mkErr := os.MkdirAll(path, 0o700); mkErr != nil {
+			createErr := &store.PromptsDirCreateError{Path: path, Err: mkErr}
+			printFail(w, createErr.Error())
+			return createErr
+		}
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return reportPromptSourceStatError(w, cfg, source, err)
+	}
+	if !info.IsDir() {
+		missingErr := &store.PromptsDirMissingError{Path: path}
+		printFail(w, missingErr.Error())
+		return missingErr
+	}
+	printOK(w, fmt.Sprintf("prompts directory exists (scope %s, %s) %s",
+		source.Scope, path, sourceOriginLabel(source, cfg)))
+	return nil
+}
+
+func reportPromptSourceStatError(w io.Writer, cfg config.Resolved, source promptsource.Source, err error) error {
+	path := source.Path
+	if errors.Is(err, os.ErrNotExist) {
+		if source.Optional {
+			printWarn(w, fmt.Sprintf("prompts directory missing (scope %s, %s) %s",
+				source.Scope, path, sourceOriginLabel(source, cfg)))
+			return nil
+		}
+		missingErr := &store.PromptsDirMissingError{Path: path}
+		printFail(w, missingErr.Error())
+		return missingErr
+	}
+	statErr := fmt.Errorf("stat prompts directory %s: %w", path, err)
+	printFail(w, statErr.Error())
+	return statErr
 }
 
 // sourceOriginLabel describes where source's path came from so doctor output

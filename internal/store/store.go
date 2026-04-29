@@ -5,6 +5,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -177,10 +178,16 @@ func prepareSource(source promptsource.Source) (string, bool, error) {
 		}
 	}
 	info, statErr := os.Stat(root)
-	if statErr != nil || !info.IsDir() {
-		if source.Optional {
-			return root, false, nil
+	if statErr != nil {
+		if errors.Is(statErr, fs.ErrNotExist) {
+			if source.Optional {
+				return root, false, nil
+			}
+			return "", false, &PromptsDirMissingError{Path: root}
 		}
+		return "", false, fmt.Errorf("stat prompts directory %s: %w", root, statErr)
+	}
+	if !info.IsDir() {
 		return "", false, &PromptsDirMissingError{Path: root}
 	}
 	return root, true, nil
