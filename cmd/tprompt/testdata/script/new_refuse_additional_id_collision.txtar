@@ -1,0 +1,16 @@
+# new writes only to the primary global dir, but refuses ids that already
+# exist in an additional global dir because that would make the store invalid.
+
+mkdir prompts
+mkdir team-prompts
+! tprompt new alpha --config config.toml
+stderr 'prompt id "alpha" already exists at .*team-prompts/alpha\.md'
+! stdout .
+! exists prompts/alpha.md
+
+-- config.toml --
+prompts_dir = "prompts"
+additional_prompts_dirs = ["team-prompts"]
+
+-- team-prompts/alpha.md --
+Team body.

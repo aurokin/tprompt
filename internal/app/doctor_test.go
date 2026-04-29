@@ -426,3 +426,25 @@ func TestDoctorPromptsDirMissing(t *testing.T) {
 	assertContains(t, lines[4], "picker command")
 	assertContains(t, lines[5], "daemon unreachable")
 }
+
+func TestDoctorMissingAdditionalPromptsDirIsWarning(t *testing.T) {
+	primary := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "missing-additional")
+	fs := &fakeStore{summaries: []store.Summary{}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{
+			PromptsDir:            primary,
+			AdditionalPromptsDirs: []string{missing},
+			SocketPath:            "/tmp/tprompt-test.sock",
+		}, nil
+	}
+
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertContains(t, stdout, "ok   prompts directory exists (scope global, "+primary+") [explicit]")
+	assertContains(t, stdout, "warn prompts directory missing (scope global, "+missing+") [additional]")
+	assertContains(t, stdout, "ok   0 prompts discovered")
+}

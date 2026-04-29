@@ -1,0 +1,15 @@
+# doctor reports missing additional global dirs as warnings, not failures.
+
+mkdir prompts
+tprompt doctor --config config.toml
+stdout 'ok   prompts directory exists \(scope global, .*prompts\) \[explicit\]'
+stdout 'warn prompts directory missing \(scope global, .*missing-team-prompts\) \[additional\]'
+stdout 'ok   1 prompts discovered'
+! stderr .
+
+-- config.toml --
+prompts_dir = "prompts"
+additional_prompts_dirs = ["missing-team-prompts"]
+
+-- prompts/alpha.md --
+Alpha body.

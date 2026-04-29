@@ -2,7 +2,7 @@
 
 mkdir prompts
 tprompt list --config config.toml
-stdout '^bug-hunt  key b \(explicit\)\ncode-review  key c \(explicit\)\nno-frontmatter  key 1 \(auto\)\n$'
+stdout '^bug-hunt  global  key b \(explicit\)\ncode-review  global  key c \(explicit\)\nno-frontmatter  global  key 1 \(auto\)\n$'
 ! stderr .
 
 -- config.toml --

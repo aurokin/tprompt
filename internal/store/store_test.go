@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/hsadler/tprompt/internal/keybind"
+	"github.com/hsadler/tprompt/internal/promptsource"
 )
 
 func TestStoreInterfaceShape(t *testing.T) {
@@ -72,6 +73,7 @@ Go deeper.
 			Key:         "c",
 			KeySource:   KeySourceExplicit,
 			Path:        filepath.Join(dir, "code-review.md"),
+			Scope:       "global",
 		},
 		{
 			ID:          "deep-review",
@@ -80,6 +82,7 @@ Go deeper.
 			Key:         "1",
 			KeySource:   KeySourceAuto,
 			Path:        filepath.Join(dir, "nested", "deep-review.md"),
+			Scope:       "global",
 		},
 	}
 	if diff := cmp.Diff(wantSummaries, summaries); diff != "" {
@@ -525,11 +528,112 @@ func TestFSStoreIncludesOverflowPromptsWithoutAssignedKeys(t *testing.T) {
 	}
 
 	want := []Summary{
-		{ID: "alpha", Key: "1", KeySource: KeySourceAuto, Path: filepath.Join(dir, "alpha.md")},
-		{ID: "bravo", Key: "", KeySource: KeySourceOverflow, Path: filepath.Join(dir, "bravo.md")},
+		{ID: "alpha", Key: "1", KeySource: KeySourceAuto, Path: filepath.Join(dir, "alpha.md"), Scope: "global"},
+		{ID: "bravo", Key: "", KeySource: KeySourceOverflow, Path: filepath.Join(dir, "bravo.md"), Scope: "global"},
 	}
 	if diff := cmp.Diff(want, summaries); diff != "" {
 		t.Fatalf("List() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestMultiSourceStoreConcatenatesOrderedGlobalSources(t *testing.T) {
+	primary := t.TempDir()
+	additional := t.TempDir()
+	writePrompt(t, primary, "bravo.md", "bravo\n")
+	writePrompt(t, additional, "alpha.md", "alpha\n")
+
+	store := NewMultiSource([]promptsource.Source{
+		{Path: primary, Scope: promptsource.ScopeGlobal},
+		{Path: additional, Scope: promptsource.ScopeGlobal, Optional: true},
+	}, nil, []rune("12"))
+
+	summaries, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	want := []Summary{
+		{ID: "alpha", Key: "1", KeySource: KeySourceAuto, Path: filepath.Join(additional, "alpha.md"), Scope: "global"},
+		{ID: "bravo", Key: "2", KeySource: KeySourceAuto, Path: filepath.Join(primary, "bravo.md"), Scope: "global"},
+	}
+	if diff := cmp.Diff(want, summaries); diff != "" {
+		t.Fatalf("List() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestMultiSourceStoreSkipsMissingOptionalSources(t *testing.T) {
+	primary := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "missing")
+	writePrompt(t, primary, "alpha.md", "alpha\n")
+
+	store := NewMultiSource([]promptsource.Source{
+		{Path: primary, Scope: promptsource.ScopeGlobal},
+		{Path: missing, Scope: promptsource.ScopeGlobal, Optional: true},
+	}, nil, []rune("1"))
+
+	summaries, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].ID != "alpha" {
+		t.Fatalf("List() = %#v, want only alpha", summaries)
+	}
+	if _, err := os.Stat(missing); err == nil {
+		t.Fatalf("optional source was unexpectedly created: %s", missing)
+	}
+}
+
+func TestMultiSourceStoreRejectsDuplicateIDsWithinOneSource(t *testing.T) {
+	primary := t.TempDir()
+	additional := t.TempDir()
+	writePrompt(t, primary, "alpha.md", "primary\n")
+	writePrompt(t, additional, filepath.Join("one", "bravo.md"), "one\n")
+	writePrompt(t, additional, filepath.Join("two", "bravo.md"), "two\n")
+
+	store := NewMultiSource([]promptsource.Source{
+		{Path: primary, Scope: promptsource.ScopeGlobal},
+		{Path: additional, Scope: promptsource.ScopeGlobal, Optional: true},
+	}, nil, []rune("12"))
+
+	err := store.Discover()
+	var dupErr *DuplicatePromptIDError
+	if !errors.As(err, &dupErr) {
+		t.Fatalf("want DuplicatePromptIDError, got %T: %v", err, err)
+	}
+	if dupErr.ID != "bravo" {
+		t.Fatalf("ID = %q, want bravo", dupErr.ID)
+	}
+	wantPaths := sortedStrings([]string{
+		filepath.Join(additional, "one", "bravo.md"),
+		filepath.Join(additional, "two", "bravo.md"),
+	})
+	if diff := cmp.Diff(wantPaths, sortedStrings(dupErr.Paths)); diff != "" {
+		t.Fatalf("Paths mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestMultiSourceStoreRejectsCrossGlobalDuplicateIDs(t *testing.T) {
+	primary := t.TempDir()
+	additional := t.TempDir()
+	writePrompt(t, primary, "alpha.md", "primary\n")
+	writePrompt(t, additional, "alpha.md", "additional\n")
+
+	store := NewMultiSource([]promptsource.Source{
+		{Path: primary, Scope: promptsource.ScopeGlobal},
+		{Path: additional, Scope: promptsource.ScopeGlobal, Optional: true},
+	}, nil, []rune("1"))
+
+	err := store.Discover()
+	var dupErr *DuplicatePromptIDError
+	if !errors.As(err, &dupErr) {
+		t.Fatalf("want DuplicatePromptIDError, got %T: %v", err, err)
+	}
+	if dupErr.ID != "alpha" {
+		t.Fatalf("ID = %q, want alpha", dupErr.ID)
+	}
+	wantPaths := sortedStrings([]string{filepath.Join(additional, "alpha.md"), filepath.Join(primary, "alpha.md")})
+	if diff := cmp.Diff(wantPaths, dupErr.Paths); diff != "" {
+		t.Fatalf("Paths mismatch (-want +got):\n%s", diff)
 	}
 }
 

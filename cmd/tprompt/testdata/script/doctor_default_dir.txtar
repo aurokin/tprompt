@@ -4,7 +4,7 @@
 env HOME=$WORK/home
 
 tprompt doctor
-stdout 'ok   prompts directory exists \(.*home/\.config/tprompt/prompts\) \[default\]'
+stdout 'ok   prompts directory exists \(scope global, .*home/\.config/tprompt/prompts\) \[default\]'
 stdout 'ok   0 prompts discovered'
 
 exists $WORK/home/.config/tprompt/prompts

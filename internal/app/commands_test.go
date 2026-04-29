@@ -226,9 +226,9 @@ func TestListPrintsIDsAlphabetically(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := strings.Join([]string{
-		"alpha  key 1 (auto)",
-		"beta  key b (explicit)",
-		"gamma  key none (overflow, not on board)",
+		"alpha  global  key 1 (auto)",
+		"beta  global  key b (explicit)",
+		"gamma  global  key none (overflow, not on board)",
 		"",
 	}, "\n")
 	if stdout != want {
@@ -337,6 +337,7 @@ func TestShowFullMetadata(t *testing.T) {
 	want := strings.Join([]string{
 		"ID: code-review",
 		"Source: /prompts/code-review.md",
+		"Scope: global",
 		"Title: Code Review",
 		"Description: Deep review prompt",
 		"Tags: review, code",
@@ -368,7 +369,7 @@ func TestShowMinimalMetadata(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	want := "ID: bare\nSource: /prompts/bare.md\nKey: none (overflow, not on board)\n\nJust a body.\n"
+	want := "ID: bare\nSource: /prompts/bare.md\nScope: global\nKey: none (overflow, not on board)\n\nJust a body.\n"
 	if stdout != want {
 		t.Fatalf("stdout mismatch\ngot:\n%s\nwant:\n%s", stdout, want)
 	}
@@ -392,7 +393,7 @@ func TestShowMinimalWithAutoAssignedKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := "ID: bare\nSource: /prompts/bare.md\nKey: b (auto)\n\nJust a body.\n"
+	want := "ID: bare\nSource: /prompts/bare.md\nScope: global\nKey: b (auto)\n\nJust a body.\n"
 	if stdout != want {
 		t.Fatalf("stdout mismatch\ngot:\n%s\nwant:\n%s", stdout, want)
 	}

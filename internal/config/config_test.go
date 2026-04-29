@@ -88,6 +88,7 @@ func TestDefaultReservedKeysUseRoleToKeyMapping(t *testing.T) {
 func TestConfigDecodesDocumentedExampleShape(t *testing.T) {
 	const configTOML = `
 prompts_dir = "~/.config/tprompt/prompts"
+additional_prompts_dirs = ["~/team-prompts", "/srv/shared-prompts"]
 default_mode = "paste"
 default_enter = false
 socket_path = "~/.local/state/tprompt/daemon.sock"
@@ -116,6 +117,10 @@ select = "Enter"
 
 	if got.PromptsDir != "~/.config/tprompt/prompts" {
 		t.Fatalf("PromptsDir = %q", got.PromptsDir)
+	}
+	wantAdditional := []string{"~/team-prompts", "/srv/shared-prompts"}
+	if !stringSliceEqual(got.AdditionalPromptsDirs, wantAdditional) {
+		t.Fatalf("AdditionalPromptsDirs = %v, want %v", got.AdditionalPromptsDirs, wantAdditional)
 	}
 	if got.DefaultMode != "paste" {
 		t.Fatalf("DefaultMode = %q", got.DefaultMode)
@@ -251,6 +256,7 @@ func TestNormalizeExpandsHomePaths(t *testing.T) {
 
 	cfg := Default()
 	cfg.PromptsDir = promptsDir
+	cfg.AdditionalPromptsDirs = []string{"~/team-prompts", filepath.Join(dir, "shared")}
 	r, err := Normalize(cfg, "")
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
@@ -260,6 +266,15 @@ func TestNormalizeExpandsHomePaths(t *testing.T) {
 	}
 	if strings.Contains(r.LogPath, "~") {
 		t.Fatalf("LogPath still contains ~: %q", r.LogPath)
+	}
+	if len(r.AdditionalPromptsDirs) != 2 {
+		t.Fatalf("AdditionalPromptsDirs len = %d, want 2", len(r.AdditionalPromptsDirs))
+	}
+	if strings.Contains(r.AdditionalPromptsDirs[0], "~") {
+		t.Fatalf("AdditionalPromptsDirs[0] still contains ~: %q", r.AdditionalPromptsDirs[0])
+	}
+	if r.AdditionalPromptsDirs[1] != filepath.Join(dir, "shared") {
+		t.Fatalf("AdditionalPromptsDirs[1] = %q", r.AdditionalPromptsDirs[1])
 	}
 }
 
