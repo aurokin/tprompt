@@ -1,5 +1,5 @@
 // Package sanitize implements the off / safe / strict content sanitizer
-// (DECISIONS.md §23, docs/implementation/sanitization.md).
+// (DECISIONS.md §24, docs/implementation/sanitization.md).
 package sanitize
 
 import "fmt"

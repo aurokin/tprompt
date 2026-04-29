@@ -1,8 +1,10 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"strings"
@@ -61,7 +63,12 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 			if err != nil {
 				return nil, err
 			}
-			return store.NewMultiSource(sources, cfg.ReservedPrintable, cfg.KeybindPool), nil
+			return store.NewMultiSourceWithPolicy(
+				sources,
+				store.ConflictPolicy(activePromptPriority(cfg)),
+				cfg.ReservedPrintable,
+				cfg.KeybindPool,
+			), nil
 		},
 		NewTmux: func() (tmux.Adapter, error) {
 			return tmux.New(tmux.NewExecRunner("")), nil
@@ -181,7 +188,25 @@ func promptSources(cfg config.Resolved) ([]promptsource.Source, error) {
 	if err != nil {
 		home = ""
 	}
-	return promptsource.Resolve(cfg, lookupEnv, home)
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = ""
+	}
+	return promptsource.Resolve(cfg, lookupEnv, home, cwd, osStatSource)
+}
+
+func osStatSource(path string) (promptsource.PathKind, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return promptsource.PathMissing, nil
+		}
+		return promptsource.PathMissing, err
+	}
+	if info.IsDir() {
+		return promptsource.PathDir, nil
+	}
+	return promptsource.PathFile, nil
 }
 
 // newClipboardReader builds the clipboard.Reader used by both `Deps.NewClip`

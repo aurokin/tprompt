@@ -1,13 +1,11 @@
 // Package promptsource resolves the ordered list of prompt sources used by
-// the prompt store. Resolve is a pure function over (config, env getter, home
-// directory) so it can be exercised by table-driven tests without touching
-// the filesystem.
-//
-// Later milestone slices extend Resolve with a walk-up project overlay; this
-// slice owns the primary global source plus additional global folders.
+// the prompt store. Resolve is a pure function over config, environment,
+// cwd/home, and an injected stat predicate so it can be exercised by
+// table-driven tests without touching the filesystem.
 package promptsource
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -23,15 +21,31 @@ func (e *UnresolvedDefaultDirError) Error() string {
 	return "promptsource: cannot resolve default prompts directory: XDG_CONFIG_HOME unset and home directory unknown"
 }
 
-// Scope identifies which tier a source belongs to. Today only ScopeGlobal is
-// produced; ScopeProject lands with the project-overlay slice.
+// Scope identifies which tier a source belongs to.
 type Scope string
 
 const (
 	// ScopeGlobal is the user-level prompt store (default or explicit
 	// prompts_dir, plus future additional_prompts_dirs).
 	ScopeGlobal Scope = "global"
+	// ScopeProject is the nearest project-local tprompt/ overlay discovered
+	// while walking up from cwd inside a git tree.
+	ScopeProject Scope = "project"
 )
+
+// PathKind is the minimal filesystem shape Resolve needs from its injected
+// stat predicate.
+type PathKind int
+
+const (
+	PathMissing PathKind = iota
+	PathFile
+	PathDir
+)
+
+// StatFunc reports the shape of a path. Missing paths should return
+// PathMissing with nil error; other stat failures should return an error.
+type StatFunc func(path string) (PathKind, error)
 
 // Source describes one resolved prompt directory. AutoCreateOnAccess is true
 // only when the path was filled in by default-resolution; explicit user
@@ -46,8 +60,9 @@ type Source struct {
 }
 
 // Resolve returns the ordered list of prompt sources for cfg. getenv reads
-// environment variables (typically os.Getenv); homeDir is the absolute path
-// of the user's home directory (caller-provided so the function stays pure).
+// environment variables (typically os.Getenv); homeDir and cwd are
+// caller-provided so the function stays pure. stat is used only for project
+// overlay discovery; nil stat or empty cwd disables project discovery.
 //
 // The result starts with the primary global directory, followed by each
 // configured additional global directory:
@@ -60,7 +75,9 @@ type Source struct {
 //   - cfg.PromptsDir empty + neither: error.
 //   - cfg.AdditionalPromptsDirs: appended in order, AutoCreateOnAccess=false,
 //     Optional=true.
-func Resolve(cfg config.Resolved, getenv func(string) string, homeDir string) ([]Source, error) {
+//   - Project overlay: append the nearest tprompt/ source discovered while
+//     walking up from cwd before .git, home, or filesystem root.
+func Resolve(cfg config.Resolved, getenv func(string) string, homeDir, cwd string, stat StatFunc) ([]Source, error) {
 	primary, err := primarySource(cfg, getenv, homeDir)
 	if err != nil {
 		return nil, err
@@ -76,6 +93,13 @@ func Resolve(cfg config.Resolved, getenv func(string) string, homeDir string) ([
 			AutoCreateOnAccess: false,
 			Optional:           true,
 		})
+	}
+	project, ok, err := projectSource(cwd, homeDir, stat)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		sources = append(sources, project)
 	}
 	return sources, nil
 }
@@ -108,4 +132,81 @@ func primarySource(cfg config.Resolved, getenv func(string) string, homeDir stri
 	}
 
 	return Source{}, &UnresolvedDefaultDirError{}
+}
+
+func projectSource(cwd, homeDir string, stat StatFunc) (Source, bool, error) {
+	if cwd == "" || stat == nil {
+		return Source{}, false, nil
+	}
+	current, err := filepath.Abs(cwd)
+	if err != nil {
+		return Source{}, false, fmt.Errorf("resolve cwd: %w", err)
+	}
+	home := ""
+	if homeDir != "" {
+		home, _ = filepath.Abs(homeDir)
+	}
+
+	for {
+		if samePath(current, home) || isRoot(current) {
+			return Source{}, false, nil
+		}
+
+		promptDir := filepath.Join(current, "tprompt")
+		kind, err := stat(promptDir)
+		if err != nil {
+			return Source{}, false, err
+		}
+		if kind == PathDir {
+			if ok, err := hasGitAncestor(current, home, stat); err != nil {
+				return Source{}, false, err
+			} else if ok {
+				return Source{Path: promptDir, Scope: ScopeProject}, true, nil
+			}
+			return Source{}, false, nil
+		}
+
+		gitKind, err := stat(filepath.Join(current, ".git"))
+		if err != nil {
+			return Source{}, false, err
+		}
+		if gitKind == PathDir || gitKind == PathFile {
+			return Source{}, false, nil
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			return Source{}, false, nil
+		}
+		current = parent
+	}
+}
+
+func hasGitAncestor(start, home string, stat StatFunc) (bool, error) {
+	current := start
+	for {
+		if samePath(current, home) || isRoot(current) {
+			return false, nil
+		}
+		kind, err := stat(filepath.Join(current, ".git"))
+		if err != nil {
+			return false, err
+		}
+		if kind == PathDir || kind == PathFile {
+			return true, nil
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return false, nil
+		}
+		current = parent
+	}
+}
+
+func samePath(a, b string) bool {
+	return a != "" && b != "" && filepath.Clean(a) == filepath.Clean(b)
+}
+
+func isRoot(path string) bool {
+	return filepath.Dir(path) == path
 }

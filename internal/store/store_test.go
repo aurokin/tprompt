@@ -660,6 +660,95 @@ func TestMultiSourceStoreRejectsCrossGlobalDuplicateIDs(t *testing.T) {
 	}
 }
 
+func TestMultiSourceStoreShadowsCrossTierDuplicateByPolicy(t *testing.T) {
+	tests := []struct {
+		name        string
+		policy      ConflictPolicy
+		wantWinner  string
+		wantShadow  string
+		wantScope   string
+		shadowScope string
+	}{
+		{
+			name:        "global wins",
+			policy:      ConflictPolicyGlobal,
+			wantWinner:  "global body\n",
+			wantShadow:  "project body\n",
+			wantScope:   "global",
+			shadowScope: "project",
+		},
+		{
+			name:        "project wins",
+			policy:      ConflictPolicyProject,
+			wantWinner:  "project body\n",
+			wantShadow:  "global body\n",
+			wantScope:   "project",
+			shadowScope: "global",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			primary := t.TempDir()
+			project := t.TempDir()
+			writePrompt(t, primary, "alpha.md", "---\nkey: a\n---\nglobal body\n")
+			writePrompt(t, project, "alpha.md", "---\nkey: a\n---\nproject body\n")
+
+			store := NewMultiSourceWithPolicy([]promptsource.Source{
+				{Path: primary, Scope: promptsource.ScopeGlobal},
+				{Path: project, Scope: promptsource.ScopeProject},
+			}, tc.policy, nil, []rune("12"))
+
+			summaries, err := store.List()
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			if len(summaries) != 2 {
+				t.Fatalf("len(List()) = %d, want 2: %#v", len(summaries), summaries)
+			}
+
+			var winner, shadow Summary
+			for _, summary := range summaries {
+				if summary.Shadowed {
+					shadow = summary
+				} else {
+					winner = summary
+				}
+			}
+			if winner.Scope != tc.wantScope {
+				t.Fatalf("winner scope = %q, want %q", winner.Scope, tc.wantScope)
+			}
+			if shadow.Scope != tc.shadowScope || !shadow.Shadowed {
+				t.Fatalf("shadow = %#v, want scope %q shadowed", shadow, tc.shadowScope)
+			}
+			if winner.ShadowPath == "" || shadow.ShadowedBy == "" {
+				t.Fatalf("missing shadow links: winner=%#v shadow=%#v", winner, shadow)
+			}
+			if winner.Key != "a" || winner.KeySource != KeySourceExplicit {
+				t.Fatalf("winner key = %q/%q, want explicit a", winner.Key, winner.KeySource)
+			}
+			if shadow.Key != "" || shadow.KeySource != KeySourceShadowed {
+				t.Fatalf("shadow key = %q/%q, want shadowed without key", shadow.Key, shadow.KeySource)
+			}
+
+			resolved, err := store.Resolve("alpha")
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if resolved.Body != tc.wantWinner {
+				t.Fatalf("Resolve body = %q, want %q", resolved.Body, tc.wantWinner)
+			}
+			resolvedShadow, err := store.ResolveScoped("alpha", tc.shadowScope)
+			if err != nil {
+				t.Fatalf("ResolveScoped shadow: %v", err)
+			}
+			if resolvedShadow.Body != tc.wantShadow {
+				t.Fatalf("ResolveScoped body = %q, want %q", resolvedShadow.Body, tc.wantShadow)
+			}
+		})
+	}
+}
+
 func TestFSStoreClearsCachedPromptsWhenRediscoveryFails(t *testing.T) {
 	dir := t.TempDir()
 	writePrompt(t, dir, "alpha.md", "body\n")

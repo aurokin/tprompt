@@ -8,10 +8,16 @@ tracker; planned work lives in Linear.
 - Prompt files are markdown files under the resolved prompt directory
   (`prompts_dir` when set, otherwise the default
   `$XDG_CONFIG_HOME/tprompt/prompts` with `~/.config/tprompt/prompts` as a
-  fallback; the default directory is auto-created on first access).
+  fallback; the default directory is auto-created on first access), any
+  configured `additional_prompts_dirs`, and an active project `tprompt/`
+  overlay discovered from the current working directory.
 - Prompt IDs are derived from the filename stem only.
 - Directories are organizational only and do not namespace IDs.
-- Duplicate filename-stem IDs are invalid and must fail with clear conflicting paths.
+- Duplicate filename-stem IDs within the same tier are invalid and must fail
+  with clear conflicting paths.
+- Cross-tier global/project ID collisions are resolved by `prompt_priority`
+  (`global` by default). The losing prompt is shadowed, remains visible in
+  `list`, and remains searchable in the TUI.
 - Optional YAML frontmatter may define metadata such as `title`,
   `description`, `tags`, delivery defaults, and `key`.
 - Frontmatter is metadata only. Delivery injects the markdown body, not the frontmatter.

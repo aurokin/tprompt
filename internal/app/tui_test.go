@@ -172,6 +172,35 @@ func TestTUI_BuildsStateFromStore(t *testing.T) {
 	}
 }
 
+func TestTUI_StateKeepsShadowedPromptsSearchOnly(t *testing.T) {
+	fs := &fakeStore{
+		summaries: []store.Summary{
+			{ID: "alpha", Scope: "global", Key: "1"},
+			{ID: "alpha", Scope: "project", Shadowed: true, KeySource: store.KeySourceShadowed},
+		},
+	}
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, fs, rend)
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+
+	if len(rend.state.Rows) != 2 {
+		t.Fatalf("want clipboard + one board row, got %+v", rend.state.Rows)
+	}
+	if rend.state.Rows[1].PromptID != "alpha" || rend.state.Rows[1].Scope != "global" {
+		t.Fatalf("board row = %+v, want global alpha", rend.state.Rows[1])
+	}
+	if len(rend.state.Overflow) != 1 {
+		t.Fatalf("len(Overflow) = %d, want 1", len(rend.state.Overflow))
+	}
+	if got := rend.state.Overflow[0]; got.PromptID != "alpha" || got.Scope != "project" || !got.Shadowed {
+		t.Fatalf("overflow row = %+v, want shadowed project alpha", got)
+	}
+}
+
 func TestTUI_StateOmitsClipboardRowWhenKeyDisabled(t *testing.T) {
 	fs := &fakeStore{
 		summaries: []store.Summary{

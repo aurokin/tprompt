@@ -6,13 +6,11 @@ import (
 	"github.com/hsadler/tprompt/internal/promptsource"
 )
 
-// ConflictPolicy is intentionally small in this slice: AUR-147 has only the
-// global tier, where duplicate ids across sources are configuration errors.
-// AUR-148 extends this policy for project/global winner selection.
 type ConflictPolicy string
 
 const (
-	ConflictPolicyGlobalOnly ConflictPolicy = "global-only"
+	ConflictPolicyGlobal  ConflictPolicy = "global"
+	ConflictPolicyProject ConflictPolicy = "project"
 )
 
 type sourcePrompts struct {
@@ -25,7 +23,10 @@ type conflictResolution struct {
 	Shadows []discoveredPrompt
 }
 
-func resolveConflicts(sources []sourcePrompts, _ ConflictPolicy) (conflictResolution, error) {
+func resolveConflicts(sources []sourcePrompts, policy ConflictPolicy) (conflictResolution, error) {
+	if policy == "" {
+		policy = ConflictPolicyGlobal
+	}
 	byID := make(map[string][]discoveredPrompt)
 	for _, source := range sources {
 		for _, prompt := range source.Prompts {
@@ -35,29 +36,95 @@ func resolveConflicts(sources []sourcePrompts, _ ConflictPolicy) (conflictResolu
 
 	ids := make([]string, 0, len(byID))
 	for id, prompts := range byID {
-		if len(prompts) > 1 {
+		if duplicateWithinTier(prompts) {
 			ids = append(ids, id)
 		}
 	}
 	sort.Strings(ids)
 	if len(ids) > 0 {
 		id := ids[0]
-		paths := make([]string, 0, len(byID[id]))
-		for _, prompt := range byID[id] {
-			paths = append(paths, prompt.prompt.Path)
-		}
-		sort.Strings(paths)
+		paths := duplicateTierPaths(byID[id])
 		return conflictResolution{}, &DuplicatePromptIDError{ID: id, Paths: paths}
 	}
 
 	winners := make(map[string]discoveredPrompt, len(byID))
+	var shadows []discoveredPrompt
 	for id, prompts := range byID {
 		if len(prompts) == 0 {
 			continue
 		}
-		winners[id] = prompts[0]
+		winner, losers := chooseWinner(prompts, policy)
+		winners[id] = winner
+		shadows = append(shadows, losers...)
 	}
-	return conflictResolution{Winners: winners}, nil
+	return conflictResolution{Winners: winners, Shadows: shadows}, nil
+}
+
+func duplicateTierPaths(prompts []discoveredPrompt) []string {
+	pathsByScope := map[promptsource.Scope][]string{}
+	for _, prompt := range prompts {
+		scope := promptsource.Scope(prompt.prompt.Scope)
+		if scope == "" {
+			scope = promptsource.ScopeGlobal
+		}
+		pathsByScope[scope] = append(pathsByScope[scope], prompt.prompt.Path)
+	}
+	scopes := make([]string, 0, len(pathsByScope))
+	for scope, paths := range pathsByScope {
+		if len(paths) > 1 {
+			scopes = append(scopes, string(scope))
+		}
+	}
+	sort.Strings(scopes)
+	if len(scopes) == 0 {
+		return nil
+	}
+	paths := pathsByScope[promptsource.Scope(scopes[0])]
+	sort.Strings(paths)
+	return paths
+}
+
+func duplicateWithinTier(prompts []discoveredPrompt) bool {
+	countByScope := map[promptsource.Scope]int{}
+	for _, prompt := range prompts {
+		scope := promptsource.Scope(prompt.prompt.Scope)
+		if scope == "" {
+			scope = promptsource.ScopeGlobal
+		}
+		countByScope[scope]++
+		if countByScope[scope] > 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func chooseWinner(prompts []discoveredPrompt, policy ConflictPolicy) (discoveredPrompt, []discoveredPrompt) {
+	if len(prompts) == 1 {
+		return prompts[0], nil
+	}
+
+	wantScope := promptsource.ScopeGlobal
+	if policy == ConflictPolicyProject {
+		wantScope = promptsource.ScopeProject
+	}
+
+	winnerIdx := 0
+	for i, prompt := range prompts {
+		if promptsource.Scope(prompt.prompt.Scope) == wantScope {
+			winnerIdx = i
+			break
+		}
+	}
+
+	losers := make([]discoveredPrompt, 0, len(prompts)-1)
+	for i, prompt := range prompts {
+		if i == winnerIdx {
+			continue
+		}
+		losers = append(losers, prompt)
+	}
+	return prompts[winnerIdx], losers
 }
 
 func sortedWinnerEntries(winners map[string]discoveredPrompt) []discoveredPrompt {

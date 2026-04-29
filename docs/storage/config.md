@@ -14,6 +14,8 @@ Example:
 
 ```toml
 prompts_dir = "~/.config/tprompt/prompts"
+additional_prompts_dirs = []
+prompt_priority = "global"             # "global" | "project"
 default_mode = "paste"
 default_enter = false
 socket_path = "~/.local/state/tprompt/daemon.sock"
@@ -51,6 +53,8 @@ select    = "Enter"
 
 - prompts directory (defaults to `$XDG_CONFIG_HOME/tprompt/prompts`,
   falling back to `~/.config/tprompt/prompts`; auto-created on first access)
+- additional global prompt directories
+- prompt priority policy (`global` by default; `project` opt-in)
 - picker command (affects `tprompt pick`; does not affect the built-in TUI)
 - daemon auto-start for TUI flows
 - verification timeout
@@ -77,6 +81,27 @@ manual setup.
 When `prompts_dir` is set explicitly, the path is used verbatim and is **not**
 auto-created — a missing explicit directory remains a hard error
 (`prompts directory missing: <path>`).
+
+`additional_prompts_dirs` entries are appended after the primary global source.
+Missing additional directories are skipped at runtime and reported as doctor
+warnings. Duplicate prompt IDs within the global tier are hard errors.
+
+## Project overlay
+
+From the current working directory, tprompt walks up looking for the closest
+project marker. A `tprompt/` directory inside a git tree activates a project
+source. If `.git` is reached before any `tprompt/`, no project overlay is
+active. The walk stops at the user's home directory or filesystem root so a
+home-level `~/tprompt` folder is never treated as project scope.
+
+Project sources are appended after global sources. When a prompt ID appears in
+both global and project tiers, `prompt_priority` decides the winner:
+
+- `global` (default): the global prompt wins and the project prompt is shadowed.
+- `project`: the project prompt wins and the global prompt is shadowed.
+
+Shadowed prompts remain visible in `tprompt list` and searchable in the TUI,
+but they are excluded from automatic board keybind assignment.
 
 ## Resolution order
 
@@ -146,6 +171,7 @@ The tool fails clearly if:
 
 - prompts directory is set explicitly but missing on disk
 - default mode is invalid
+- `prompt_priority` is not `global` or `project`
 - socket path is invalid/unusable
 - `sanitize` value is not `off`/`safe`/`strict`
 - `clipboard_read_command` is set but unparseable as an argv

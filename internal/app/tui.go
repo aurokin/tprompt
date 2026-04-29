@@ -216,11 +216,13 @@ func buildTUIState(summaries []store.Summary, cfg config.Resolved) tui.State {
 	for _, sum := range summaries {
 		row := tui.Row{
 			PromptID:    sum.ID,
+			Scope:       promptScope(sum),
 			Title:       sum.Title,
 			Description: sum.Description,
 			Tags:        sum.Tags,
+			Shadowed:    sum.Shadowed,
 		}
-		if sum.Key != "" {
+		if sum.Key != "" && !sum.Shadowed {
 			row.Key = []rune(sum.Key)[0]
 			board = append(board, row)
 			continue

@@ -1,6 +1,6 @@
 // Package clipboard reads the host clipboard, auto-detecting the right tool
 // (pbpaste / wl-paste / xclip / xsel) with an optional user override
-// (DECISIONS.md §22).
+// (DECISIONS.md §23).
 package clipboard
 
 import (

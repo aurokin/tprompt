@@ -23,6 +23,10 @@ type Submitter interface {
 	Submit(result tui.Result) error
 }
 
+type scopedStore interface {
+	ResolveScoped(id, scope string) (store.Prompt, error)
+}
+
 // BodyTooLargeError reports that a prompt or clipboard body exceeds the
 // configured max_paste_bytes ceiling at submission time. Distinct from
 // tmux.OversizeError, which fires at delivery time and maps to ExitDelivery.
@@ -55,7 +59,7 @@ type submitter struct {
 func (s *submitter) Submit(result tui.Result) error {
 	switch result.Action {
 	case tui.ActionPrompt:
-		return s.submitPrompt(result.PromptID)
+		return s.submitPrompt(result.PromptID, result.Scope)
 	case tui.ActionClipboard:
 		return s.submitClipboard(result.ClipboardBody)
 	case tui.ActionCancel:
@@ -65,8 +69,20 @@ func (s *submitter) Submit(result tui.Result) error {
 	}
 }
 
-func (s *submitter) submitPrompt(id string) error {
-	prompt, err := s.prompts.Resolve(id)
+func (s *submitter) submitPrompt(id, scope string) error {
+	var (
+		prompt store.Prompt
+		err    error
+	)
+	if scope != "" {
+		if scoped, ok := s.prompts.(scopedStore); ok {
+			prompt, err = scoped.ResolveScoped(id, scope)
+		} else {
+			prompt, err = s.prompts.Resolve(id)
+		}
+	} else {
+		prompt, err = s.prompts.Resolve(id)
+	}
 	if err != nil {
 		return err
 	}
