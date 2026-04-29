@@ -260,6 +260,7 @@ func TestNew_ProjectWritesAtGitRootAndAutoCreatesDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("abs: %v", err)
 	}
+	abs = mustEvalSymlinks(t, abs)
 	if got := strings.TrimRight(stdout, "\n"); got != abs {
 		t.Errorf("stdout = %q, want %q", got, abs)
 	}
@@ -315,8 +316,9 @@ func TestNew_ProjectRefusesExistingProjectFile(t *testing.T) {
 	if !errors.As(err, &existsErr) {
 		t.Fatalf("err = %T %v, want *PromptFileExistsError", err, err)
 	}
-	if existsErr.Path != target {
-		t.Errorf("Path = %q, want %q", existsErr.Path, target)
+	wantPath := mustEvalSymlinks(t, target)
+	if existsErr.Path != wantPath {
+		t.Errorf("Path = %q, want %q", existsErr.Path, wantPath)
 	}
 	body, err := os.ReadFile(target)
 	if err != nil {
@@ -421,4 +423,13 @@ func newCmdDepsWithAdditional(t *testing.T, promptsDir string, additional []stri
 		}, nil
 	}
 	return deps
+}
+
+func mustEvalSymlinks(t *testing.T, path string) string {
+	t.Helper()
+	evaluated, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", path, err)
+	}
+	return evaluated
 }

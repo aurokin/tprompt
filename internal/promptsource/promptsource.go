@@ -111,6 +111,10 @@ func ProjectRoot(cwd string, stat func(string) (os.FileInfo, error)) (string, er
 	if err != nil {
 		return "", fmt.Errorf("resolve current directory: %w", err)
 	}
+	start, err = filepath.EvalSymlinks(start)
+	if err != nil {
+		return "", fmt.Errorf("resolve current directory symlinks: %w", err)
+	}
 	dir := start
 	for {
 		if _, err := stat(filepath.Join(dir, ".git")); err == nil {

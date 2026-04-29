@@ -168,8 +168,9 @@ func TestProjectRootFindsGitRootFromNestedDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProjectRoot: %v", err)
 	}
-	if got != root {
-		t.Fatalf("ProjectRoot = %q, want %q", got, root)
+	want := mustEvalSymlinks(t, root)
+	if got != want {
+		t.Fatalf("ProjectRoot = %q, want %q", got, want)
 	}
 }
 
@@ -185,8 +186,37 @@ func TestProjectRootAcceptsGitFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProjectRoot: %v", err)
 	}
-	if got != root {
-		t.Fatalf("ProjectRoot = %q, want %q", got, root)
+	want := mustEvalSymlinks(t, root)
+	if got != want {
+		t.Fatalf("ProjectRoot = %q, want %q", got, want)
+	}
+}
+
+func TestProjectRootResolvesSymlinkedCWD(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	realNested := filepath.Join(root, "cmd", "tool")
+	if err := os.MkdirAll(realNested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	linkParent := t.TempDir()
+	linkNested := filepath.Join(linkParent, "tool-link")
+	if err := os.Symlink(realNested, linkNested); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	got, err := ProjectRoot(linkNested, os.Stat)
+	if err != nil {
+		t.Fatalf("ProjectRoot: %v", err)
+	}
+	want := mustEvalSymlinks(t, root)
+	if got != want {
+		t.Fatalf("ProjectRoot = %q, want %q", got, want)
 	}
 }
 
@@ -199,9 +229,19 @@ func TestProjectRootOutsideGitTree(t *testing.T) {
 	if !errors.As(err, &notFound) {
 		t.Fatalf("ProjectRoot error = %T %v, want *ProjectRootNotFoundError", err, err)
 	}
-	if notFound.CWD != cwd {
-		t.Fatalf("ProjectRootNotFoundError.CWD = %q, want %q", notFound.CWD, cwd)
+	want := mustEvalSymlinks(t, cwd)
+	if notFound.CWD != want {
+		t.Fatalf("ProjectRootNotFoundError.CWD = %q, want %q", notFound.CWD, want)
 	}
+}
+
+func mustEvalSymlinks(t *testing.T, path string) string {
+	t.Helper()
+	evaluated, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", path, err)
+	}
+	return evaluated
 }
 
 // mapGetenv returns a getenv-like func backed by m. A nil m yields a nil
