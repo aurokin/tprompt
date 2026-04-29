@@ -130,7 +130,7 @@ func TestResolveTable(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := Resolve(tc.cfg, mapGetenv(tc.env), tc.homeDir)
+			got, err := Resolve(tc.cfg, mapGetenv(tc.env), tc.homeDir, "", nil)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("Resolve: want error, got nil (sources=%v)", got)
@@ -151,6 +151,86 @@ func TestResolveTable(t *testing.T) {
 	}
 }
 
+func TestResolveProjectDiscovery(t *testing.T) {
+	t.Parallel()
+
+	const (
+		home    = "/users/jane"
+		global  = "/global/prompts"
+		gitRoot = "/users/jane/work/repo"
+	)
+
+	tests := []struct {
+		name  string
+		cwd   string
+		paths map[string]PathKind
+		want  []Source
+	}{
+		{
+			name: "project source activates from subdirectory",
+			cwd:  filepath.Join(gitRoot, "cmd", "tool"),
+			paths: map[string]PathKind{
+				filepath.Join(gitRoot, ".git"):    PathDir,
+				filepath.Join(gitRoot, "tprompt"): PathDir,
+			},
+			want: []Source{
+				{Path: global, Scope: ScopeGlobal},
+				{Path: filepath.Join(gitRoot, "tprompt"), Scope: ScopeProject},
+			},
+		},
+		{
+			name: "git marker before tprompt means no overlay",
+			cwd:  filepath.Join(gitRoot, "cmd"),
+			paths: map[string]PathKind{
+				filepath.Join(gitRoot, ".git"): PathDir,
+			},
+			want: []Source{{Path: global, Scope: ScopeGlobal}},
+		},
+		{
+			name: "tprompt outside git tree is ignored",
+			cwd:  "/tmp/scratch/src",
+			paths: map[string]PathKind{
+				filepath.Join("/tmp/scratch", "tprompt"): PathDir,
+			},
+			want: []Source{{Path: global, Scope: ScopeGlobal}},
+		},
+		{
+			name: "home bound ignores home tprompt",
+			cwd:  filepath.Join(home, "scratch"),
+			paths: map[string]PathKind{
+				filepath.Join(home, "tprompt"): PathDir,
+				filepath.Join(home, ".git"):    PathDir,
+			},
+			want: []Source{{Path: global, Scope: ScopeGlobal}},
+		},
+		{
+			name: "git file worktree marker counts as git tree",
+			cwd:  filepath.Join(gitRoot, "pkg"),
+			paths: map[string]PathKind{
+				filepath.Join(gitRoot, ".git"):    PathFile,
+				filepath.Join(gitRoot, "tprompt"): PathDir,
+			},
+			want: []Source{
+				{Path: global, Scope: ScopeGlobal},
+				{Path: filepath.Join(gitRoot, "tprompt"), Scope: ScopeProject},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Resolve(config.Resolved{PromptsDir: global}, nil, home, tc.cwd, mapStat(tc.paths))
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Fatalf("Resolve mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 // mapGetenv returns a getenv-like func backed by m. A nil m yields a nil
 // function so callers can verify Resolve handles a missing env getter.
 func mapGetenv(m map[string]string) func(string) string {
@@ -158,4 +238,13 @@ func mapGetenv(m map[string]string) func(string) string {
 		return nil
 	}
 	return func(k string) string { return m[k] }
+}
+
+func mapStat(paths map[string]PathKind) StatFunc {
+	return func(path string) (PathKind, error) {
+		if kind, ok := paths[filepath.Clean(path)]; ok {
+			return kind, nil
+		}
+		return PathMissing, nil
+	}
 }

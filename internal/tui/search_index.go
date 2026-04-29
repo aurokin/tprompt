@@ -94,7 +94,12 @@ func newSearchIndex(rows []Row, overflow []Row, clipRow Row) *SearchIndex {
 		nonClip = append(nonClip, i)
 	}
 	sort.Slice(nonClip, func(a, b int) bool {
-		return all[nonClip[a]].PromptID < all[nonClip[b]].PromptID
+		left := all[nonClip[a]]
+		right := all[nonClip[b]]
+		if left.PromptID != right.PromptID {
+			return left.PromptID < right.PromptID
+		}
+		return left.Scope < right.Scope
 	})
 	idx.alphabeticalOrder = nonClip
 
@@ -154,18 +159,25 @@ func (s *SearchIndex) ranked(q string) []MatchedRow {
 	for idx, rank := range ranks {
 		row := s.rows[idx]
 		out = append(out, MatchedRow{Row: row, Score: rank.score})
-		priorities[row.PromptID] = rank.bestPriority
+		priorities[rowIdentity(row)] = rank.bestPriority
 	}
 	sort.Slice(out, func(a, b int) bool {
-		priorityA := priorities[out[a].Row.PromptID]
-		priorityB := priorities[out[b].Row.PromptID]
+		priorityA := priorities[rowIdentity(out[a].Row)]
+		priorityB := priorities[rowIdentity(out[b].Row)]
 		if priorityA != priorityB {
 			return priorityA < priorityB
 		}
 		if out[a].Score != out[b].Score {
 			return out[a].Score > out[b].Score
 		}
-		return out[a].Row.PromptID < out[b].Row.PromptID
+		if out[a].Row.PromptID != out[b].Row.PromptID {
+			return out[a].Row.PromptID < out[b].Row.PromptID
+		}
+		return out[a].Row.Scope < out[b].Row.Scope
 	})
 	return out
+}
+
+func rowIdentity(row Row) string {
+	return row.Scope + "\x00" + row.PromptID
 }

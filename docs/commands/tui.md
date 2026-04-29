@@ -51,6 +51,11 @@ Matching is **case-insensitive** — `c` and `C` are the same key.
 
 Overflow: once the auto-assign pool is exhausted and frontmatter keys are satisfied, remaining prompts are **not shown on the board**. They are reachable only via `/`-search.
 
+Shadowed prompts (the loser of a global/project ID collision under
+`prompt_priority`) behave like overflow for board purposes: they receive no
+board key and cannot double-bind an existing key. They remain searchable via
+`/`, and selecting a shadowed search result delivers that scoped prompt.
+
 ### Collisions (hard errors at load time)
 
 - two prompts declaring the same `key:`
@@ -61,7 +66,7 @@ These surface in `tprompt doctor` and cause `tprompt list|show|send|tui` to fail
 
 ## Search mode
 
-Triggered by `/`. All prompts (including overflow) are searchable — search is the complete-catalog view.
+Triggered by `/`. All prompts (including overflow and shadowed prompts) are searchable — search is the complete-catalog view.
 
 - **Matching:** fuzzy (fzf-style). Typing `cmv` matches `code-merge-verification`.
 - **Scope:** `id + title + description + tags`. Body content is **not** indexed.

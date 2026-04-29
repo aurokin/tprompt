@@ -1,6 +1,6 @@
 # Tech Stack
 
-Locked by DECISIONS.md §30. This doc expands on the choices and how they wire together.
+Locked by DECISIONS.md §32. This doc expands on the choices and how they wire together.
 
 ## Language
 

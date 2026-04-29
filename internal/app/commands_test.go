@@ -236,6 +236,27 @@ func TestListPrintsIDsAlphabetically(t *testing.T) {
 	}
 }
 
+func TestListMarksShadowedPrompts(t *testing.T) {
+	fs := &fakeStore{
+		summaries: []store.Summary{
+			{ID: "alpha", Scope: "global", Key: "1", KeySource: store.KeySourceAuto, ShadowPath: "/project/alpha.md"},
+			{ID: "alpha", Scope: "project", Shadowed: true, ShadowedBy: "/global/alpha.md", KeySource: store.KeySourceShadowed},
+		},
+	}
+	stdout, _, err := executeRootWith(t, workingDeps(t, fs), "list")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := strings.Join([]string{
+		"alpha  global  key 1 (auto)",
+		"alpha  project  shadowed by /global/alpha.md",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout mismatch\ngot:  %q\nwant: %q", stdout, want)
+	}
+}
+
 func TestListEmptyStore(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	stdout, _, err := executeRootWith(t, workingDeps(t, fs), "list")
@@ -349,6 +370,29 @@ func TestShowFullMetadata(t *testing.T) {
 	if stdout != want {
 		t.Fatalf("stdout mismatch\ngot:\n%s\nwant:\n%s", stdout, want)
 	}
+}
+
+func TestShowPrintsShadowedCounterpartPath(t *testing.T) {
+	fs := &fakeStore{
+		prompts: map[string]store.Prompt{
+			"alpha": {
+				Summary: store.Summary{
+					ID:         "alpha",
+					Path:       "/global/alpha.md",
+					Scope:      "global",
+					Key:        "1",
+					KeySource:  store.KeySourceAuto,
+					ShadowPath: "/project/alpha.md",
+				},
+				Body: "Global body.\n",
+			},
+		},
+	}
+	stdout, _, err := executeRootWith(t, workingDeps(t, fs), "show", "alpha")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertContains(t, stdout, "Shadowed counterpart: /project/alpha.md")
 }
 
 func TestShowMinimalMetadata(t *testing.T) {

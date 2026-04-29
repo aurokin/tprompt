@@ -44,6 +44,28 @@ func TestSearchIndex_EmptyQueryIncludesOverflow(t *testing.T) {
 	}
 }
 
+func TestSearchIndex_IncludesShadowedOverflowRows(t *testing.T) {
+	board := []Row{{Key: '1', PromptID: "alpha", Scope: "global"}}
+	overflow := []Row{{PromptID: "alpha", Scope: "project", Shadowed: true, Title: "Project Alpha"}}
+	idx := newSearchIndex(board, overflow, Row{})
+
+	got := idx.Query("project")
+	if len(got) != 1 {
+		t.Fatalf("len(Query(project)) = %d, want 1: %+v", len(got), got)
+	}
+	if got[0].Row.Scope != "project" || !got[0].Row.Shadowed {
+		t.Fatalf("matched row = %+v, want shadowed project row", got[0].Row)
+	}
+
+	catalog := idx.Query("")
+	if len(catalog) != 2 {
+		t.Fatalf("empty query len = %d, want 2", len(catalog))
+	}
+	if catalog[1].Row.Scope != "project" || !catalog[1].Row.Shadowed {
+		t.Fatalf("shadowed row missing from catalog: %+v", catalog)
+	}
+}
+
 func TestSearchIndex_EmptyQueryWithoutClipRow(t *testing.T) {
 	rows := []Row{
 		{Key: '1', PromptID: "beta"},

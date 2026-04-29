@@ -75,10 +75,18 @@ func checkPromptsDir(w io.Writer, cfg config.Resolved) error {
 		printFail(w, err.Error())
 		return err
 	}
+	printOK(w, fmt.Sprintf("prompt priority: %s", activePromptPriority(cfg)))
+	hasProject := false
 	for _, source := range sources {
+		if source.Scope == promptsource.ScopeProject {
+			hasProject = true
+		}
 		if err := checkPromptSource(w, cfg, source); err != nil {
 			return err
 		}
+	}
+	if !hasProject {
+		printOK(w, "project overlay: no project overlay")
 	}
 	return nil
 }
@@ -128,6 +136,9 @@ func reportPromptSourceStatError(w io.Writer, cfg config.Resolved, source prompt
 func sourceOriginLabel(source promptsource.Source, cfg config.Resolved) string {
 	if source.Optional {
 		return "[additional]"
+	}
+	if source.Scope == promptsource.ScopeProject {
+		return "[project]"
 	}
 	if cfg.PromptsDir == "" {
 		return "[default]"

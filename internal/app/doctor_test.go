@@ -61,24 +61,28 @@ func TestDoctorHealthy(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 7 {
-		t.Fatalf("want 7 lines, got %d:\n%s", len(lines), stdout)
+	if len(lines) != 9 {
+		t.Fatalf("want 9 lines, got %d:\n%s", len(lines), stdout)
 	}
 	assertPrefix(t, lines[0], "ok")
 	assertContains(t, lines[0], "config loaded")
 	assertContains(t, lines[0], "/etc/tprompt/config.toml")
 	assertPrefix(t, lines[1], "ok")
-	assertContains(t, lines[1], "prompts directory exists")
+	assertContains(t, lines[1], "prompt priority: global")
 	assertPrefix(t, lines[2], "ok")
-	assertContains(t, lines[2], "2 prompts discovered")
+	assertContains(t, lines[2], "prompts directory exists")
 	assertPrefix(t, lines[3], "ok")
-	assertContains(t, lines[3], "inside tmux")
+	assertContains(t, lines[3], "project overlay: no project overlay")
 	assertPrefix(t, lines[4], "ok")
-	assertContains(t, lines[4], "clipboard reader: custom-paste (override)")
+	assertContains(t, lines[4], "2 prompts discovered")
 	assertPrefix(t, lines[5], "ok")
-	assertContains(t, lines[5], "picker command: fzf")
+	assertContains(t, lines[5], "inside tmux")
 	assertPrefix(t, lines[6], "ok")
-	assertContains(t, lines[6], "daemon reachable")
+	assertContains(t, lines[6], "clipboard reader: custom-paste (override)")
+	assertPrefix(t, lines[7], "ok")
+	assertContains(t, lines[7], "picker command: fzf")
+	assertPrefix(t, lines[8], "ok")
+	assertContains(t, lines[8], "daemon reachable")
 }
 
 func TestDoctorNoTmux(t *testing.T) {
@@ -413,18 +417,20 @@ func TestDoctorPromptsDirMissing(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 6 {
-		t.Fatalf("want 6 lines (config ok, dir fail, tmux warn, clipboard, picker, daemon), got %d:\n%s", len(lines), stdout)
+	if len(lines) != 7 {
+		t.Fatalf("want 7 lines (config ok, policy ok, dir fail, tmux warn, clipboard, picker, daemon), got %d:\n%s", len(lines), stdout)
 	}
 	assertPrefix(t, lines[0], "ok")
 	assertContains(t, lines[0], "config loaded")
-	assertPrefix(t, lines[1], "FAIL")
-	assertContains(t, lines[1], "prompts directory missing")
-	assertPrefix(t, lines[2], "warn")
-	assertContains(t, lines[2], "not inside tmux")
-	assertContains(t, lines[3], "clipboard reader")
-	assertContains(t, lines[4], "picker command")
-	assertContains(t, lines[5], "daemon unreachable")
+	assertPrefix(t, lines[1], "ok")
+	assertContains(t, lines[1], "prompt priority: global")
+	assertPrefix(t, lines[2], "FAIL")
+	assertContains(t, lines[2], "prompts directory missing")
+	assertPrefix(t, lines[3], "warn")
+	assertContains(t, lines[3], "not inside tmux")
+	assertContains(t, lines[4], "clipboard reader")
+	assertContains(t, lines[5], "picker command")
+	assertContains(t, lines[6], "daemon unreachable")
 }
 
 func TestDoctorMissingAdditionalPromptsDirIsWarning(t *testing.T) {

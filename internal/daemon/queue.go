@@ -11,7 +11,7 @@ import (
 
 // ReplacedBanner is the user-visible message surfaced via tmux display-message
 // when a pending job is dropped because a newer job arrived for the same pane
-// (DECISIONS.md §26, docs/commands/daemon.md "Error feedback").
+// (DECISIONS.md §27, docs/commands/daemon.md "Error feedback").
 const ReplacedBanner = "tprompt: replaced by a newer job — this delivery was dropped"
 
 // JobRunner executes verification + sanitize + delivery for a single job and
