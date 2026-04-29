@@ -45,7 +45,7 @@ func TestResolveConflictsGlobalOnly(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := resolveConflicts(tc.sources, ConflictPolicyGlobalOnly)
+			got, err := resolveConflicts(tc.sources, ConflictPolicyGlobal)
 			if err != nil {
 				t.Fatalf("resolveConflicts: %v", err)
 			}
@@ -75,7 +75,7 @@ func TestResolveConflictsRejectsCrossGlobalDuplicates(t *testing.T) {
 				conflictPrompt("alpha", "/team/alpha.md"),
 			},
 		},
-	}, ConflictPolicyGlobalOnly)
+	}, ConflictPolicyGlobal)
 
 	var dupErr *DuplicatePromptIDError
 	if !errors.As(err, &dupErr) {
@@ -100,6 +100,65 @@ func conflictPrompt(id, path string) discoveredPrompt {
 			},
 		},
 	}
+}
+
+func TestResolveConflictsCrossTierPolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		policy      ConflictPolicy
+		wantWinner  string
+		wantShadows []string
+	}{
+		{
+			name:        "global wins by default",
+			policy:      ConflictPolicyGlobal,
+			wantWinner:  "/global/alpha.md",
+			wantShadows: []string{"/project/alpha.md"},
+		},
+		{
+			name:        "project wins when configured",
+			policy:      ConflictPolicyProject,
+			wantWinner:  "/project/alpha.md",
+			wantShadows: []string{"/global/alpha.md"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := resolveConflicts([]sourcePrompts{
+				{
+					Source: promptsource.Source{Path: "/global", Scope: promptsource.ScopeGlobal},
+					Prompts: []discoveredPrompt{
+						conflictPromptWithScope("alpha", "/global/alpha.md", "global"),
+					},
+				},
+				{
+					Source: promptsource.Source{Path: "/project", Scope: promptsource.ScopeProject},
+					Prompts: []discoveredPrompt{
+						conflictPromptWithScope("alpha", "/project/alpha.md", "project"),
+					},
+				},
+			}, tc.policy)
+			if err != nil {
+				t.Fatalf("resolveConflicts: %v", err)
+			}
+			if got.Winners["alpha"].prompt.Path != tc.wantWinner {
+				t.Fatalf("winner = %q, want %q", got.Winners["alpha"].prompt.Path, tc.wantWinner)
+			}
+			if diff := cmp.Diff(tc.wantShadows, shadowPaths(got.Shadows)); diff != "" {
+				t.Fatalf("shadows mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func conflictPromptWithScope(id, path, scope string) discoveredPrompt {
+	prompt := conflictPrompt(id, path)
+	prompt.prompt.Scope = scope
+	return prompt
 }
 
 func winnerPathsByID(winners map[string]discoveredPrompt) map[string]string {

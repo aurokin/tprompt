@@ -63,7 +63,12 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 			if err != nil {
 				return nil, err
 			}
-			return store.NewMultiSource(sources, cfg.ReservedPrintable, cfg.KeybindPool), nil
+			return store.NewMultiSourceWithPolicy(
+				sources,
+				store.ConflictPolicy(activePromptPriority(cfg)),
+				cfg.ReservedPrintable,
+				cfg.KeybindPool,
+			), nil
 		},
 		NewTmux: func() (tmux.Adapter, error) {
 			return tmux.New(tmux.NewExecRunner("")), nil
@@ -183,44 +188,25 @@ func promptSources(cfg config.Resolved) ([]promptsource.Source, error) {
 	if err != nil {
 		home = ""
 	}
-	sources, err := promptsource.Resolve(cfg, lookupEnv, home)
-	if err != nil {
-		return nil, err
-	}
-	project, err := currentProjectSource()
-	if err != nil {
-		return nil, err
-	}
-	if project.Path != "" {
-		sources = append(sources, project)
-	}
-	return sources, nil
-}
-
-func currentProjectSource() (promptsource.Source, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return promptsource.Source{}, fmt.Errorf("resolve current directory: %w", err)
+		cwd = ""
 	}
-	project, err := promptsource.ProjectSource(cwd)
+	return promptsource.Resolve(cfg, lookupEnv, home, cwd, osStatSource)
+}
+
+func osStatSource(path string) (promptsource.PathKind, error) {
+	info, err := os.Stat(path)
 	if err != nil {
-		var notFound *promptsource.ProjectRootNotFoundError
-		if errors.As(err, &notFound) {
-			return promptsource.Source{}, nil
+		if errors.Is(err, fs.ErrNotExist) {
+			return promptsource.PathMissing, nil
 		}
-		return promptsource.Source{}, err
+		return promptsource.PathMissing, err
 	}
-	info, statErr := os.Stat(project.Path)
-	if statErr != nil {
-		if errors.Is(statErr, fs.ErrNotExist) {
-			return promptsource.Source{}, nil
-		}
-		return promptsource.Source{}, fmt.Errorf("stat project prompts directory %s: %w", project.Path, statErr)
+	if info.IsDir() {
+		return promptsource.PathDir, nil
 	}
-	if !info.IsDir() {
-		return promptsource.Source{}, nil
-	}
-	return project, nil
+	return promptsource.PathFile, nil
 }
 
 // newClipboardReader builds the clipboard.Reader used by both `Deps.NewClip`

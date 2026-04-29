@@ -87,6 +87,9 @@ func newShowCmd(deps Deps) *cobra.Command {
 				_, _ = fmt.Fprintf(w, "Tags: %s\n", strings.Join(p.Tags, ", "))
 			}
 			_, _ = fmt.Fprintf(w, "Key: %s\n", keybindValue(p.Summary))
+			if p.ShadowPath != "" {
+				_, _ = fmt.Fprintf(w, "Shadowed counterpart: %s\n", p.ShadowPath)
+			}
 			_, _ = fmt.Fprintln(w)
 			_, _ = fmt.Fprint(w, p.Body)
 			return nil
@@ -101,7 +104,20 @@ func promptScope(summary store.Summary) string {
 	return "global"
 }
 
+func activePromptPriority(cfg config.Resolved) string {
+	if cfg.PromptPriority != "" {
+		return cfg.PromptPriority
+	}
+	return "global"
+}
+
 func keybindSummary(summary store.Summary) string {
+	if summary.Shadowed {
+		if summary.ShadowedBy != "" {
+			return "shadowed by " + summary.ShadowedBy
+		}
+		return "shadowed"
+	}
 	return "key " + keybindValue(summary)
 }
 
@@ -113,6 +129,8 @@ func keybindValue(summary store.Summary) string {
 		return fmt.Sprintf("%s (auto)", summary.Key)
 	case store.KeySourceOverflow:
 		return "none (overflow, not on board)"
+	case store.KeySourceShadowed:
+		return "none (shadowed, search only)"
 	default:
 		if summary.Key != "" {
 			return summary.Key

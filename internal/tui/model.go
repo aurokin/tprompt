@@ -20,6 +20,10 @@ type Submitter interface {
 	Submit(Result) error
 }
 
+type scopedStore interface {
+	ResolveScoped(id, scope string) (store.Prompt, error)
+}
+
 // submitResultMsg carries the outcome of an async Submitter.Submit call back
 // into Update so the Model can transition to tea.Quit with the captured
 // Result and error.
@@ -288,7 +292,7 @@ func (m Model) tryPromptSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !promptKeyMatches(got, row.Key) {
 			continue
 		}
-		return m.selectPrompt(row.PromptID)
+		return m.selectPrompt(row)
 	}
 	return m, nil
 }
@@ -296,13 +300,27 @@ func (m Model) tryPromptSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // selectPrompt resolves the prompt body, enforces MaxPasteBytes inline, and
 // fires the submit cmd when the body is within limits. Store or resolve
 // failures propagate through submitErr so the Renderer wrapper surfaces them.
-func (m Model) selectPrompt(id string) (tea.Model, tea.Cmd) {
-	prompt, err := m.deps.Store.Resolve(id)
+func (m Model) selectPrompt(row Row) (tea.Model, tea.Cmd) {
+	id := row.PromptID
+	scope := row.Scope
+	var (
+		prompt store.Prompt
+		err    error
+	)
+	if scope != "" {
+		if scoped, ok := m.deps.Store.(scopedStore); ok {
+			prompt, err = scoped.ResolveScoped(id, scope)
+		} else {
+			prompt, err = m.deps.Store.Resolve(id)
+		}
+	} else {
+		prompt, err = m.deps.Store.Resolve(id)
+	}
 	if err != nil {
 		// The pre-flight validated the store, but a prompt file can still be
 		// removed between List and Resolve. Bubble as a submit failure so the
 		// exit-code mapping in runTUI handles it like any other store error.
-		m.result = Result{Action: ActionPrompt, PromptID: id}
+		m.result = Result{Action: ActionPrompt, PromptID: id, Scope: scope}
 		m.submitErr = err
 		return m, tea.Quit
 	}
@@ -312,7 +330,7 @@ func (m Model) selectPrompt(id string) (tea.Model, tea.Cmd) {
 	}
 	m.inlineError = ""
 	m.pendingSubmit = true
-	return m, submitCmd(m.deps.Submitter, Result{Action: ActionPrompt, PromptID: id})
+	return m, submitCmd(m.deps.Submitter, Result{Action: ActionPrompt, PromptID: id, Scope: scope})
 }
 
 // selectClipboard kicks off an async clipboard read via readClipboardCmd. The
@@ -489,7 +507,7 @@ func (m Model) searchSelectHighlighted() (tea.Model, tea.Cmd) {
 	if row.PromptID == "" {
 		return m.selectClipboard()
 	}
-	return m.selectPrompt(row.PromptID)
+	return m.selectPrompt(row)
 }
 
 // searchMoveCursor advances the search cursor by delta (±1) within bounds.

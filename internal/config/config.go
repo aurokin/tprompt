@@ -17,6 +17,7 @@ import (
 type Config struct {
 	PromptsDir                 string            `toml:"prompts_dir"`
 	AdditionalPromptsDirs      []string          `toml:"additional_prompts_dirs"`
+	PromptPriority             string            `toml:"prompt_priority"`
 	DefaultMode                string            `toml:"default_mode"`
 	DefaultEnter               bool              `toml:"default_enter"`
 	SocketPath                 string            `toml:"socket_path"`
@@ -37,6 +38,7 @@ type Config struct {
 func Default() Config {
 	return Config{
 		DefaultMode:                "paste",
+		PromptPriority:             "global",
 		DefaultEnter:               false,
 		SocketPath:                 "~/.local/state/tprompt/daemon.sock",
 		LogPath:                    "~/.local/state/tprompt/daemon.log",
@@ -71,6 +73,7 @@ type ReservedKey struct {
 type Resolved struct {
 	PromptsDir                 string
 	AdditionalPromptsDirs      []string
+	PromptPriority             string
 	DefaultMode                string
 	DefaultEnter               bool
 	SocketPath                 string
@@ -179,6 +182,7 @@ func standardConfigPaths(getenv func(string) string) []string {
 func Normalize(cfg Config, configPath string) (Resolved, error) {
 	r := Resolved{
 		DefaultMode:                cfg.DefaultMode,
+		PromptPriority:             cfg.PromptPriority,
 		DefaultEnter:               cfg.DefaultEnter,
 		PickerCommand:              cfg.PickerCommand,
 		VerificationTimeoutMS:      cfg.VerificationTimeoutMS,
@@ -265,6 +269,15 @@ func parseCommandArgv(field, command string) ([]string, error) {
 func Validate(r Resolved) error {
 	if err := validateDeliveryConfig(r); err != nil {
 		return err
+	}
+
+	switch r.PromptPriority {
+	case "", "global", "project":
+	default:
+		return &ValidationError{
+			Field:   "prompt_priority",
+			Message: fmt.Sprintf("invalid value %q: must be global or project", r.PromptPriority),
+		}
 	}
 
 	if r.SocketPath == "" {

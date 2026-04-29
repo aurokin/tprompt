@@ -50,6 +50,9 @@ func TestDefaultMatchesDocumentedMVPValues(t *testing.T) {
 	if got.PostInjectionVerification {
 		t.Fatal("Default().PostInjectionVerification = true, want false")
 	}
+	if got.PromptPriority != "global" {
+		t.Fatalf("Default().PromptPriority = %q, want global", got.PromptPriority)
+	}
 }
 
 func TestDefaultSanitizeIsOff(t *testing.T) {
@@ -102,6 +105,7 @@ clipboard_read_command = ""
 max_paste_bytes = 1048576
 sanitize = "off"
 keybind_pool = "12345qerfgtzxc"
+prompt_priority = "project"
 
 [reserved_keys]
 clipboard = "P"
@@ -136,6 +140,9 @@ select = "Enter"
 	}
 	if got.KeybindPool != "12345qerfgtzxc" {
 		t.Fatalf("KeybindPool = %q", got.KeybindPool)
+	}
+	if got.PromptPriority != "project" {
+		t.Fatalf("PromptPriority = %q", got.PromptPriority)
 	}
 	if got.ReservedKeys["clipboard"] != "P" || got.ReservedKeys["select"] != "Enter" {
 		t.Fatalf("ReservedKeys decoded incorrectly: %#v", got.ReservedKeys)
@@ -580,6 +587,12 @@ func TestValidateRejectsNonPositiveMaxPasteBytes(t *testing.T) {
 	r := validResolved(t)
 	r.MaxPasteBytes = 0
 	assertValidationField(t, Validate(r), "max_paste_bytes")
+}
+
+func TestValidateRejectsInvalidPromptPriority(t *testing.T) {
+	r := validResolved(t)
+	r.PromptPriority = "local"
+	assertValidationField(t, Validate(r), "prompt_priority")
 }
 
 func TestValidatePasteAcceptsEmptyPromptsDir(t *testing.T) {

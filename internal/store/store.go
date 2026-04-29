@@ -1,7 +1,8 @@
 // Package store discovers prompts on disk and resolves them by ID.
 //
-// ID is the filename stem (DECISIONS.md §3). Duplicate stems are a hard error
-// (§4). Keybind validation is delegated to internal/keybind.
+// ID is the filename stem (DECISIONS.md §3). Duplicate stems within a tier are
+// a hard error (§4); cross-tier project/global collisions are resolved by
+// policy. Keybind validation is delegated to internal/keybind.
 package store
 
 import (
@@ -28,6 +29,9 @@ type Summary struct {
 	KeySource   KeySource
 	Path        string
 	Scope       string
+	Shadowed    bool
+	ShadowedBy  string
+	ShadowPath  string
 }
 
 // KeySource identifies how a prompt's resolved board key was assigned.
@@ -37,6 +41,7 @@ const (
 	KeySourceExplicit KeySource = "explicit"
 	KeySourceAuto     KeySource = "auto"
 	KeySourceOverflow KeySource = "overflow"
+	KeySourceShadowed KeySource = "shadowed"
 )
 
 // DeliveryDefaults captures per-prompt delivery defaults from frontmatter.
@@ -117,11 +122,13 @@ func (e *PromptsDirCreateError) Unwrap() error { return e.Err }
 // FSStore is the filesystem-backed Phase 1 store implementation.
 type FSStore struct {
 	sources  []promptsource.Source
+	policy   ConflictPolicy
 	reserved map[rune]string
 	pool     []rune
 
-	promptsByID map[string]Prompt
-	summaries   []Summary
+	promptsByID  map[string]Prompt
+	promptsByRef map[string]Prompt
+	summaries    []Summary
 }
 
 // NewFS returns a store that discovers prompts from the given directory.
@@ -137,6 +144,12 @@ func NewFS(root string, reserved map[rune]string, pool []rune) *FSStore {
 // of sources. Missing optional sources are skipped; missing required sources
 // remain PromptsDirMissingError.
 func NewMultiSource(sources []promptsource.Source, reserved map[rune]string, pool []rune) *FSStore {
+	return NewMultiSourceWithPolicy(sources, ConflictPolicyGlobal, reserved, pool)
+}
+
+// NewMultiSourceWithPolicy is like NewMultiSource, but cross-tier
+// global/project ID collisions are resolved with policy.
+func NewMultiSourceWithPolicy(sources []promptsource.Source, policy ConflictPolicy, reserved map[rune]string, pool []rune) *FSStore {
 	reservedCopy := make(map[rune]string, len(reserved))
 	for key, action := range reserved {
 		reservedCopy[key] = action
@@ -146,6 +159,7 @@ func NewMultiSource(sources []promptsource.Source, reserved map[rune]string, poo
 
 	return &FSStore{
 		sources:  sourceCopy,
+		policy:   policy,
 		reserved: reservedCopy,
 		pool:     poolCopy,
 	}
@@ -200,12 +214,12 @@ func (s *FSStore) Discover() error {
 		return err
 	}
 
-	resolution, err := resolveConflicts(sourceResults, ConflictPolicyGlobalOnly)
+	resolution, err := resolveConflicts(sourceResults, s.policy)
 	if err != nil {
 		s.clearCache()
 		return err
 	}
-	if err := s.cacheResolvedPrompts(sortedWinnerEntries(resolution.Winners)); err != nil {
+	if err := s.cacheResolvedPrompts(sortedWinnerEntries(resolution.Winners), resolution.Shadows); err != nil {
 		s.clearCache()
 		return err
 	}
@@ -247,14 +261,16 @@ func normalizeSource(source promptsource.Source) promptsource.Source {
 	return source
 }
 
-func (s *FSStore) cacheResolvedPrompts(winners []discoveredPrompt) error {
+func (s *FSStore) cacheResolvedPrompts(winners []discoveredPrompt, shadows []discoveredPrompt) error {
 	assignment, err := keybind.Resolve(promptInputs(winners), s.reserved, s.pool)
 	if err != nil {
 		return err
 	}
 
 	promptsByID := make(map[string]Prompt, len(winners))
-	summaries := make([]Summary, 0, len(winners))
+	promptsByRef := make(map[string]Prompt, len(winners)+len(shadows))
+	summaries := make([]Summary, 0, len(winners)+len(shadows))
+	shadowByWinner := shadowsByWinner(winners, shadows)
 	for _, entry := range winners {
 		if resolvedKey, ok := resolvedKeyForPrompt(assignment.Bindings, entry.prompt.ID); ok {
 			entry.prompt.Key = string(resolvedKey)
@@ -266,18 +282,40 @@ func (s *FSStore) cacheResolvedPrompts(winners []discoveredPrompt) error {
 		} else {
 			entry.prompt.KeySource = KeySourceOverflow
 		}
+		if shadow, ok := shadowByWinner[promptRef(entry.prompt.Summary)]; ok {
+			entry.prompt.ShadowPath = shadow.prompt.Path
+		}
 		promptsByID[entry.prompt.ID] = entry.prompt
+		promptsByRef[promptRef(entry.prompt.Summary)] = entry.prompt
+		summaries = append(summaries, entry.prompt.Summary)
+	}
+	for _, entry := range shadows {
+		winner, ok := winnerForShadow(entry, winners)
+		if ok {
+			entry.prompt.ShadowedBy = winner.prompt.Path
+		}
+		entry.prompt.Shadowed = true
+		entry.prompt.Key = ""
+		entry.prompt.KeySource = KeySourceShadowed
+		promptsByRef[promptRef(entry.prompt.Summary)] = entry.prompt
 		summaries = append(summaries, entry.prompt.Summary)
 	}
 
-	sort.Slice(summaries, func(i, j int) bool { return summaries[i].ID < summaries[j].ID })
+	sort.Slice(summaries, func(i, j int) bool {
+		if summaries[i].ID != summaries[j].ID {
+			return summaries[i].ID < summaries[j].ID
+		}
+		return summaries[i].Scope < summaries[j].Scope
+	})
 	s.promptsByID = promptsByID
+	s.promptsByRef = promptsByRef
 	s.summaries = summaries
 	return nil
 }
 
 func (s *FSStore) clearCache() {
 	s.promptsByID = nil
+	s.promptsByRef = nil
 	s.summaries = nil
 }
 
@@ -286,6 +324,23 @@ func (s *FSStore) Resolve(id string) (Prompt, error) {
 		return Prompt{}, err
 	}
 	prompt, ok := s.promptsByID[id]
+	if !ok {
+		return Prompt{}, &NotFoundError{ID: id}
+	}
+	return clonePrompt(prompt), nil
+}
+
+// ResolveScoped resolves a prompt by ID and scope. It is used by the TUI
+// search path so shadowed prompts remain selectable without changing
+// Resolve(id)'s winner-only CLI contract.
+func (s *FSStore) ResolveScoped(id, scope string) (Prompt, error) {
+	if scope == "" {
+		return s.Resolve(id)
+	}
+	if err := s.ensureDiscovered(); err != nil {
+		return Prompt{}, err
+	}
+	prompt, ok := s.promptsByRef[promptRef(Summary{ID: id, Scope: scope})]
 	if !ok {
 		return Prompt{}, &NotFoundError{ID: id}
 	}
@@ -465,6 +520,33 @@ func cloneSummaries(summaries []Summary) []Summary {
 func cloneSummary(summary Summary) Summary {
 	summary.Tags = append([]string(nil), summary.Tags...)
 	return summary
+}
+
+func promptRef(summary Summary) string {
+	scope := summary.Scope
+	if scope == "" {
+		scope = string(promptsource.ScopeGlobal)
+	}
+	return scope + "\x00" + summary.ID
+}
+
+func shadowsByWinner(winners []discoveredPrompt, shadows []discoveredPrompt) map[string]discoveredPrompt {
+	out := make(map[string]discoveredPrompt)
+	for _, shadow := range shadows {
+		if winner, ok := winnerForShadow(shadow, winners); ok {
+			out[promptRef(winner.prompt.Summary)] = shadow
+		}
+	}
+	return out
+}
+
+func winnerForShadow(shadow discoveredPrompt, winners []discoveredPrompt) (discoveredPrompt, bool) {
+	for _, winner := range winners {
+		if winner.prompt.ID == shadow.prompt.ID {
+			return winner, true
+		}
+	}
+	return discoveredPrompt{}, false
 }
 
 func cloneBoolPtr(value *bool) *bool {

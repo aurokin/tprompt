@@ -8,18 +8,22 @@ This file describes the current command surface.
 
 Default dispatch: when stdin is a tty **and** `$TMUX` is set, the invocation is rewritten to `tprompt tui` before cobra parses flags, so a tmux binding can use `tprompt --target-pane '#{pane_id}' ...` instead of `tprompt tui --target-pane '#{pane_id}' ...`. Outside tmux (or without a tty), bare `tprompt` prints help.
 
-Because rewriting happens before flag parsing, `tui`'s required `--target-pane` still fires — bare `tprompt` with no flags inside tmux+tty errors clearly with exit 2. This is intentional: see DECISIONS.md §29 and `examples/tmux-bindings.md`.
+Because rewriting happens before flag parsing, `tui`'s required `--target-pane` still fires — bare `tprompt` with no flags inside tmux+tty errors clearly with exit 2. This is intentional: see DECISIONS.md §30 and `examples/tmux-bindings.md`.
 
 ### `tprompt list`
 
 Lists all available prompt IDs with their resolved TUI board key state.
+The second column is the source scope (`global` or `project`). Shadowed
+cross-tier collisions remain listed but are marked as shadowed and are not
+assigned board keys.
 
 Current output shape:
 
 ```text
-code-review  key c (explicit)
-bug-hunt  key 1 (auto)
-deep-review  key none (overflow, not on board)
+code-review  global  key c (explicit)
+bug-hunt  project  key 1 (auto)
+deep-review  global  key none (overflow, not on board)
+deploy  project  shadowed by /home/user/.config/tprompt/prompts/deploy.md
 ```
 
 ### `tprompt show <id>`
@@ -28,9 +32,12 @@ Shows the resolved prompt. Output order:
 
 - `ID:` — prompt ID
 - `Source:` — source file path
+- `Scope:` — `global` or `project`
 - `Title:`, `Description:`, `Tags:` — included only when the frontmatter sets them
 - `Key:` — resolved board key state, formatted as `<key> (explicit)`,
   `<key> (auto)`, or `none (overflow, not on board)`
+- `Shadowed counterpart:` — included when another cross-tier prompt with the
+  same ID exists but lost the active `prompt_priority` policy
 - a blank line, then the markdown body
 
 Example:
@@ -38,6 +45,7 @@ Example:
 ```text
 ID: code-review
 Source: /home/user/.config/tprompt/prompts/code-review.md
+Scope: global
 Title: Code Review
 Description: Deep review prompt focused on correctness, risk, tests
 Tags: review, code
@@ -106,16 +114,18 @@ Checks, in order:
 
 1. **config loads and validates** — `FAIL` on any load or validation error.
 2. **prompts directory exists** — `FAIL` when missing.
-3. **prompts discovered** — `FAIL` on duplicate IDs, malformed
+3. **prompt priority and project overlay** — reports `prompt_priority` and the
+   project overlay path, or `no project overlay`.
+4. **prompts discovered** — `FAIL` on duplicate IDs, malformed
    frontmatter, or duplicate/reserved/malformed `key:` values; reports the
    discovered prompt count on success.
-4. **inside tmux** — `warn` when `$TMUX` is unset.
-5. **clipboard reader** — `warn` when no reader is auto-detected and no
+5. **inside tmux** — `warn` when `$TMUX` is unset.
+6. **clipboard reader** — `warn` when no reader is auto-detected and no
    override is configured, or when a configured override is missing on
    `$PATH`. `tprompt send`-only workflows do not need a reader.
-6. **picker command** — `warn` when `picker_command` is empty or its binary is
+7. **picker command** — `warn` when `picker_command` is empty or its binary is
    not on `$PATH`. Only `tprompt pick` needs this.
-7. **daemon reachable** — `warn` when the configured socket is unreachable or
+8. **daemon reachable** — `warn` when the configured socket is unreachable or
    the daemon is not running. Only the TUI flow requires it; direct
    `send`/`paste` are unaffected.
 
@@ -127,7 +137,9 @@ Example output:
 
 ```text
 ok   config loaded (/home/user/.config/tprompt/config.toml)
-ok   prompts directory exists (/home/user/.config/tprompt/prompts)
+ok   prompt priority: global
+ok   prompts directory exists (scope global, /home/user/.config/tprompt/prompts) [default]
+ok   project overlay: no project overlay
 ok   4 prompts discovered
 ok   inside tmux
 ok   clipboard reader: pbpaste (auto-detected, darwin)

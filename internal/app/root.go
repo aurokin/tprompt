@@ -1,5 +1,5 @@
 // Package app wires the CLI. It owns the cobra command tree and the default
-// no-args dispatch (DECISIONS.md §29).
+// no-args dispatch (DECISIONS.md §30).
 package app
 
 import (
@@ -44,7 +44,7 @@ tmux (or without a tty), bare 'tprompt' prints this help.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// Bare `tprompt` outside tmux+tty: help is the MVP behavior.
 			// Bare dispatch to `tui` in tmux+tty is handled by dispatchArgs in
-			// RunCLI (see DECISIONS.md §29) so cobra flag parsing applies to
+			// RunCLI (see DECISIONS.md §30) so cobra flag parsing applies to
 			// `tui`'s required --target-pane.
 			return cmd.Help()
 		},
@@ -86,7 +86,7 @@ func RunCLI(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	return ExitOK
 }
 
-// dispatchArgs implements the DECISIONS.md §29 default-subcommand rule: when
+// dispatchArgs implements the DECISIONS.md §30 default-subcommand rule: when
 // stdin is a tty and $TMUX is set and the user has not named a subcommand, the
 // invocation is rewritten to run `tui`. This happens before cobra parses flags
 // so `tui`'s required --target-pane validation fires normally.

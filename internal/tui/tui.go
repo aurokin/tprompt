@@ -17,6 +17,7 @@ const (
 type Result struct {
 	Action   Action
 	PromptID string // populated when Action == ActionPrompt
+	Scope    string // optional; disambiguates shadowed cross-tier prompts.
 	// ClipboardBody is captured by the Renderer at the moment of intent so the
 	// daemon never re-reads the clipboard. Populated when Action == ActionClipboard.
 	ClipboardBody []byte
@@ -52,9 +53,11 @@ type ReservedKeys struct {
 type Row struct {
 	Key         rune
 	PromptID    string
+	Scope       string
 	Title       string
 	Description string
 	Tags        []string
+	Shadowed    bool
 }
 
 // DisplayDescription returns the text shown in the board's description column.

@@ -75,7 +75,7 @@ Inline TUI footer errors are reserved for recoverable, pre-submit choices such a
 
 ## Concurrency and replacement
 
-- Multiple TUI instances may be open simultaneously (singleton is not enforced — see DECISIONS.md §27).
+- Multiple TUI instances may be open simultaneously (singleton is not enforced — see DECISIONS.md §28).
 - When a newly submitted job targets the same `pane_id` as a pending job, the pending job is **replaced**. See `docs/commands/daemon.md`.
 
 ## Verification before injection

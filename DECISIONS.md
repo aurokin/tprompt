@@ -163,11 +163,26 @@ Prompts without a frontmatter `key:` receive one from this pool in order:
 
 Prompts are scanned **alphabetically by `id`** to assign from this pool. Once the pool is exhausted, remaining prompts are **overflow** — they are not shown on the board and are reachable only via `/`-search.
 
-### 18. Reserved keys are reconfigurable
+### 18. Project overlays and shadowing
+
+Project prompt overlays are discovered by walking up from the current working
+directory. A `tprompt/` directory inside a git tree activates a project source;
+reaching `.git` first means no overlay is active. The walk stops at the user's
+home directory or filesystem root.
+
+When a prompt ID exists in both the global and project tiers,
+`prompt_priority` selects the winner. The default is `global` so adopting a
+project overlay does not silently replace existing muscle-memory prompts.
+`project` is an explicit opt-in. The losing prompt is shadowed, not deleted:
+it appears in `tprompt list`, is reported by `tprompt show <id>` on the
+winner, and remains selectable through TUI search. Shadowed prompts receive no
+board key.
+
+### 19. Reserved keys are reconfigurable
 
 Default reserved keys are `P` (clipboard), `/` (search), `Esc` (cancel), `Enter` (select). All are overridable via `config.toml`.
 
-### 19. TUI row layout
+### 20. TUI row layout
 
 Rows are rendered as three columns: `[key]  id  description`.
 
@@ -175,19 +190,19 @@ Rows are rendered as three columns: `[key]  id  description`.
 - When `description` is absent, fall through: `description → title → blank`.
 - No body preview in rows.
 
-### 20. Clipboard read on keypress, no preview
+### 21. Clipboard read on keypress, no preview
 
 When the TUI opens, the clipboard is **not** read. It is read only when the user presses the clipboard key (`P` by default).
 
 The TUI process reads the clipboard, captures the content, and submits it as part of the daemon job payload before exiting. The daemon never reads the clipboard itself.
 
-### 21. Clipboard edge cases fail loudly
+### 22. Clipboard edge cases fail loudly
 
 - **Empty clipboard** → inline error in TUI; TUI stays open.
 - **Non-UTF-8 / binary clipboard** → reject with clear error.
 - **Oversized clipboard** → hard cap via `max_paste_bytes` config; reject when over.
 
-### 22. Clipboard reader is auto-detected, with override
+### 23. Clipboard reader is auto-detected, with override
 
 The reader is chosen at runtime from platform/env signals:
 
@@ -197,15 +212,15 @@ The reader is chosen at runtime from platform/env signals:
 
 Users can override via `clipboard_read_command` in `config.toml`. `doctor` reports which reader was chosen and whether it is installed.
 
-### 23. Sanitization is opt-in with three tested modes
+### 24. Sanitization is opt-in with three tested modes
 
 `sanitize = "strict" | "safe" | "off"`, default `off`. The rule applies uniformly to `tprompt paste` and `tprompt send <id>`. Both `strict` and `safe` require tested implementations before release.
 
-### 24. Search is fuzzy, scope-limited
+### 25. Search is fuzzy, scope-limited
 
 Search uses fuzzy (fzf-style) matching over `id + title + description + tags`, ranked id-first. Body content is **not** searched.
 
-### 25. Error feedback is in-tmux plus logs
+### 26. Error feedback is in-tmux plus logs
 
 Deferred-job failures surface in two channels:
 
@@ -214,25 +229,25 @@ Deferred-job failures surface in two channels:
 
 No success banner by default.
 
-### 26. Pending jobs are replaced, not queued
+### 27. Pending jobs are replaced, not queued
 
 When a new deferred job arrives for the **same target pane** as one already pending, the new job **replaces** the old one. Matches "I changed my mind" intent. Different targets are independent.
 
-### 27. TUI singletons are not enforced
+### 28. TUI singletons are not enforced
 
 Multiple TUI instances (including multiple tmux popups) can be open simultaneously — across clients or even on the same client. The simpler "any TUI may submit a job" rule applies unless a future Linear-scoped change introduces singleton behavior.
 
-### 28. Direct sends bypass the daemon queue entirely
+### 29. Direct sends bypass the daemon queue entirely
 
 `tprompt send <id>` and `tprompt paste` (invoked outside the TUI flow) always deliver synchronously through the tmux adapter. They do not touch the daemon queue and cannot be affected by pending TUI jobs.
 
-### 29. Bare `tprompt` defaults to `tprompt tui` in tmux + tty
+### 30. Bare `tprompt` defaults to `tprompt tui` in tmux + tty
 
 When invoked with no subcommand, `tprompt` dispatches to `tprompt tui` if stdin is a tty **and** `$TMUX` is set, so users can write `tprompt --target-pane '#{pane_id}' ...` in their binding instead of `tprompt tui --target-pane '#{pane_id}' ...`. Outside tmux (or without a tty), it prints help, preserving the no-args → usage convention in a regular shell. The TUI is the signature workflow, so this default matches user intent when the environment supports it.
 
 The dispatch is a pure arg rewrite at the top of `RunCLI` — cobra still parses flags and enforces `tui`'s required `--target-pane`, so bare `tprompt` with no flags inside tmux+tty errors clearly (exit 2). This is intentional: inside a `display-popup -E` popup, `$TMUX_PANE` resolves to the popup's own pane, not the originating one, so the binding must pass `#{pane_id}` at trigger time for delivery to target the correct pane. See `examples/tmux-bindings.md` for the canonical binding.
 
-### 30. Default global prompts directory with auto-create
+### 31. Default global prompts directory with auto-create
 
 `prompts_dir` is optional. When unset, it resolves to
 `$XDG_CONFIG_HOME/tprompt/prompts` (falling back to
@@ -250,7 +265,7 @@ slices extend it with `additional_prompts_dirs` and a project overlay; the
 auto-create asymmetry stays — only the resolved primary global default is
 created on access.
 
-### 31. Implementation tech stack
+### 32. Implementation tech stack
 
 The implementation language and toolchain are locked for v1:
 

@@ -1,5 +1,5 @@
 // Package daemon implements the deferred-delivery IPC server and job queue
-// with replace-same-target semantics (DECISIONS.md §26).
+// with replace-same-target semantics (DECISIONS.md §27).
 //
 // MVP wire protocol: line-delimited JSON, one request and one response per
 // connection, then close. Submit is fire-and-ack — SubmitResponse is returned
