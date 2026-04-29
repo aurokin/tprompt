@@ -1,8 +1,10 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"strings"
@@ -181,7 +183,44 @@ func promptSources(cfg config.Resolved) ([]promptsource.Source, error) {
 	if err != nil {
 		home = ""
 	}
-	return promptsource.Resolve(cfg, lookupEnv, home)
+	sources, err := promptsource.Resolve(cfg, lookupEnv, home)
+	if err != nil {
+		return nil, err
+	}
+	project, err := currentProjectSource()
+	if err != nil {
+		return nil, err
+	}
+	if project.Path != "" {
+		sources = append(sources, project)
+	}
+	return sources, nil
+}
+
+func currentProjectSource() (promptsource.Source, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return promptsource.Source{}, fmt.Errorf("resolve current directory: %w", err)
+	}
+	project, err := promptsource.ProjectSource(cwd)
+	if err != nil {
+		var notFound *promptsource.ProjectRootNotFoundError
+		if errors.As(err, &notFound) {
+			return promptsource.Source{}, nil
+		}
+		return promptsource.Source{}, err
+	}
+	info, statErr := os.Stat(project.Path)
+	if statErr != nil {
+		if errors.Is(statErr, fs.ErrNotExist) {
+			return promptsource.Source{}, nil
+		}
+		return promptsource.Source{}, fmt.Errorf("stat project prompts directory %s: %w", project.Path, statErr)
+	}
+	if !info.IsDir() {
+		return promptsource.Source{}, nil
+	}
+	return project, nil
 }
 
 // newClipboardReader builds the clipboard.Reader used by both `Deps.NewClip`

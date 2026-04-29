@@ -2,6 +2,7 @@ package promptsource
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -148,6 +149,58 @@ func TestResolveTable(t *testing.T) {
 				t.Fatalf("Resolve mismatch (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+func TestProjectRootFindsGitRootFromNestedDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "cmd", "tool")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ProjectRoot(nested, os.Stat)
+	if err != nil {
+		t.Fatalf("ProjectRoot: %v", err)
+	}
+	if got != root {
+		t.Fatalf("ProjectRoot = %q, want %q", got, root)
+	}
+}
+
+func TestProjectRootAcceptsGitFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: ../.git/worktrees/x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ProjectRoot(root, os.Stat)
+	if err != nil {
+		t.Fatalf("ProjectRoot: %v", err)
+	}
+	if got != root {
+		t.Fatalf("ProjectRoot = %q, want %q", got, root)
+	}
+}
+
+func TestProjectRootOutsideGitTree(t *testing.T) {
+	t.Parallel()
+
+	cwd := t.TempDir()
+	_, err := ProjectRoot(cwd, os.Stat)
+	var notFound *ProjectRootNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("ProjectRoot error = %T %v, want *ProjectRootNotFoundError", err, err)
+	}
+	if notFound.CWD != cwd {
+		t.Fatalf("ProjectRootNotFoundError.CWD = %q, want %q", notFound.CWD, cwd)
 	}
 }
 

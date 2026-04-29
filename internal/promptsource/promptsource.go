@@ -8,6 +8,8 @@
 package promptsource
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -23,14 +25,28 @@ func (e *UnresolvedDefaultDirError) Error() string {
 	return "promptsource: cannot resolve default prompts directory: XDG_CONFIG_HOME unset and home directory unknown"
 }
 
-// Scope identifies which tier a source belongs to. Today only ScopeGlobal is
-// produced; ScopeProject lands with the project-overlay slice.
+// ProjectRootNotFoundError reports that a project-scoped operation was run
+// outside a git tree. CWD names the directory where discovery started.
+type ProjectRootNotFoundError struct {
+	CWD string
+}
+
+func (e *ProjectRootNotFoundError) Error() string {
+	if e.CWD == "" {
+		return "promptsource: no project root found: not inside a git tree"
+	}
+	return fmt.Sprintf("promptsource: no project root found from %s: not inside a git tree", e.CWD)
+}
+
+// Scope identifies which tier a source belongs to.
 type Scope string
 
 const (
 	// ScopeGlobal is the user-level prompt store (default or explicit
 	// prompts_dir, plus future additional_prompts_dirs).
 	ScopeGlobal Scope = "global"
+	// ScopeProject is the project-level prompt overlay at <gitroot>/tprompt.
+	ScopeProject Scope = "project"
 )
 
 // Source describes one resolved prompt directory. AutoCreateOnAccess is true
@@ -78,6 +94,50 @@ func Resolve(cfg config.Resolved, getenv func(string) string, homeDir string) ([
 		})
 	}
 	return sources, nil
+}
+
+// ProjectRoot walks upward from cwd until it finds a git root. A directory is
+// considered a git root when it contains a .git entry, which covers both normal
+// repositories (.git directory) and linked worktrees/submodules (.git file).
+func ProjectRoot(cwd string, stat func(string) (os.FileInfo, error)) (string, error) {
+	if strings.TrimSpace(cwd) == "" {
+		return "", &ProjectRootNotFoundError{}
+	}
+	if stat == nil {
+		stat = os.Stat
+	}
+
+	start, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", fmt.Errorf("resolve current directory: %w", err)
+	}
+	dir := start
+	for {
+		if _, err := stat(filepath.Join(dir, ".git")); err == nil {
+			return dir, nil
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", &ProjectRootNotFoundError{CWD: start}
+		}
+		dir = parent
+	}
+}
+
+// ProjectSource resolves the write/read source for a project prompt overlay.
+// It does not require the tprompt directory to exist; callers decide whether
+// to auto-create it or skip it.
+func ProjectSource(cwd string) (Source, error) {
+	root, err := ProjectRoot(cwd, os.Stat)
+	if err != nil {
+		return Source{}, err
+	}
+	return Source{
+		Path:               filepath.Join(root, "tprompt"),
+		Scope:              ScopeProject,
+		AutoCreateOnAccess: false,
+	}, nil
 }
 
 func primarySource(cfg config.Resolved, getenv func(string) string, homeDir string) (Source, error) {

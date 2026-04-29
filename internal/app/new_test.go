@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hsadler/tprompt/internal/config"
+	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/store"
 )
 
@@ -227,6 +228,94 @@ func TestNew_AdditionalPromptsDirThatIsFileIsHardError(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(primary, "alpha.md")); !errors.Is(statErr, fs.ErrNotExist) {
 		t.Fatalf("primary alpha.md should not exist, stat err = %v", statErr)
+	}
+}
+
+func TestNew_ProjectWritesAtGitRootAndAutoCreatesDir(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "cmd", "tool")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(nested)
+
+	deps := newCmdDeps(t, filepath.Join(t.TempDir(), "global-prompts"))
+	stdout, stderr, err := executeRootWith(t, deps, "new", "project-review", "--project")
+	if err != nil {
+		t.Fatalf("executeRootWith: %v", err)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty", stderr)
+	}
+
+	target := filepath.Join(root, "tprompt", "project-review.md")
+	abs, err := filepath.Abs(target)
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	if got := strings.TrimRight(stdout, "\n"); got != abs {
+		t.Errorf("stdout = %q, want %q", got, abs)
+	}
+
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read scaffolded project file: %v", err)
+	}
+	if string(body) != scaffoldTemplate {
+		t.Errorf("scaffolded body mismatch\n--- got ---\n%s--- want ---\n%s", body, scaffoldTemplate)
+	}
+}
+
+func TestNew_ProjectOutsideGitTreeFailsClearly(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	deps := newCmdDeps(t, filepath.Join(t.TempDir(), "global-prompts"))
+	_, _, err := executeRootWith(t, deps, "new", "project-review", "--project")
+
+	var notFound *promptsource.ProjectRootNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("err = %T %v, want *promptsource.ProjectRootNotFoundError", err, err)
+	}
+	if ExitCode(err) != ExitUsage {
+		t.Errorf("ExitCode = %d, want %d", ExitCode(err), ExitUsage)
+	}
+}
+
+func TestNew_ProjectRefusesExistingProjectFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	projectPrompts := filepath.Join(root, "tprompt")
+	if err := os.Mkdir(projectPrompts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(projectPrompts, "project-review.md")
+	original := []byte("project body\n")
+	if err := os.WriteFile(target, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+
+	deps := newCmdDeps(t, filepath.Join(t.TempDir(), "global-prompts"))
+	_, _, err := executeRootWith(t, deps, "new", "project-review", "--project")
+
+	var existsErr *PromptFileExistsError
+	if !errors.As(err, &existsErr) {
+		t.Fatalf("err = %T %v, want *PromptFileExistsError", err, err)
+	}
+	if existsErr.Path != target {
+		t.Errorf("Path = %q, want %q", existsErr.Path, target)
+	}
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(body) != string(original) {
+		t.Errorf("file body changed: got %q, want %q", body, original)
 	}
 }
 

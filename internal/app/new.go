@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/store"
 )
@@ -59,11 +60,13 @@ func (e *PromptFileExistsError) Error() string {
 }
 
 func newNewCmd(deps Deps) *cobra.Command {
-	return &cobra.Command{
+	var project bool
+	cmd := &cobra.Command{
 		Use:   "new <id>",
-		Short: "Scaffold a new prompt file in the global prompts directory",
+		Short: "Scaffold a new prompt file",
 		Long: `New scaffolds a templated markdown file in the primary global prompts
-directory and prints the absolute path of the created file.
+directory and prints the absolute path of the created file. With --project, it
+scaffolds into the current git project's tprompt/ directory instead.
 
 The argument is the bare id; the .md extension is implied. Ids with path
 separators, leading dots, empty ids, ids ending in .md, or ids with
@@ -71,19 +74,26 @@ non-printable characters are rejected up front.
 
 If the target file already exists, new refuses to overwrite it and exits
 non-zero. The parent directory is auto-created on first use when it is
-the default global path; explicit prompts_dir paths must already exist.
+the default global path. With --project, <gitroot>/tprompt is auto-created.
+Explicit prompts_dir paths must already exist.
 
 The scaffolded file stubs every supported frontmatter field with an empty
 value so authors can see the schema without consulting docs. Empty
 frontmatter values are ignored at load.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return runNew(deps, args[0])
+			return runNew(deps, args[0], newFlags{project: project})
 		},
 	}
+	cmd.Flags().BoolVar(&project, "project", false, "write to <gitroot>/tprompt instead of the global prompts directory")
+	return cmd
 }
 
-func runNew(deps Deps, id string) error {
+type newFlags struct {
+	project bool
+}
+
+func runNew(deps Deps, id string, flags newFlags) error {
 	if err := validateNewID(id); err != nil {
 		return err
 	}
@@ -91,11 +101,10 @@ func runNew(deps Deps, id string) error {
 	if err != nil {
 		return err
 	}
-	sources, err := promptSources(cfg)
+	source, collisionSources, err := scaffoldTargetSources(cfg, flags)
 	if err != nil {
 		return err
 	}
-	source := sources[0]
 	if err := ensureScaffoldDir(source.Path, source.AutoCreateOnAccess); err != nil {
 		return err
 	}
@@ -108,7 +117,7 @@ func runNew(deps Deps, id string) error {
 	// any existing `<id>.md` anywhere under source.Path collides — not just
 	// the exact target. Scan first so the user sees a clear error instead
 	// of a silently-broken store on the next list/show.
-	if existing, err := findPromptByIDInSources(sources, id); err != nil {
+	if existing, err := findPromptByIDInSources(collisionSources, id); err != nil {
 		return err
 	} else if existing != "" {
 		return &PromptFileExistsError{ID: id, Path: existing}
@@ -118,6 +127,27 @@ func runNew(deps Deps, id string) error {
 	}
 	_, _ = fmt.Fprintln(deps.Stdout, target)
 	return nil
+}
+
+func scaffoldTargetSources(cfg config.Resolved, flags newFlags) (promptsource.Source, []promptsource.Source, error) {
+	if flags.project {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return promptsource.Source{}, nil, fmt.Errorf("resolve current directory: %w", err)
+		}
+		source, err := promptsource.ProjectSource(cwd)
+		if err != nil {
+			return promptsource.Source{}, nil, err
+		}
+		source.AutoCreateOnAccess = true
+		return source, []promptsource.Source{source}, nil
+	}
+
+	sources, err := promptSources(cfg)
+	if err != nil {
+		return promptsource.Source{}, nil, err
+	}
+	return sources[0], sources, nil
 }
 
 func validateNewID(id string) error {

@@ -1,0 +1,20 @@
+# Existing project prompt files are not overwritten by `tprompt new --project`.
+
+mkdir repo/.git
+mkdir repo/tprompt
+mkdir global
+cp existing.md repo/tprompt/project-review.md
+
+cd repo
+! tprompt new project-review --project --config $WORK/config.toml
+stderr 'prompt id "project-review"'
+stderr 'repo/tprompt/project-review\.md'
+stderr 'refusing to overwrite'
+
+cmp $WORK/repo/tprompt/project-review.md $WORK/existing.md
+
+-- config.toml --
+prompts_dir = "../global"
+
+-- existing.md --
+# untouched project body

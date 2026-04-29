@@ -1,0 +1,37 @@
+# `tprompt new <id> --project` writes to the git root's tprompt/
+# directory from a nested working directory. The scaffolded file loads
+# through list/show with project scope.
+
+mkdir repo/.git
+mkdir repo/tprompt
+mkdir repo/cmd/tool
+mkdir global
+
+cd repo/cmd/tool
+tprompt new project-review --project --config $WORK/config.toml
+stdout 'repo/tprompt/project-review\.md$'
+! stderr .
+
+cmp $WORK/repo/tprompt/project-review.md $WORK/want.md
+
+tprompt list --config $WORK/config.toml
+stdout '^project-review  project  key 1 \(auto\)\n$'
+
+tprompt show project-review --config $WORK/config.toml
+stdout 'ID: project-review'
+stdout 'Source: .*/repo/tprompt/project-review\.md'
+stdout 'Scope: project'
+stdout 'Key: 1 \(auto\)'
+
+-- config.toml --
+prompts_dir = "../../../global"
+
+-- want.md --
+---
+title:
+description:
+tags: []
+key:
+mode:
+enter:
+---

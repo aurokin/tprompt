@@ -1,0 +1,13 @@
+# `tprompt new --project` outside a git tree fails clearly and does not
+# create a stray local tprompt/ directory.
+
+mkdir global
+
+! tprompt new stray --project --config config.toml
+stderr 'no project root found'
+stderr 'not inside a git tree'
+
+! exists tprompt
+
+-- config.toml --
+prompts_dir = "global"

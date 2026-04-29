@@ -59,6 +59,11 @@ func ExitCode(err error) int {
 		return ExitUsage
 	}
 
+	var projectRootNotFound *promptsource.ProjectRootNotFoundError
+	if errors.As(err, &projectRootNotFound) {
+		return ExitUsage
+	}
+
 	var fileExists *PromptFileExistsError
 	if errors.As(err, &fileExists) {
 		return ExitPrompt
