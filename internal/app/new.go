@@ -140,7 +140,11 @@ func scaffoldTargetSources(cfg config.Resolved, flags newFlags) (promptsource.So
 			return promptsource.Source{}, nil, err
 		}
 		source.AutoCreateOnAccess = true
-		return source, []promptsource.Source{source}, nil
+		sources, err := promptSources(cfg)
+		if err != nil {
+			return promptsource.Source{}, nil, err
+		}
+		return source, appendOrReplaceSource(sources, source), nil
 	}
 
 	sources, err := promptSources(cfg)
@@ -148,6 +152,17 @@ func scaffoldTargetSources(cfg config.Resolved, flags newFlags) (promptsource.So
 		return promptsource.Source{}, nil, err
 	}
 	return sources[0], sources, nil
+}
+
+func appendOrReplaceSource(sources []promptsource.Source, source promptsource.Source) []promptsource.Source {
+	out := append([]promptsource.Source(nil), sources...)
+	for i, existing := range out {
+		if existing.Path == source.Path {
+			out[i] = source
+			return out
+		}
+	}
+	return append(out, source)
 }
 
 func validateNewID(id string) error {

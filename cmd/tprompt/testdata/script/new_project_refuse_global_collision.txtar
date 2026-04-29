@@ -1,0 +1,21 @@
+# `tprompt new --project` must reject an ID that already exists in the
+# loaded global sources, because list/show currently reject cross-source
+# duplicate ids.
+
+mkdir repo/.git
+mkdir global
+cp existing.md global/code-review.md
+
+cd repo
+! tprompt new code-review --project --config $WORK/config.toml
+stderr 'prompt id "code-review"'
+stderr 'global/code-review\.md'
+stderr 'refusing to overwrite'
+
+! exists $WORK/repo/tprompt/code-review.md
+
+-- config.toml --
+prompts_dir = "../global"
+
+-- existing.md --
+# global body
