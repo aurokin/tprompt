@@ -1,0 +1,19 @@
+# Duplicate IDs across global source dirs are fatal configuration errors.
+
+mkdir prompts
+mkdir team-prompts
+! tprompt list --config config.toml
+stderr 'duplicate prompt ID detected: alpha:'
+stderr 'prompts/alpha\.md'
+stderr 'team-prompts/alpha\.md'
+! stdout .
+
+-- config.toml --
+prompts_dir = "prompts"
+additional_prompts_dirs = ["team-prompts"]
+
+-- prompts/alpha.md --
+Primary body.
+
+-- team-prompts/alpha.md --
+Team body.

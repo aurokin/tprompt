@@ -5,6 +5,7 @@ mkdir prompts
 tprompt show bare --config config.toml
 stdout 'ID: bare'
 stdout 'Source: .*/prompts/bare\.md'
+stdout 'Scope: global'
 ! stdout 'Title:'
 ! stdout 'Description:'
 ! stdout 'Tags:'

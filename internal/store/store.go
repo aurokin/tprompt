@@ -5,6 +5,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/hsadler/tprompt/internal/keybind"
 	"github.com/hsadler/tprompt/internal/promptmeta"
+	"github.com/hsadler/tprompt/internal/promptsource"
 )
 
 // Summary is the light-weight view of a prompt used for listings.
@@ -25,6 +27,7 @@ type Summary struct {
 	Key         string
 	KeySource   KeySource
 	Path        string
+	Scope       string
 }
 
 // KeySource identifies how a prompt's resolved board key was assigned.
@@ -113,10 +116,9 @@ func (e *PromptsDirCreateError) Unwrap() error { return e.Err }
 
 // FSStore is the filesystem-backed Phase 1 store implementation.
 type FSStore struct {
-	root       string
-	reserved   map[rune]string
-	pool       []rune
-	autoCreate bool
+	sources  []promptsource.Source
+	reserved map[rune]string
+	pool     []rune
 
 	promptsByID map[string]Prompt
 	summaries   []Summary
@@ -125,14 +127,25 @@ type FSStore struct {
 // NewFS returns a store that discovers prompts from the given directory.
 // A missing root remains a PromptsDirMissingError on Discover.
 func NewFS(root string, reserved map[rune]string, pool []rune) *FSStore {
+	return NewMultiSource([]promptsource.Source{{
+		Path:  root,
+		Scope: promptsource.ScopeGlobal,
+	}}, reserved, pool)
+}
+
+// NewMultiSource returns a store that discovers prompts from an ordered list
+// of sources. Missing optional sources are skipped; missing required sources
+// remain PromptsDirMissingError.
+func NewMultiSource(sources []promptsource.Source, reserved map[rune]string, pool []rune) *FSStore {
 	reservedCopy := make(map[rune]string, len(reserved))
 	for key, action := range reserved {
 		reservedCopy[key] = action
 	}
 	poolCopy := append([]rune(nil), pool...)
+	sourceCopy := append([]promptsource.Source(nil), sources...)
 
 	return &FSStore{
-		root:     root,
+		sources:  sourceCopy,
 		reserved: reservedCopy,
 		pool:     poolCopy,
 	}
@@ -143,59 +156,106 @@ func NewFS(root string, reserved map[rune]string, pool []rune) *FSStore {
 // explicit user paths must continue to use NewFS so a missing directory
 // remains a hard error.
 func NewFSWithAutoCreate(root string, reserved map[rune]string, pool []rune) *FSStore {
-	s := NewFS(root, reserved, pool)
-	s.autoCreate = true
-	return s
+	return NewMultiSource([]promptsource.Source{{
+		Path:               root,
+		Scope:              promptsource.ScopeGlobal,
+		AutoCreateOnAccess: true,
+	}}, reserved, pool)
 }
 
-// prepareRoot canonicalizes the configured root, optionally creates it when
+// prepareSource canonicalizes the configured root, optionally creates it when
 // auto-create is enabled, and confirms it is a directory. A missing
 // non-auto-create root surfaces as PromptsDirMissingError so the existing
 // contract for explicit prompts_dir is preserved.
-func (s *FSStore) prepareRoot() (string, error) {
-	root, err := filepath.Abs(s.root)
+func prepareSource(source promptsource.Source) (string, bool, error) {
+	root, err := filepath.Abs(source.Path)
 	if err != nil {
-		return "", fmt.Errorf("resolve prompts directory: %w", err)
+		return "", false, fmt.Errorf("resolve prompts directory: %w", err)
 	}
-	if s.autoCreate {
+	if source.AutoCreateOnAccess {
 		if err := os.MkdirAll(root, 0o700); err != nil {
-			return "", &PromptsDirCreateError{Path: root, Err: err}
+			return "", false, &PromptsDirCreateError{Path: root, Err: err}
 		}
 	}
 	info, statErr := os.Stat(root)
-	if statErr != nil || !info.IsDir() {
-		return "", &PromptsDirMissingError{Path: root}
+	if statErr != nil {
+		if errors.Is(statErr, fs.ErrNotExist) {
+			if source.Optional {
+				return root, false, nil
+			}
+			return "", false, &PromptsDirMissingError{Path: root}
+		}
+		return "", false, fmt.Errorf("stat prompts directory %s: %w", root, statErr)
 	}
-	return root, nil
+	if !info.IsDir() {
+		return "", false, &PromptsDirMissingError{Path: root}
+	}
+	return root, true, nil
 }
 
 func (s *FSStore) Discover() error {
-	root, err := s.prepareRoot()
+	sourceResults, err := s.discoverSources()
 	if err != nil {
 		s.clearCache()
 		return err
 	}
 
-	entries, err := discoverPromptFiles(root)
+	resolution, err := resolveConflicts(sourceResults, ConflictPolicyGlobalOnly)
 	if err != nil {
 		s.clearCache()
 		return err
 	}
-
-	if err := validateUniqueIDs(entries); err != nil {
+	if err := s.cacheResolvedPrompts(sortedWinnerEntries(resolution.Winners)); err != nil {
 		s.clearCache()
 		return err
 	}
+	return nil
+}
 
-	assignment, err := keybind.Resolve(promptInputs(entries), s.reserved, s.pool)
+func (s *FSStore) discoverSources() ([]sourcePrompts, error) {
+	sourceResults := make([]sourcePrompts, 0, len(s.sources))
+	for _, source := range s.sources {
+		source = normalizeSource(source)
+		root, exists, err := prepareSource(source)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			continue
+		}
+
+		entries, err := discoverPromptFiles(root, source)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := validateUniqueIDs(entries); err != nil {
+			return nil, err
+		}
+		sourceResults = append(sourceResults, sourcePrompts{
+			Source:  source,
+			Prompts: entries,
+		})
+	}
+	return sourceResults, nil
+}
+
+func normalizeSource(source promptsource.Source) promptsource.Source {
+	if source.Scope == "" {
+		source.Scope = promptsource.ScopeGlobal
+	}
+	return source
+}
+
+func (s *FSStore) cacheResolvedPrompts(winners []discoveredPrompt) error {
+	assignment, err := keybind.Resolve(promptInputs(winners), s.reserved, s.pool)
 	if err != nil {
-		s.clearCache()
 		return err
 	}
 
-	promptsByID := make(map[string]Prompt, len(entries))
-	summaries := make([]Summary, 0, len(entries))
-	for _, entry := range entries {
+	promptsByID := make(map[string]Prompt, len(winners))
+	summaries := make([]Summary, 0, len(winners))
+	for _, entry := range winners {
 		if resolvedKey, ok := resolvedKeyForPrompt(assignment.Bindings, entry.prompt.ID); ok {
 			entry.prompt.Key = string(resolvedKey)
 			if entry.hasKey {
@@ -252,9 +312,9 @@ type discoveredPrompt struct {
 	hasKey bool
 }
 
-func discoverPromptFiles(root string) ([]discoveredPrompt, error) {
+func discoverPromptFiles(root string, source promptsource.Source) ([]discoveredPrompt, error) {
 	entries := make([]discoveredPrompt, 0)
-	err := filepath.WalkDir(root, promptFileWalker(root, &entries))
+	err := filepath.WalkDir(root, promptFileWalker(root, source, &entries))
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +326,7 @@ func discoverPromptFiles(root string) ([]discoveredPrompt, error) {
 	return entries, nil
 }
 
-func promptFileWalker(root string, entries *[]discoveredPrompt) fs.WalkDirFunc {
+func promptFileWalker(root string, source promptsource.Source, entries *[]discoveredPrompt) fs.WalkDirFunc {
 	return func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -281,7 +341,7 @@ func promptFileWalker(root string, entries *[]discoveredPrompt) fs.WalkDirFunc {
 			return nil
 		}
 
-		entry, err := loadPromptFile(path)
+		entry, err := loadPromptFile(path, source)
 		if err != nil {
 			return err
 		}
@@ -294,7 +354,7 @@ func shouldSkipPath(root, path string, d fs.DirEntry) bool {
 	return path != root && isHidden(filepath.Base(path))
 }
 
-func loadPromptFile(path string) (discoveredPrompt, error) {
+func loadPromptFile(path string, source promptsource.Source) (discoveredPrompt, error) {
 	content, err := readPromptFile(path)
 	if err != nil {
 		return discoveredPrompt{}, fmt.Errorf("read prompt %s: %w", path, err)
@@ -304,10 +364,14 @@ func loadPromptFile(path string) (discoveredPrompt, error) {
 		return discoveredPrompt{}, fmt.Errorf("parse prompt %s: %w", path, err)
 	}
 	sanitizeMeta(&parsed.Meta)
-	return buildDiscoveredPrompt(path, parsed), nil
+	return buildDiscoveredPrompt(path, source, parsed), nil
 }
 
-func buildDiscoveredPrompt(path string, parsed promptmeta.Parsed) discoveredPrompt {
+func buildDiscoveredPrompt(path string, source promptsource.Source, parsed promptmeta.Parsed) discoveredPrompt {
+	scope := string(source.Scope)
+	if scope == "" {
+		scope = string(promptsource.ScopeGlobal)
+	}
 	return discoveredPrompt{
 		prompt: Prompt{
 			Summary: Summary{
@@ -316,6 +380,7 @@ func buildDiscoveredPrompt(path string, parsed promptmeta.Parsed) discoveredProm
 				Description: parsed.Meta.Description,
 				Tags:        append([]string(nil), parsed.Meta.Tags...),
 				Path:        path,
+				Scope:       scope,
 			},
 			Body: parsed.Body,
 			Defaults: DeliveryDefaults{

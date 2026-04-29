@@ -4,6 +4,7 @@ mkdir prompts
 tprompt show code-review --config config.toml
 stdout 'ID: code-review'
 stdout 'Source: .*/prompts/code-review\.md'
+stdout 'Scope: global'
 stdout 'Title: Code Review'
 stdout 'Description: Deep review prompt'
 stdout 'Tags: review, code'

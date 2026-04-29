@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/store"
 )
 
@@ -90,10 +91,11 @@ func runNew(deps Deps, id string) error {
 	if err != nil {
 		return err
 	}
-	source, err := primaryPromptSource(cfg)
+	sources, err := promptSources(cfg)
 	if err != nil {
 		return err
 	}
+	source := sources[0]
 	if err := ensureScaffoldDir(source.Path, source.AutoCreateOnAccess); err != nil {
 		return err
 	}
@@ -106,7 +108,7 @@ func runNew(deps Deps, id string) error {
 	// any existing `<id>.md` anywhere under source.Path collides — not just
 	// the exact target. Scan first so the user sees a clear error instead
 	// of a silently-broken store on the next list/show.
-	if existing, err := findPromptByID(source.Path, id); err != nil {
+	if existing, err := findPromptByIDInSources(sources, id); err != nil {
 		return err
 	} else if existing != "" {
 		return &PromptFileExistsError{ID: id, Path: existing}
@@ -158,6 +160,38 @@ func ensureScaffoldDir(path string, autoCreate bool) error {
 		return &store.PromptsDirMissingError{Path: path}
 	}
 	return nil
+}
+
+func findPromptByIDInSources(sources []promptsource.Source, id string) (string, error) {
+	for _, source := range sources {
+		if ok, err := promptSourceExists(source); err != nil {
+			return "", err
+		} else if !ok {
+			continue
+		}
+		existing, err := findPromptByID(source.Path, id)
+		if err != nil {
+			return "", err
+		}
+		if existing != "" {
+			return existing, nil
+		}
+	}
+	return "", nil
+}
+
+func promptSourceExists(source promptsource.Source) (bool, error) {
+	info, err := os.Stat(source.Path)
+	if err != nil {
+		if source.Optional && errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !info.IsDir() {
+		return false, &store.PromptsDirMissingError{Path: source.Path}
+	}
+	return true, nil
 }
 
 // findPromptByID walks root looking for any markdown file whose filename

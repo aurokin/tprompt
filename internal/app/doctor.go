@@ -70,31 +70,65 @@ func checkConfig(w io.Writer, deps Deps) (config.Resolved, error) {
 }
 
 func checkPromptsDir(w io.Writer, cfg config.Resolved) error {
-	source, err := primaryPromptSource(cfg)
+	sources, err := promptSources(cfg)
 	if err != nil {
 		printFail(w, err.Error())
 		return err
 	}
+	for _, source := range sources {
+		if err := checkPromptSource(w, cfg, source); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkPromptSource(w io.Writer, cfg config.Resolved, source promptsource.Source) error {
+	path := source.Path
 	if source.AutoCreateOnAccess {
-		if mkErr := os.MkdirAll(source.Path, 0o700); mkErr != nil {
-			createErr := &store.PromptsDirCreateError{Path: source.Path, Err: mkErr}
+		if mkErr := os.MkdirAll(path, 0o700); mkErr != nil {
+			createErr := &store.PromptsDirCreateError{Path: path, Err: mkErr}
 			printFail(w, createErr.Error())
 			return createErr
 		}
 	}
-	info, err := os.Stat(source.Path)
-	if err != nil || !info.IsDir() {
-		missingErr := &store.PromptsDirMissingError{Path: source.Path}
+	info, err := os.Stat(path)
+	if err != nil {
+		return reportPromptSourceStatError(w, cfg, source, err)
+	}
+	if !info.IsDir() {
+		missingErr := &store.PromptsDirMissingError{Path: path}
 		printFail(w, missingErr.Error())
 		return missingErr
 	}
-	printOK(w, fmt.Sprintf("prompts directory exists (%s) %s", source.Path, sourceOriginLabel(source, cfg)))
+	printOK(w, fmt.Sprintf("prompts directory exists (scope %s, %s) %s",
+		source.Scope, path, sourceOriginLabel(source, cfg)))
 	return nil
+}
+
+func reportPromptSourceStatError(w io.Writer, cfg config.Resolved, source promptsource.Source, err error) error {
+	path := source.Path
+	if errors.Is(err, os.ErrNotExist) {
+		if source.Optional {
+			printWarn(w, fmt.Sprintf("prompts directory missing (scope %s, %s) %s",
+				source.Scope, path, sourceOriginLabel(source, cfg)))
+			return nil
+		}
+		missingErr := &store.PromptsDirMissingError{Path: path}
+		printFail(w, missingErr.Error())
+		return missingErr
+	}
+	statErr := fmt.Errorf("stat prompts directory %s: %w", path, err)
+	printFail(w, statErr.Error())
+	return statErr
 }
 
 // sourceOriginLabel describes where source's path came from so doctor output
 // distinguishes a resolved default from an explicit user setting.
 func sourceOriginLabel(source promptsource.Source, cfg config.Resolved) string {
+	if source.Optional {
+		return "[additional]"
+	}
 	if cfg.PromptsDir == "" {
 		return "[default]"
 	}

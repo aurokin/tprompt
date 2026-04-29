@@ -13,6 +13,8 @@ func TestResolveTable(t *testing.T) {
 	t.Parallel()
 
 	const explicit = "/srv/prompts"
+	const additionalA = "/srv/team-prompts"
+	const additionalB = "/srv/org-prompts"
 	const xdg = "/var/xdg"
 	const home = "/users/jane"
 
@@ -25,15 +27,32 @@ func TestResolveTable(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "explicit prompts_dir wins over XDG",
-			cfg:     config.Resolved{PromptsDir: explicit},
+			name: "explicit prompts_dir wins over XDG and additional dirs follow",
+			cfg: config.Resolved{
+				PromptsDir:            explicit,
+				AdditionalPromptsDirs: []string{additionalA, additionalB},
+			},
 			env:     map[string]string{"XDG_CONFIG_HOME": xdg},
 			homeDir: home,
-			want: []Source{{
-				Path:               explicit,
-				Scope:              ScopeGlobal,
-				AutoCreateOnAccess: false,
-			}},
+			want: []Source{
+				{
+					Path:               explicit,
+					Scope:              ScopeGlobal,
+					AutoCreateOnAccess: false,
+				},
+				{
+					Path:               additionalA,
+					Scope:              ScopeGlobal,
+					AutoCreateOnAccess: false,
+					Optional:           true,
+				},
+				{
+					Path:               additionalB,
+					Scope:              ScopeGlobal,
+					AutoCreateOnAccess: false,
+					Optional:           true,
+				},
+			},
 		},
 		{
 			name:    "explicit prompts_dir wins with no env",
@@ -46,15 +65,25 @@ func TestResolveTable(t *testing.T) {
 			}},
 		},
 		{
-			name:    "default uses XDG when set",
-			cfg:     config.Resolved{},
+			name: "default uses XDG when set and additional dirs follow",
+			cfg: config.Resolved{
+				AdditionalPromptsDirs: []string{additionalA},
+			},
 			env:     map[string]string{"XDG_CONFIG_HOME": xdg},
 			homeDir: home,
-			want: []Source{{
-				Path:               filepath.Join(xdg, "tprompt", "prompts"),
-				Scope:              ScopeGlobal,
-				AutoCreateOnAccess: true,
-			}},
+			want: []Source{
+				{
+					Path:               filepath.Join(xdg, "tprompt", "prompts"),
+					Scope:              ScopeGlobal,
+					AutoCreateOnAccess: true,
+				},
+				{
+					Path:               additionalA,
+					Scope:              ScopeGlobal,
+					AutoCreateOnAccess: false,
+					Optional:           true,
+				},
+			},
 		},
 		{
 			name:    "default falls back to home when XDG unset",

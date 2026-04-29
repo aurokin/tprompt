@@ -48,7 +48,7 @@ func newListCmd(deps Deps) *cobra.Command {
 				return err
 			}
 			for _, summary := range summaries {
-				_, _ = fmt.Fprintf(deps.Stdout, "%s  %s\n", summary.ID, keybindSummary(summary))
+				_, _ = fmt.Fprintf(deps.Stdout, "%s  %s  %s\n", summary.ID, promptScope(summary), keybindSummary(summary))
 			}
 			return nil
 		},
@@ -76,6 +76,7 @@ func newShowCmd(deps Deps) *cobra.Command {
 			w := deps.Stdout
 			_, _ = fmt.Fprintf(w, "ID: %s\n", p.ID)
 			_, _ = fmt.Fprintf(w, "Source: %s\n", p.Path)
+			_, _ = fmt.Fprintf(w, "Scope: %s\n", promptScope(p.Summary))
 			if p.Title != "" {
 				_, _ = fmt.Fprintf(w, "Title: %s\n", p.Title)
 			}
@@ -91,6 +92,13 @@ func newShowCmd(deps Deps) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func promptScope(summary store.Summary) string {
+	if summary.Scope != "" {
+		return summary.Scope
+	}
+	return "global"
 }
 
 func keybindSummary(summary store.Summary) string {
