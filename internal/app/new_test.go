@@ -340,6 +340,37 @@ func TestNew_ProjectMissingGlobalDirReturnsTypedError(t *testing.T) {
 	}
 }
 
+func TestNew_ProjectAllowsMissingDefaultGlobalDir(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Chdir(root)
+
+	deps := workingDeps(t, &fakeStore{})
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{}, nil
+	}
+	stdout, _, err := executeRootWith(t, deps, "new", "project-review", "--project")
+	if err != nil {
+		t.Fatalf("new --project: %v", err)
+	}
+	target := filepath.Join(root, "tprompt", "project-review.md")
+	wantPath := mustEvalSymlinks(t, target)
+	if got := strings.TrimRight(stdout, "\n"); got != wantPath {
+		t.Errorf("stdout = %q, want %q", got, wantPath)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("stat project prompt: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, ".config", "tprompt", "prompts")); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Fatalf("default global prompts dir should not be required, stat err = %v", statErr)
+	}
+}
+
 func TestNew_ProjectRefusesExistingProjectFile(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {

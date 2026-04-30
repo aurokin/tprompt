@@ -250,6 +250,9 @@ func promptSourceExists(source promptsource.Source) (bool, error) {
 	info, err := os.Stat(source.Path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
+			if source.AutoCreateOnAccess {
+				return false, nil
+			}
 			if source.Optional {
 				return false, nil
 			}
