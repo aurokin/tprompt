@@ -2,6 +2,7 @@ package promptsource
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -351,6 +352,22 @@ func TestProjectRootStopsAtHomeBoundary(t *testing.T) {
 	var notFound *ProjectRootNotFoundError
 	if !errors.As(err, &notFound) {
 		t.Fatalf("ProjectRoot error = %T %v, want *ProjectRootNotFoundError", err, err)
+	}
+}
+
+func TestProjectRootPropagatesGitMarkerStatErrors(t *testing.T) {
+	t.Parallel()
+
+	cwd := t.TempDir()
+	statErr := fs.ErrPermission
+	_, err := ProjectRoot(cwd, "", func(path string) (os.FileInfo, error) {
+		if filepath.Base(path) == ".git" {
+			return nil, statErr
+		}
+		return os.Stat(path)
+	})
+	if !errors.Is(err, statErr) {
+		t.Fatalf("ProjectRoot error = %T %v, want wrapped %v", err, err, statErr)
 	}
 }
 

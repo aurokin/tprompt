@@ -317,6 +317,29 @@ func TestNew_ProjectIgnoresHomeGitRoot(t *testing.T) {
 	}
 }
 
+func TestNew_ProjectMissingGlobalDirReturnsTypedError(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+
+	missingGlobal := filepath.Join(t.TempDir(), "missing-global")
+	deps := newCmdDeps(t, missingGlobal)
+	_, _, err := executeRootWith(t, deps, "new", "project-review", "--project")
+
+	var dirMissing *store.PromptsDirMissingError
+	if !errors.As(err, &dirMissing) {
+		t.Fatalf("err = %T %v, want *store.PromptsDirMissingError", err, err)
+	}
+	if dirMissing.Path != missingGlobal {
+		t.Fatalf("Path = %q, want %q", dirMissing.Path, missingGlobal)
+	}
+	if ExitCode(err) != ExitUsage {
+		t.Errorf("ExitCode = %d, want %d", ExitCode(err), ExitUsage)
+	}
+}
+
 func TestNew_ProjectRefusesExistingProjectFile(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {

@@ -232,8 +232,11 @@ func findPromptByIDInSources(sources []promptsource.Source, id string) (string, 
 func promptSourceExists(source promptsource.Source) (bool, error) {
 	info, err := os.Stat(source.Path)
 	if err != nil {
-		if source.Optional && errors.Is(err, fs.ErrNotExist) {
-			return false, nil
+		if errors.Is(err, fs.ErrNotExist) {
+			if source.Optional {
+				return false, nil
+			}
+			return false, &store.PromptsDirMissingError{Path: source.Path}
 		}
 		return false, err
 	}

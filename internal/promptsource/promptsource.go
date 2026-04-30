@@ -5,6 +5,7 @@
 package promptsource
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -151,6 +152,8 @@ func ProjectRoot(cwd, homeDir string, stat func(string) (os.FileInfo, error)) (s
 		}
 		if _, err := stat(filepath.Join(dir, ".git")); err == nil {
 			return dir, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("stat git marker %s: %w", filepath.Join(dir, ".git"), err)
 		}
 
 		parent := filepath.Dir(dir)
