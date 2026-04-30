@@ -1,0 +1,27 @@
+# `tprompt new --project` may create a project prompt with the same ID as a
+# global prompt. Cross-tier duplicates are resolved by prompt_priority.
+
+mkdir repo/.git
+mkdir global
+cp existing.md global/code-review.md
+
+cd repo
+tprompt new code-review --project --config $WORK/config.toml
+stdout 'repo/tprompt/code-review\.md$'
+! stderr .
+exists $WORK/repo/tprompt/code-review.md
+
+tprompt list --config $WORK/config.toml
+stdout 'code-review  global  key 1 \(auto\)'
+stdout 'code-review  project  shadowed by .*/global/code-review\.md'
+
+tprompt show code-review --config $WORK/config.toml
+stdout 'Scope: global'
+stdout 'Shadowed counterpart: .*/repo/tprompt/code-review\.md'
+stdout '# global body'
+
+-- config.toml --
+prompts_dir = "../global"
+
+-- existing.md --
+# global body

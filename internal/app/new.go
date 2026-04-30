@@ -105,19 +105,21 @@ func runNew(deps Deps, id string, flags newFlags) error {
 	if err != nil {
 		return err
 	}
-	if err := ensureScaffoldDir(source.Path, source.AutoCreateOnAccess); err != nil {
-		return err
-	}
-
 	target, err := filepath.Abs(filepath.Join(source.Path, id+".md"))
 	if err != nil {
 		return fmt.Errorf("resolve prompt file path: %w", err)
+	}
+	if err := validatePromptSources(collisionSources, source.Path); err != nil {
+		return err
+	}
+	if err := ensureScaffoldDir(source.Path, source.AutoCreateOnAccess); err != nil {
+		return err
 	}
 	// Prompt ids are filename stems and the store walks subdirectories, so
 	// any existing `<id>.md` anywhere under source.Path collides — not just
 	// the exact target. Scan first so the user sees a clear error instead
 	// of a silently-broken store on the next list/show.
-	if existing, err := findPromptByIDInSources(collisionSources, id); err != nil {
+	if existing, err := findPromptByIDInSources(collisionSources, source.Scope, id); err != nil {
 		return err
 	} else if existing != "" {
 		return &PromptFileExistsError{ID: id, Path: existing}
@@ -211,8 +213,23 @@ func ensureScaffoldDir(path string, autoCreate bool) error {
 	return nil
 }
 
-func findPromptByIDInSources(sources []promptsource.Source, id string) (string, error) {
+func validatePromptSources(sources []promptsource.Source, targetPath string) error {
 	for _, source := range sources {
+		if source.Path == targetPath {
+			continue
+		}
+		if _, err := promptSourceExists(source); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func findPromptByIDInSources(sources []promptsource.Source, scope promptsource.Scope, id string) (string, error) {
+	for _, source := range sources {
+		if source.Scope != scope {
+			continue
+		}
 		if ok, err := promptSourceExists(source); err != nil {
 			return "", err
 		} else if !ok {

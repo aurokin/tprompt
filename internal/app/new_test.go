@@ -380,7 +380,7 @@ func TestNew_ProjectRefusesExistingProjectFile(t *testing.T) {
 	}
 }
 
-func TestNew_ProjectRefusesGlobalIDCollision(t *testing.T) {
+func TestNew_ProjectAllowsGlobalIDShadow(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
 		t.Fatal(err)
@@ -396,17 +396,28 @@ func TestNew_ProjectRefusesGlobalIDCollision(t *testing.T) {
 	t.Chdir(root)
 
 	deps := newCmdDeps(t, globalPrompts)
-	_, _, err := executeRootWith(t, deps, "new", "code-review", "--project")
-
-	var existsErr *PromptFileExistsError
-	if !errors.As(err, &existsErr) {
-		t.Fatalf("err = %T %v, want *PromptFileExistsError", err, err)
+	stdout, _, err := executeRootWith(t, deps, "new", "code-review", "--project")
+	if err != nil {
+		t.Fatalf("new --project: %v", err)
 	}
-	if existsErr.Path != globalPrompt {
-		t.Errorf("Path = %q, want %q", existsErr.Path, globalPrompt)
+	target := filepath.Join(root, "tprompt", "code-review.md")
+	wantPath := mustEvalSymlinks(t, target)
+	if got := strings.TrimRight(stdout, "\n"); got != wantPath {
+		t.Errorf("stdout = %q, want %q", got, wantPath)
 	}
-	if _, statErr := os.Stat(filepath.Join(root, "tprompt", "code-review.md")); !errors.Is(statErr, fs.ErrNotExist) {
-		t.Fatalf("project prompt should not exist, stat err = %v", statErr)
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read project prompt: %v", err)
+	}
+	if string(body) != scaffoldTemplate {
+		t.Errorf("project body mismatch\n--- got ---\n%s--- want ---\n%s", body, scaffoldTemplate)
+	}
+	globalBody, err := os.ReadFile(globalPrompt)
+	if err != nil {
+		t.Fatalf("read global prompt: %v", err)
+	}
+	if string(globalBody) != "global body\n" {
+		t.Errorf("global prompt changed: %q", globalBody)
 	}
 }
 
