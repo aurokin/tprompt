@@ -135,7 +135,11 @@ func scaffoldTargetSources(cfg config.Resolved, flags newFlags) (promptsource.So
 		if err != nil {
 			return promptsource.Source{}, nil, fmt.Errorf("resolve current directory: %w", err)
 		}
-		source, err := promptsource.ProjectSource(cwd)
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = ""
+		}
+		source, err := promptsource.ProjectSource(cwd, home)
 		if err != nil {
 			return promptsource.Source{}, nil, err
 		}

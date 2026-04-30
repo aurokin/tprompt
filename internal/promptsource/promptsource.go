@@ -118,10 +118,11 @@ func Resolve(cfg config.Resolved, getenv func(string) string, homeDir, cwd strin
 	return sources, nil
 }
 
-// ProjectRoot walks upward from cwd until it finds a git root. A directory is
-// considered a git root when it contains a .git entry, which covers both normal
-// repositories (.git directory) and linked worktrees/submodules (.git file).
-func ProjectRoot(cwd string, stat func(string) (os.FileInfo, error)) (string, error) {
+// ProjectRoot walks upward from cwd until it finds a git root. The walk stops
+// before the user's home directory, matching read-time overlay discovery.
+// A directory is considered a git root when it contains a .git entry, which
+// covers both normal repositories and linked worktrees/submodules.
+func ProjectRoot(cwd, homeDir string, stat func(string) (os.FileInfo, error)) (string, error) {
 	if strings.TrimSpace(cwd) == "" {
 		return "", &ProjectRootNotFoundError{}
 	}
@@ -137,8 +138,17 @@ func ProjectRoot(cwd string, stat func(string) (os.FileInfo, error)) (string, er
 	if err != nil {
 		return "", fmt.Errorf("resolve current directory symlinks: %w", err)
 	}
+	home := ""
+	if homeDir != "" {
+		if resolvedHome, err := canonicalPath(homeDir); err == nil {
+			home = resolvedHome
+		}
+	}
 	dir := start
 	for {
+		if samePath(dir, home) {
+			return "", &ProjectRootNotFoundError{CWD: start}
+		}
 		if _, err := stat(filepath.Join(dir, ".git")); err == nil {
 			return dir, nil
 		}
@@ -154,8 +164,8 @@ func ProjectRoot(cwd string, stat func(string) (os.FileInfo, error)) (string, er
 // ProjectSource resolves the write/read source for a project prompt overlay.
 // It does not require the tprompt directory to exist; callers decide whether
 // to auto-create it or skip it.
-func ProjectSource(cwd string) (Source, error) {
-	root, err := ProjectRoot(cwd, os.Stat)
+func ProjectSource(cwd, homeDir string) (Source, error) {
+	root, err := ProjectRoot(cwd, homeDir, os.Stat)
 	if err != nil {
 		return Source{}, err
 	}

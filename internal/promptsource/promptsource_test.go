@@ -279,7 +279,7 @@ func TestProjectRootFindsGitRootFromNestedDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ProjectRoot(nested, os.Stat)
+	got, err := ProjectRoot(nested, "", os.Stat)
 	if err != nil {
 		t.Fatalf("ProjectRoot: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestProjectRootAcceptsGitFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ProjectRoot(root, os.Stat)
+	got, err := ProjectRoot(root, "", os.Stat)
 	if err != nil {
 		t.Fatalf("ProjectRoot: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestProjectRootResolvesSymlinkedCWD(t *testing.T) {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 
-	got, err := ProjectRoot(linkNested, os.Stat)
+	got, err := ProjectRoot(linkNested, "", os.Stat)
 	if err != nil {
 		t.Fatalf("ProjectRoot: %v", err)
 	}
@@ -335,11 +335,30 @@ func TestProjectRootResolvesSymlinkedCWD(t *testing.T) {
 	}
 }
 
+func TestProjectRootStopsAtHomeBoundary(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	if err := os.Mkdir(filepath.Join(home, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cwd := filepath.Join(home, "scratch", "work")
+	if err := os.MkdirAll(cwd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ProjectRoot(cwd, home, os.Stat)
+	var notFound *ProjectRootNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("ProjectRoot error = %T %v, want *ProjectRootNotFoundError", err, err)
+	}
+}
+
 func TestProjectRootOutsideGitTree(t *testing.T) {
 	t.Parallel()
 
 	cwd := t.TempDir()
-	_, err := ProjectRoot(cwd, os.Stat)
+	_, err := ProjectRoot(cwd, "", os.Stat)
 	var notFound *ProjectRootNotFoundError
 	if !errors.As(err, &notFound) {
 		t.Fatalf("ProjectRoot error = %T %v, want *ProjectRootNotFoundError", err, err)

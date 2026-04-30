@@ -289,6 +289,34 @@ func TestNew_ProjectOutsideGitTreeFailsClearly(t *testing.T) {
 	}
 }
 
+func TestNew_ProjectIgnoresHomeGitRoot(t *testing.T) {
+	home := t.TempDir()
+	if err := os.Mkdir(filepath.Join(home, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cwd := filepath.Join(home, "scratch", "work")
+	if err := os.MkdirAll(cwd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Chdir(cwd)
+
+	globalPrompts := filepath.Join(t.TempDir(), "global-prompts")
+	if err := os.Mkdir(globalPrompts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	deps := newCmdDeps(t, globalPrompts)
+	_, _, err := executeRootWith(t, deps, "new", "home-leak", "--project")
+
+	var notFound *promptsource.ProjectRootNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("err = %T %v, want *promptsource.ProjectRootNotFoundError", err, err)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, "tprompt", "home-leak.md")); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Fatalf("home project prompt should not exist, stat err = %v", statErr)
+	}
+}
+
 func TestNew_ProjectRefusesExistingProjectFile(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
