@@ -223,38 +223,46 @@ func projectSource(cwd, homeDir string, stat StatFunc) (Source, bool, error) {
 	}
 
 	for {
-		if samePath(current, home) || isRoot(current) {
-			return Source{}, false, nil
-		}
-
-		promptDir := filepath.Join(current, "tprompt")
-		kind, err := stat(promptDir)
+		source, ok, stop, err := projectSourceAt(current, home, stat)
 		if err != nil {
 			return Source{}, false, err
 		}
-		if kind == PathDir {
-			if ok, err := hasGitAncestor(current, home, stat); err != nil {
-				return Source{}, false, err
-			} else if ok {
-				return Source{Path: promptDir, Scope: ScopeProject}, true, nil
-			}
+		if ok {
+			return source, true, nil
+		}
+		if stop {
 			return Source{}, false, nil
 		}
-
-		gitKind, err := stat(filepath.Join(current, ".git"))
-		if err != nil {
-			return Source{}, false, err
-		}
-		if gitKind == PathDir || gitKind == PathFile {
-			return Source{}, false, nil
-		}
-
-		parent := filepath.Dir(current)
-		if parent == current {
-			return Source{}, false, nil
-		}
-		current = parent
+		current = filepath.Dir(current)
 	}
+}
+
+func projectSourceAt(current, home string, stat StatFunc) (Source, bool, bool, error) {
+	if samePath(current, home) || isRoot(current) {
+		return Source{}, false, true, nil
+	}
+
+	promptDir := filepath.Join(current, "tprompt")
+	kind, err := stat(promptDir)
+	if err != nil {
+		return Source{}, false, false, err
+	}
+	if kind == PathDir {
+		ok, err := hasGitAncestor(current, home, stat)
+		if err != nil {
+			return Source{}, false, false, err
+		}
+		if ok {
+			return Source{Path: promptDir, Scope: ScopeProject}, true, false, nil
+		}
+		return Source{}, false, true, nil
+	}
+
+	gitKind, err := stat(filepath.Join(current, ".git"))
+	if err != nil {
+		return Source{}, false, false, err
+	}
+	return Source{}, false, gitKind == PathDir || gitKind == PathFile, nil
 }
 
 func canonicalPath(path string) (string, error) {
