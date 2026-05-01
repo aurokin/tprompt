@@ -317,7 +317,7 @@ func TestNew_ProjectIgnoresHomeGitRoot(t *testing.T) {
 	}
 }
 
-func TestNew_ProjectMissingGlobalDirReturnsTypedError(t *testing.T) {
+func TestNew_ProjectIgnoresExplicitMissingGlobalDir(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
 		t.Fatal(err)
@@ -326,27 +326,27 @@ func TestNew_ProjectMissingGlobalDirReturnsTypedError(t *testing.T) {
 
 	missingGlobal := filepath.Join(t.TempDir(), "missing-global")
 	deps := newCmdDeps(t, missingGlobal)
-	_, _, err := executeRootWith(t, deps, "new", "project-review", "--project")
+	stdout, _, err := executeRootWith(t, deps, "new", "project-review", "--project")
+	if err != nil {
+		t.Fatalf("new --project: %v", err)
+	}
 
-	var dirMissing *store.PromptsDirMissingError
-	if !errors.As(err, &dirMissing) {
-		t.Fatalf("err = %T %v, want *store.PromptsDirMissingError", err, err)
+	target := filepath.Join(root, "tprompt", "project-review.md")
+	wantPath := mustEvalSymlinks(t, target)
+	if got := strings.TrimRight(stdout, "\n"); got != wantPath {
+		t.Errorf("stdout = %q, want %q", got, wantPath)
 	}
-	if dirMissing.Path != missingGlobal {
-		t.Fatalf("Path = %q, want %q", dirMissing.Path, missingGlobal)
-	}
-	if ExitCode(err) != ExitUsage {
-		t.Errorf("ExitCode = %d, want %d", ExitCode(err), ExitUsage)
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("stat project prompt: %v", err)
 	}
 }
 
-func TestNew_ProjectAllowsMissingDefaultGlobalDir(t *testing.T) {
-	home := t.TempDir()
+func TestNew_ProjectDoesNotResolveDefaultGlobalDir(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "repo")
 	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
+	t.Setenv("HOME", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Chdir(root)
 
@@ -365,9 +365,6 @@ func TestNew_ProjectAllowsMissingDefaultGlobalDir(t *testing.T) {
 	}
 	if _, err := os.Stat(target); err != nil {
 		t.Fatalf("stat project prompt: %v", err)
-	}
-	if _, statErr := os.Stat(filepath.Join(home, ".config", "tprompt", "prompts")); !errors.Is(statErr, fs.ErrNotExist) {
-		t.Fatalf("default global prompts dir should not be required, stat err = %v", statErr)
 	}
 }
 
