@@ -1,0 +1,15 @@
+# `tprompt new --project` auto-creates <gitroot>/tprompt on first use.
+
+mkdir repo/.git
+mkdir repo/subdir
+mkdir global
+
+cd repo/subdir
+tprompt new adoption --project --config $WORK/config.toml
+stdout 'repo/tprompt/adoption\.md$'
+! stderr .
+
+exists $WORK/repo/tprompt/adoption.md
+
+-- config.toml --
+prompts_dir = "../../global"

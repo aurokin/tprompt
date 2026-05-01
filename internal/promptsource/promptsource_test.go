@@ -2,6 +2,8 @@ package promptsource
 
 import (
 	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -231,6 +233,159 @@ func TestResolveProjectDiscovery(t *testing.T) {
 	}
 }
 
+func TestResolveProjectDiscoveryResolvesSymlinkedCWD(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	for _, dir := range []string{
+		filepath.Join(root, ".git"),
+		filepath.Join(root, "tprompt"),
+		filepath.Join(root, "cmd", "tool"),
+	} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	linkParent := t.TempDir()
+	linkNested := filepath.Join(linkParent, "tool-link")
+	if err := os.Symlink(filepath.Join(root, "cmd", "tool"), linkNested); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	global := filepath.Join(t.TempDir(), "global")
+	got, err := Resolve(config.Resolved{PromptsDir: global}, nil, "", linkNested, osStatKind)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	want := []Source{
+		{Path: global, Scope: ScopeGlobal},
+		{Path: filepath.Join(mustEvalSymlinks(t, root), "tprompt"), Scope: ScopeProject},
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("Resolve mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestProjectRootFindsGitRootFromNestedDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "cmd", "tool")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ProjectRoot(nested, "", os.Stat)
+	if err != nil {
+		t.Fatalf("ProjectRoot: %v", err)
+	}
+	want := mustEvalSymlinks(t, root)
+	if got != want {
+		t.Fatalf("ProjectRoot = %q, want %q", got, want)
+	}
+}
+
+func TestProjectRootAcceptsGitFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: ../.git/worktrees/x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ProjectRoot(root, "", os.Stat)
+	if err != nil {
+		t.Fatalf("ProjectRoot: %v", err)
+	}
+	want := mustEvalSymlinks(t, root)
+	if got != want {
+		t.Fatalf("ProjectRoot = %q, want %q", got, want)
+	}
+}
+
+func TestProjectRootResolvesSymlinkedCWD(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	realNested := filepath.Join(root, "cmd", "tool")
+	if err := os.MkdirAll(realNested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	linkParent := t.TempDir()
+	linkNested := filepath.Join(linkParent, "tool-link")
+	if err := os.Symlink(realNested, linkNested); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	got, err := ProjectRoot(linkNested, "", os.Stat)
+	if err != nil {
+		t.Fatalf("ProjectRoot: %v", err)
+	}
+	want := mustEvalSymlinks(t, root)
+	if got != want {
+		t.Fatalf("ProjectRoot = %q, want %q", got, want)
+	}
+}
+
+func TestProjectRootStopsAtHomeBoundary(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	if err := os.Mkdir(filepath.Join(home, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cwd := filepath.Join(home, "scratch", "work")
+	if err := os.MkdirAll(cwd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ProjectRoot(cwd, home, os.Stat)
+	var notFound *ProjectRootNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("ProjectRoot error = %T %v, want *ProjectRootNotFoundError", err, err)
+	}
+}
+
+func TestProjectRootPropagatesGitMarkerStatErrors(t *testing.T) {
+	t.Parallel()
+
+	cwd := t.TempDir()
+	statErr := fs.ErrPermission
+	_, err := ProjectRoot(cwd, "", func(path string) (os.FileInfo, error) {
+		if filepath.Base(path) == ".git" {
+			return nil, statErr
+		}
+		return os.Stat(path)
+	})
+	if !errors.Is(err, statErr) {
+		t.Fatalf("ProjectRoot error = %T %v, want wrapped %v", err, err, statErr)
+	}
+}
+
+func TestProjectRootOutsideGitTree(t *testing.T) {
+	t.Parallel()
+
+	cwd := t.TempDir()
+	_, err := ProjectRoot(cwd, "", os.Stat)
+	var notFound *ProjectRootNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("ProjectRoot error = %T %v, want *ProjectRootNotFoundError", err, err)
+	}
+	want := mustEvalSymlinks(t, cwd)
+	if notFound.CWD != want {
+		t.Fatalf("ProjectRootNotFoundError.CWD = %q, want %q", notFound.CWD, want)
+	}
+}
+
 // mapGetenv returns a getenv-like func backed by m. A nil m yields a nil
 // function so callers can verify Resolve handles a missing env getter.
 func mapGetenv(m map[string]string) func(string) string {
@@ -247,4 +402,27 @@ func mapStat(paths map[string]PathKind) StatFunc {
 		}
 		return PathMissing, nil
 	}
+}
+
+func osStatKind(path string) (PathKind, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return PathMissing, nil
+		}
+		return PathMissing, err
+	}
+	if info.IsDir() {
+		return PathDir, nil
+	}
+	return PathFile, nil
+}
+
+func mustEvalSymlinks(t *testing.T, path string) string {
+	t.Helper()
+	evaluated, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", path, err)
+	}
+	return evaluated
 }

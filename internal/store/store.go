@@ -270,36 +270,8 @@ func (s *FSStore) cacheResolvedPrompts(winners []discoveredPrompt, shadows []dis
 	promptsByID := make(map[string]Prompt, len(winners))
 	promptsByRef := make(map[string]Prompt, len(winners)+len(shadows))
 	summaries := make([]Summary, 0, len(winners)+len(shadows))
-	shadowByWinner := shadowsByWinner(winners, shadows)
-	for _, entry := range winners {
-		if resolvedKey, ok := resolvedKeyForPrompt(assignment.Bindings, entry.prompt.ID); ok {
-			entry.prompt.Key = string(resolvedKey)
-			if entry.hasKey {
-				entry.prompt.KeySource = KeySourceExplicit
-			} else {
-				entry.prompt.KeySource = KeySourceAuto
-			}
-		} else {
-			entry.prompt.KeySource = KeySourceOverflow
-		}
-		if shadow, ok := shadowByWinner[promptRef(entry.prompt.Summary)]; ok {
-			entry.prompt.ShadowPath = shadow.prompt.Path
-		}
-		promptsByID[entry.prompt.ID] = entry.prompt
-		promptsByRef[promptRef(entry.prompt.Summary)] = entry.prompt
-		summaries = append(summaries, entry.prompt.Summary)
-	}
-	for _, entry := range shadows {
-		winner, ok := winnerForShadow(entry, winners)
-		if ok {
-			entry.prompt.ShadowedBy = winner.prompt.Path
-		}
-		entry.prompt.Shadowed = true
-		entry.prompt.Key = ""
-		entry.prompt.KeySource = KeySourceShadowed
-		promptsByRef[promptRef(entry.prompt.Summary)] = entry.prompt
-		summaries = append(summaries, entry.prompt.Summary)
-	}
+	cacheWinnerPrompts(winners, shadows, assignment.Bindings, promptsByID, promptsByRef, &summaries)
+	cacheShadowPrompts(shadows, winners, promptsByRef, &summaries)
 
 	sort.Slice(summaries, func(i, j int) bool {
 		if summaries[i].ID != summaries[j].ID {
@@ -311,6 +283,60 @@ func (s *FSStore) cacheResolvedPrompts(winners []discoveredPrompt, shadows []dis
 	s.promptsByRef = promptsByRef
 	s.summaries = summaries
 	return nil
+}
+
+func cacheWinnerPrompts(
+	winners []discoveredPrompt,
+	shadows []discoveredPrompt,
+	bindings map[rune]string,
+	promptsByID map[string]Prompt,
+	promptsByRef map[string]Prompt,
+	summaries *[]Summary,
+) {
+	shadowByWinner := shadowsByWinner(winners, shadows)
+	for _, entry := range winners {
+		entry.prompt = promptWithResolvedKey(entry, bindings)
+		if shadow, ok := shadowByWinner[promptRef(entry.prompt.Summary)]; ok {
+			entry.prompt.ShadowPath = shadow.prompt.Path
+		}
+		promptsByID[entry.prompt.ID] = entry.prompt
+		promptsByRef[promptRef(entry.prompt.Summary)] = entry.prompt
+		*summaries = append(*summaries, entry.prompt.Summary)
+	}
+}
+
+func promptWithResolvedKey(entry discoveredPrompt, bindings map[rune]string) Prompt {
+	prompt := entry.prompt
+	if resolvedKey, ok := resolvedKeyForPrompt(bindings, prompt.ID); ok {
+		prompt.Key = string(resolvedKey)
+		if entry.hasKey {
+			prompt.KeySource = KeySourceExplicit
+		} else {
+			prompt.KeySource = KeySourceAuto
+		}
+		return prompt
+	}
+	prompt.KeySource = KeySourceOverflow
+	return prompt
+}
+
+func cacheShadowPrompts(
+	shadows []discoveredPrompt,
+	winners []discoveredPrompt,
+	promptsByRef map[string]Prompt,
+	summaries *[]Summary,
+) {
+	for _, entry := range shadows {
+		winner, ok := winnerForShadow(entry, winners)
+		if ok {
+			entry.prompt.ShadowedBy = winner.prompt.Path
+		}
+		entry.prompt.Shadowed = true
+		entry.prompt.Key = ""
+		entry.prompt.KeySource = KeySourceShadowed
+		promptsByRef[promptRef(entry.prompt.Summary)] = entry.prompt
+		*summaries = append(*summaries, entry.prompt.Summary)
+	}
 }
 
 func (s *FSStore) clearCache() {

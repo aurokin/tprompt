@@ -128,32 +128,44 @@ func (s *SearchIndex) catalog() []MatchedRow {
 }
 
 func (s *SearchIndex) ranked(q string) []MatchedRow {
-	ranks := make(map[int]matchRank)
-	accumulate := func(corpus []string, weight float64, priority int) {
-		for _, m := range fuzzy.Find(q, corpus) {
-			if s.rows[m.Index].PromptID == "" {
-				// The clip row has no searchable content, but guard in case a
-				// future caller passes a clip row with a populated field.
-				continue
-			}
-			rank, ok := ranks[m.Index]
-			if !ok {
-				rank.bestPriority = priority
-			} else if priority < rank.bestPriority {
-				rank.bestPriority = priority
-			}
-			rank.score += float64(m.Score) * weight
-			ranks[m.Index] = rank
-		}
-	}
-	accumulate(s.ids, weightID, priorityID)
-	accumulate(s.titles, weightTitle, priorityTitle)
-	accumulate(s.descriptions, weightDescription, priorityDescription)
-	accumulate(s.tagsText, weightTags, priorityTags)
-
+	ranks := s.matchRanks(q)
 	if len(ranks) == 0 {
 		return []MatchedRow{}
 	}
+	return s.sortedMatchedRows(ranks)
+}
+
+func (s *SearchIndex) matchRanks(q string) map[int]matchRank {
+	ranks := make(map[int]matchRank)
+	s.accumulateRanks(q, s.ids, weightID, priorityID, ranks)
+	s.accumulateRanks(q, s.titles, weightTitle, priorityTitle, ranks)
+	s.accumulateRanks(q, s.descriptions, weightDescription, priorityDescription, ranks)
+	s.accumulateRanks(q, s.tagsText, weightTags, priorityTags, ranks)
+	return ranks
+}
+
+func (s *SearchIndex) accumulateRanks(q string, corpus []string, weight float64, priority int, ranks map[int]matchRank) {
+	for _, m := range fuzzy.Find(q, corpus) {
+		if s.rows[m.Index].PromptID == "" {
+			// The clip row has no searchable content, but guard in case a
+			// future caller passes a clip row with a populated field.
+			continue
+		}
+		rank, ok := ranks[m.Index]
+		rank = updatedRank(rank, ok, priority, float64(m.Score)*weight)
+		ranks[m.Index] = rank
+	}
+}
+
+func updatedRank(rank matchRank, ok bool, priority int, score float64) matchRank {
+	if !ok || priority < rank.bestPriority {
+		rank.bestPriority = priority
+	}
+	rank.score += score
+	return rank
+}
+
+func (s *SearchIndex) sortedMatchedRows(ranks map[int]matchRank) []MatchedRow {
 	out := make([]MatchedRow, 0, len(ranks))
 	priorities := make(map[string]int, len(ranks))
 	for idx, rank := range ranks {
@@ -162,20 +174,24 @@ func (s *SearchIndex) ranked(q string) []MatchedRow {
 		priorities[rowIdentity(row)] = rank.bestPriority
 	}
 	sort.Slice(out, func(a, b int) bool {
-		priorityA := priorities[rowIdentity(out[a].Row)]
-		priorityB := priorities[rowIdentity(out[b].Row)]
-		if priorityA != priorityB {
-			return priorityA < priorityB
-		}
-		if out[a].Score != out[b].Score {
-			return out[a].Score > out[b].Score
-		}
-		if out[a].Row.PromptID != out[b].Row.PromptID {
-			return out[a].Row.PromptID < out[b].Row.PromptID
-		}
-		return out[a].Row.Scope < out[b].Row.Scope
+		return matchedRowLess(out[a], out[b], priorities)
 	})
 	return out
+}
+
+func matchedRowLess(left, right MatchedRow, priorities map[string]int) bool {
+	priorityLeft := priorities[rowIdentity(left.Row)]
+	priorityRight := priorities[rowIdentity(right.Row)]
+	if priorityLeft != priorityRight {
+		return priorityLeft < priorityRight
+	}
+	if left.Score != right.Score {
+		return left.Score > right.Score
+	}
+	if left.Row.PromptID != right.Row.PromptID {
+		return left.Row.PromptID < right.Row.PromptID
+	}
+	return left.Row.Scope < right.Row.Scope
 }
 
 func rowIdentity(row Row) string {

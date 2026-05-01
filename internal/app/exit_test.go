@@ -74,6 +74,13 @@ func TestExitCodeUnresolvedDefaultDir(t *testing.T) {
 	}
 }
 
+func TestExitCodeProjectRootNotFound(t *testing.T) {
+	err := &promptsource.ProjectRootNotFoundError{CWD: "/tmp/no-git"}
+	if got := ExitCode(err); got != ExitUsage {
+		t.Fatalf("ExitCode(ProjectRootNotFoundError) = %d, want %d", got, ExitUsage)
+	}
+}
+
 func TestExitCodePromptsDirCreate(t *testing.T) {
 	err := &store.PromptsDirCreateError{Path: "/nope", Err: errors.New("read-only fs")}
 	if got := ExitCode(err); got != ExitUsage {

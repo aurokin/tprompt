@@ -1,0 +1,15 @@
+# Minimal environment: no config file, no prompts_dir set, and no resolvable
+# default global prompts directory. `tprompt new --project` still writes the
+# project prompt because project scaffolding does not resolve global sources.
+
+env HOME=
+env XDG_CONFIG_HOME=
+
+mkdir repo/.git
+cd repo
+
+tprompt new project-review --project
+stdout 'repo/tprompt/project-review\.md$'
+! stderr .
+
+exists $WORK/repo/tprompt/project-review.md

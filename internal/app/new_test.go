@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hsadler/tprompt/internal/config"
+	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/store"
 )
 
@@ -230,6 +231,224 @@ func TestNew_AdditionalPromptsDirThatIsFileIsHardError(t *testing.T) {
 	}
 }
 
+func TestNew_ProjectWritesAtGitRootAndAutoCreatesDir(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "cmd", "tool")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(nested)
+
+	globalPrompts := filepath.Join(t.TempDir(), "global-prompts")
+	if err := os.Mkdir(globalPrompts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	deps := newCmdDeps(t, globalPrompts)
+	stdout, stderr, err := executeRootWith(t, deps, "new", "project-review", "--project")
+	if err != nil {
+		t.Fatalf("executeRootWith: %v", err)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty", stderr)
+	}
+
+	target := filepath.Join(root, "tprompt", "project-review.md")
+	abs, err := filepath.Abs(target)
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	abs = mustEvalSymlinks(t, abs)
+	if got := strings.TrimRight(stdout, "\n"); got != abs {
+		t.Errorf("stdout = %q, want %q", got, abs)
+	}
+
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read scaffolded project file: %v", err)
+	}
+	if string(body) != scaffoldTemplate {
+		t.Errorf("scaffolded body mismatch\n--- got ---\n%s--- want ---\n%s", body, scaffoldTemplate)
+	}
+}
+
+func TestNew_ProjectOutsideGitTreeFailsClearly(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	deps := newCmdDeps(t, filepath.Join(t.TempDir(), "global-prompts"))
+	_, _, err := executeRootWith(t, deps, "new", "project-review", "--project")
+
+	var notFound *promptsource.ProjectRootNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("err = %T %v, want *promptsource.ProjectRootNotFoundError", err, err)
+	}
+	if ExitCode(err) != ExitUsage {
+		t.Errorf("ExitCode = %d, want %d", ExitCode(err), ExitUsage)
+	}
+}
+
+func TestNew_ProjectIgnoresHomeGitRoot(t *testing.T) {
+	home := t.TempDir()
+	if err := os.Mkdir(filepath.Join(home, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cwd := filepath.Join(home, "scratch", "work")
+	if err := os.MkdirAll(cwd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Chdir(cwd)
+
+	globalPrompts := filepath.Join(t.TempDir(), "global-prompts")
+	if err := os.Mkdir(globalPrompts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	deps := newCmdDeps(t, globalPrompts)
+	_, _, err := executeRootWith(t, deps, "new", "home-leak", "--project")
+
+	var notFound *promptsource.ProjectRootNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("err = %T %v, want *promptsource.ProjectRootNotFoundError", err, err)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, "tprompt", "home-leak.md")); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Fatalf("home project prompt should not exist, stat err = %v", statErr)
+	}
+}
+
+func TestNew_ProjectIgnoresExplicitMissingGlobalDir(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+
+	missingGlobal := filepath.Join(t.TempDir(), "missing-global")
+	deps := newCmdDeps(t, missingGlobal)
+	stdout, _, err := executeRootWith(t, deps, "new", "project-review", "--project")
+	if err != nil {
+		t.Fatalf("new --project: %v", err)
+	}
+
+	target := filepath.Join(root, "tprompt", "project-review.md")
+	wantPath := mustEvalSymlinks(t, target)
+	if got := strings.TrimRight(stdout, "\n"); got != wantPath {
+		t.Errorf("stdout = %q, want %q", got, wantPath)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("stat project prompt: %v", err)
+	}
+}
+
+func TestNew_ProjectDoesNotResolveDefaultGlobalDir(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Chdir(root)
+
+	deps := workingDeps(t, &fakeStore{})
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{}, nil
+	}
+	stdout, _, err := executeRootWith(t, deps, "new", "project-review", "--project")
+	if err != nil {
+		t.Fatalf("new --project: %v", err)
+	}
+	target := filepath.Join(root, "tprompt", "project-review.md")
+	wantPath := mustEvalSymlinks(t, target)
+	if got := strings.TrimRight(stdout, "\n"); got != wantPath {
+		t.Errorf("stdout = %q, want %q", got, wantPath)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("stat project prompt: %v", err)
+	}
+}
+
+func TestNew_ProjectRefusesExistingProjectFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	projectPrompts := filepath.Join(root, "tprompt")
+	if err := os.Mkdir(projectPrompts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(projectPrompts, "project-review.md")
+	original := []byte("project body\n")
+	if err := os.WriteFile(target, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+
+	globalPrompts := filepath.Join(t.TempDir(), "global-prompts")
+	if err := os.Mkdir(globalPrompts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	deps := newCmdDeps(t, globalPrompts)
+	_, _, err := executeRootWith(t, deps, "new", "project-review", "--project")
+
+	var existsErr *PromptFileExistsError
+	if !errors.As(err, &existsErr) {
+		t.Fatalf("err = %T %v, want *PromptFileExistsError", err, err)
+	}
+	wantPath := mustEvalSymlinks(t, target)
+	if existsErr.Path != wantPath {
+		t.Errorf("Path = %q, want %q", existsErr.Path, wantPath)
+	}
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(body) != string(original) {
+		t.Errorf("file body changed: got %q, want %q", body, original)
+	}
+}
+
+func TestNew_ProjectAllowsGlobalIDShadow(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	globalPrompts := filepath.Join(t.TempDir(), "global-prompts")
+	if err := os.Mkdir(globalPrompts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	globalPrompt := filepath.Join(globalPrompts, "code-review.md")
+	if err := os.WriteFile(globalPrompt, []byte("global body\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+
+	deps := newCmdDeps(t, globalPrompts)
+	stdout, _, err := executeRootWith(t, deps, "new", "code-review", "--project")
+	if err != nil {
+		t.Fatalf("new --project: %v", err)
+	}
+	target := filepath.Join(root, "tprompt", "code-review.md")
+	wantPath := mustEvalSymlinks(t, target)
+	if got := strings.TrimRight(stdout, "\n"); got != wantPath {
+		t.Errorf("stdout = %q, want %q", got, wantPath)
+	}
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read project prompt: %v", err)
+	}
+	if string(body) != scaffoldTemplate {
+		t.Errorf("project body mismatch\n--- got ---\n%s--- want ---\n%s", body, scaffoldTemplate)
+	}
+	globalBody, err := os.ReadFile(globalPrompt)
+	if err != nil {
+		t.Fatalf("read global prompt: %v", err)
+	}
+	if string(globalBody) != "global body\n" {
+		t.Errorf("global prompt changed: %q", globalBody)
+	}
+}
+
 func TestNew_RequiresExactlyOneArg(t *testing.T) {
 	dir := t.TempDir()
 	deps := newCmdDeps(t, dir)
@@ -294,4 +513,13 @@ func newCmdDepsWithAdditional(t *testing.T, promptsDir string, additional []stri
 		}, nil
 	}
 	return deps
+}
+
+func mustEvalSymlinks(t *testing.T, path string) string {
+	t.Helper()
+	evaluated, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", path, err)
+	}
+	return evaluated
 }

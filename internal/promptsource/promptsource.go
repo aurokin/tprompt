@@ -5,7 +5,9 @@
 package promptsource
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -19,6 +21,19 @@ type UnresolvedDefaultDirError struct{}
 
 func (e *UnresolvedDefaultDirError) Error() string {
 	return "promptsource: cannot resolve default prompts directory: XDG_CONFIG_HOME unset and home directory unknown"
+}
+
+// ProjectRootNotFoundError reports that a project-scoped operation was run
+// outside a git tree. CWD names the directory where discovery started.
+type ProjectRootNotFoundError struct {
+	CWD string
+}
+
+func (e *ProjectRootNotFoundError) Error() string {
+	if e.CWD == "" {
+		return "promptsource: no project root found: not inside a git tree"
+	}
+	return fmt.Sprintf("promptsource: no project root found from %s: not inside a git tree", e.CWD)
 }
 
 // Scope identifies which tier a source belongs to.
@@ -104,6 +119,66 @@ func Resolve(cfg config.Resolved, getenv func(string) string, homeDir, cwd strin
 	return sources, nil
 }
 
+// ProjectRoot walks upward from cwd until it finds a git root. The walk stops
+// before the user's home directory, matching read-time overlay discovery.
+// A directory is considered a git root when it contains a .git entry, which
+// covers both normal repositories and linked worktrees/submodules.
+func ProjectRoot(cwd, homeDir string, stat func(string) (os.FileInfo, error)) (string, error) {
+	if strings.TrimSpace(cwd) == "" {
+		return "", &ProjectRootNotFoundError{}
+	}
+	if stat == nil {
+		stat = os.Stat
+	}
+
+	start, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", fmt.Errorf("resolve current directory: %w", err)
+	}
+	start, err = filepath.EvalSymlinks(start)
+	if err != nil {
+		return "", fmt.Errorf("resolve current directory symlinks: %w", err)
+	}
+	home := ""
+	if homeDir != "" {
+		if resolvedHome, err := canonicalPath(homeDir); err == nil {
+			home = resolvedHome
+		}
+	}
+	dir := start
+	for {
+		if samePath(dir, home) {
+			return "", &ProjectRootNotFoundError{CWD: start}
+		}
+		if _, err := stat(filepath.Join(dir, ".git")); err == nil {
+			return dir, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("stat git marker %s: %w", filepath.Join(dir, ".git"), err)
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", &ProjectRootNotFoundError{CWD: start}
+		}
+		dir = parent
+	}
+}
+
+// ProjectSource resolves the write/read source for a project prompt overlay.
+// It does not require the tprompt directory to exist; callers decide whether
+// to auto-create it or skip it.
+func ProjectSource(cwd, homeDir string) (Source, error) {
+	root, err := ProjectRoot(cwd, homeDir, os.Stat)
+	if err != nil {
+		return Source{}, err
+	}
+	return Source{
+		Path:               filepath.Join(root, "tprompt"),
+		Scope:              ScopeProject,
+		AutoCreateOnAccess: false,
+	}, nil
+}
+
 func primarySource(cfg config.Resolved, getenv func(string) string, homeDir string) (Source, error) {
 	if cfg.PromptsDir != "" {
 		return Source{
@@ -138,48 +213,68 @@ func projectSource(cwd, homeDir string, stat StatFunc) (Source, bool, error) {
 	if cwd == "" || stat == nil {
 		return Source{}, false, nil
 	}
-	current, err := filepath.Abs(cwd)
+	current, err := canonicalPath(cwd)
 	if err != nil {
 		return Source{}, false, fmt.Errorf("resolve cwd: %w", err)
 	}
 	home := ""
 	if homeDir != "" {
-		home, _ = filepath.Abs(homeDir)
+		home, _ = canonicalPath(homeDir)
 	}
 
 	for {
-		if samePath(current, home) || isRoot(current) {
-			return Source{}, false, nil
-		}
-
-		promptDir := filepath.Join(current, "tprompt")
-		kind, err := stat(promptDir)
+		source, ok, stop, err := projectSourceAt(current, home, stat)
 		if err != nil {
 			return Source{}, false, err
 		}
-		if kind == PathDir {
-			if ok, err := hasGitAncestor(current, home, stat); err != nil {
-				return Source{}, false, err
-			} else if ok {
-				return Source{Path: promptDir, Scope: ScopeProject}, true, nil
-			}
+		if ok {
+			return source, true, nil
+		}
+		if stop {
 			return Source{}, false, nil
 		}
-
-		gitKind, err := stat(filepath.Join(current, ".git"))
-		if err != nil {
-			return Source{}, false, err
-		}
-		if gitKind == PathDir || gitKind == PathFile {
-			return Source{}, false, nil
-		}
-
-		parent := filepath.Dir(current)
-		if parent == current {
-			return Source{}, false, nil
-		}
-		current = parent
+		current = filepath.Dir(current)
 	}
+}
+
+func projectSourceAt(current, home string, stat StatFunc) (Source, bool, bool, error) {
+	if samePath(current, home) || isRoot(current) {
+		return Source{}, false, true, nil
+	}
+
+	promptDir := filepath.Join(current, "tprompt")
+	kind, err := stat(promptDir)
+	if err != nil {
+		return Source{}, false, false, err
+	}
+	if kind == PathDir {
+		ok, err := hasGitAncestor(current, home, stat)
+		if err != nil {
+			return Source{}, false, false, err
+		}
+		if ok {
+			return Source{Path: promptDir, Scope: ScopeProject}, true, false, nil
+		}
+		return Source{}, false, true, nil
+	}
+
+	gitKind, err := stat(filepath.Join(current, ".git"))
+	if err != nil {
+		return Source{}, false, false, err
+	}
+	return Source{}, false, gitKind == PathDir || gitKind == PathFile, nil
+}
+
+func canonicalPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	evaluated, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return abs, nil
+	}
+	return evaluated, nil
 }
 
 func hasGitAncestor(start, home string, stat StatFunc) (bool, error) {

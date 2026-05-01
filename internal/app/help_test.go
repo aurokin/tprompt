@@ -55,8 +55,8 @@ func TestSubcommandHelpText(t *testing.T) {
 		},
 		{
 			path:   []string{"new"},
-			want:   []string{"scaffold", "global prompts", "absolute path", "refuses to overwrite"},
-			banned: []string{"--project"},
+			want:   []string{"scaffold", "global prompts", "--project", "absolute path", "refuses to overwrite"},
+			banned: nil,
 		},
 		{
 			path:   []string{"tui"},
