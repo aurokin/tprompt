@@ -97,10 +97,10 @@ func (c *socketClient) do(req wireRequest, resp *wireResponse) error {
 	}
 
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		return &IPCError{Path: c.path, Op: "write request", Reason: err.Error()}
+		return &IPCError{Path: c.path, Op: "write request", Reason: err.Error(), Err: err}
 	}
 	if err := json.NewDecoder(conn).Decode(resp); err != nil {
-		return &IPCError{Path: c.path, Op: "read response", Reason: err.Error()}
+		return &IPCError{Path: c.path, Op: "read response", Reason: err.Error(), Err: err}
 	}
 	return nil
 }

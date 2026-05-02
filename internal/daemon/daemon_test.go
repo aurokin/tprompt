@@ -2,7 +2,11 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
+	"net"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -231,5 +235,85 @@ func TestTimeoutErrorMessage(t *testing.T) {
 	want := "verification timed out after 5000ms"
 	if got := err.Error(); got != want {
 		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestIPCErrorUnwrap(t *testing.T) {
+	cause := io.EOF
+	err := &IPCError{Path: "/tmp/x.sock", Op: "read response", Reason: cause.Error(), Err: cause}
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("errors.Is(err, io.EOF) = false, want true")
+	}
+}
+
+func TestIsDaemonGone(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{
+			name: "SocketUnavailableError",
+			err:  &SocketUnavailableError{Path: "/tmp/x.sock", Reason: "no such file"},
+			want: true,
+		},
+		{
+			name: "wrapped SocketUnavailableError",
+			err:  errors.Join(errors.New("ctx"), &SocketUnavailableError{Path: "/tmp/x.sock"}),
+			want: true,
+		},
+		{
+			name: "IPCError wrapping io.EOF",
+			err:  &IPCError{Op: "read response", Reason: io.EOF.Error(), Err: io.EOF},
+			want: true,
+		},
+		{
+			name: "IPCError wrapping io.ErrUnexpectedEOF",
+			err:  &IPCError{Op: "read response", Reason: io.ErrUnexpectedEOF.Error(), Err: io.ErrUnexpectedEOF},
+			want: true,
+		},
+		{
+			name: "IPCError wrapping net.ErrClosed",
+			err:  &IPCError{Op: "write request", Reason: net.ErrClosed.Error(), Err: net.ErrClosed},
+			want: true,
+		},
+		{
+			name: "IPCError wrapping ECONNRESET",
+			err:  &IPCError{Op: "read response", Reason: syscall.ECONNRESET.Error(), Err: syscall.ECONNRESET},
+			want: true,
+		},
+		{
+			name: "IPCError wrapping EPIPE",
+			err:  &IPCError{Op: "write request", Reason: syscall.EPIPE.Error(), Err: syscall.EPIPE},
+			want: true,
+		},
+		{
+			name: "IPCError wrapping syscall via net.OpError",
+			err:  &IPCError{Op: "read response", Reason: "wrapped", Err: &net.OpError{Op: "read", Err: syscall.ECONNRESET}},
+			want: true,
+		},
+		{
+			name: "IPCError with unrelated cause",
+			err:  &IPCError{Op: "read response", Reason: "boom", Err: errors.New("boom")},
+			want: false,
+		},
+		{
+			name: "IPCError with no Err field",
+			err:  &IPCError{Op: "read response", Reason: "EOF"},
+			want: false,
+		},
+		{
+			name: "unrelated error",
+			err:  errors.New("some other failure"),
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsDaemonGone(tc.err); got != tc.want {
+				t.Fatalf("IsDaemonGone(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }

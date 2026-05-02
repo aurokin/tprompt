@@ -9,7 +9,11 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"net"
+	"syscall"
 	"time"
 
 	"github.com/hsadler/tprompt/internal/tmux"
@@ -141,10 +145,14 @@ func (e *SocketUnavailableError) Error() string {
 // IPCError reports a failure on an already-established daemon socket, such as
 // a broken write or an EOF while waiting for the daemon's reply. These are
 // still daemon-class failures and map to ExitDaemon (5) at the CLI boundary.
+// Err preserves the underlying cause so callers can use errors.Is to classify
+// peer-close conditions (see IsDaemonGone); Reason carries the rendered
+// message used in Error().
 type IPCError struct {
 	Path   string
 	Op     string
 	Reason string
+	Err    error
 }
 
 func (e *IPCError) Error() string {
@@ -159,6 +167,36 @@ func (e *IPCError) Error() string {
 		return base
 	}
 	return fmt.Sprintf("%s: %s", base, e.Reason)
+}
+
+func (e *IPCError) Unwrap() error { return e.Err }
+
+// IsDaemonGone reports whether err indicates the daemon socket is no longer
+// reachable — either the listener has been unlinked (SocketUnavailableError)
+// or an in-flight IPC observed the peer close the connection. Used by
+// `tprompt daemon stop` to treat the inherent shutdown race as success
+// instead of an IPC failure.
+func IsDaemonGone(err error) bool {
+	if err == nil {
+		return false
+	}
+	var sue *SocketUnavailableError
+	if errors.As(err, &sue) {
+		return true
+	}
+	var ipc *IPCError
+	if !errors.As(err, &ipc) {
+		return false
+	}
+	switch {
+	case errors.Is(ipc, io.EOF),
+		errors.Is(ipc, io.ErrUnexpectedEOF),
+		errors.Is(ipc, net.ErrClosed),
+		errors.Is(ipc, syscall.ECONNRESET),
+		errors.Is(ipc, syscall.EPIPE):
+		return true
+	}
+	return false
 }
 
 // ShutdownTimeoutError reports that `daemon stop` was acknowledged but the
