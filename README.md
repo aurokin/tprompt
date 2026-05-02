@@ -14,9 +14,25 @@ The core workflow is built for tmux popups:
 That deferred handoff avoids sleep-based popup timing and keeps delivery tied
 to tmux state.
 
+## Quickstart
+
+```bash
+tprompt new code-review              # scaffold ~/.config/tprompt/prompts/code-review.md
+$EDITOR "$(tprompt show code-review | head -1 | cut -d' ' -f2)"  # or just open it
+tprompt list                         # confirm it loads with a board key
+tprompt send code-review --target-pane '#{pane_id}'
+```
+
+`tprompt new` auto-creates the default global prompts directory on first use,
+so a fresh install needs no hand-edited config to start writing prompts. Pass
+`--project` to scaffold a per-repo overlay at `<gitroot>/tprompt/<id>.md`
+instead.
+
 ## Core Commands
 
 ```bash
+tprompt new code-review
+tprompt new project-only --project
 tprompt list
 tprompt show code-review
 tprompt send code-review

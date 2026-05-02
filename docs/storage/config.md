@@ -86,6 +86,21 @@ auto-created — a missing explicit directory remains a hard error
 Missing additional directories are skipped at runtime and reported as doctor
 warnings. Duplicate prompt IDs within the global tier are hard errors.
 
+## Source resolution order
+
+Discovery walks the configured sources in this fixed order:
+
+1. **Primary global** — `prompts_dir` if set, otherwise the auto-created
+   default at `$XDG_CONFIG_HOME/tprompt/prompts` (or `~/.config/tprompt/prompts`).
+2. **Additional global sources** — each entry of `additional_prompts_dirs`,
+   in declared order.
+3. **Project overlay** — the `tprompt/` directory discovered by walking up
+   from the current working directory, when one is active.
+
+Sources 1 and 2 form the **global tier**. Source 3 is the **project tier**.
+Within a single tier, duplicate prompt IDs remain a hard error. Across tiers,
+`prompt_priority` decides the winner and the loser is shadowed (see below).
+
 ## Project overlay
 
 From the current working directory, tprompt walks up looking for the closest
