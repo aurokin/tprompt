@@ -1348,3 +1348,157 @@ func TestClampScrollOffset(t *testing.T) {
 		})
 	}
 }
+
+// --- AUR-163: Enter on the board delivers the cursor row --- //
+
+func TestUpdate_EnterOnBoardWithDefaultCursorReadsClipboard(t *testing.T) {
+	// sampleState() seeds the clipboard pinned row at index 0; NewModel leaves
+	// the cursor there. Enter must trigger the same clipboard-read flow as P.
+	deps, _, clip := clipboardDeps([]byte("ok"), nil, nil)
+	m := NewModel(sampleState(), deps)
+
+	next, cmd := m.Update(keyMsg("enter"))
+	got := next.(Model)
+
+	if !got.pendingClipboard {
+		t.Fatal("Enter on clipboard row must set pendingClipboard")
+	}
+	if cmd == nil {
+		t.Fatal("Enter on clipboard row must return a read cmd")
+	}
+	if _, ok := runCmd(cmd).(clipboardReadMsg); !ok {
+		t.Fatal("cmd must emit clipboardReadMsg")
+	}
+	if clip.calls != 1 {
+		t.Fatalf("clip.Read calls = %d, want 1", clip.calls)
+	}
+}
+
+func TestUpdate_DownThenEnterDeliversCursorPrompt(t *testing.T) {
+	deps, sub, _ := promptDeps(map[string]string{"alpha": "body-alpha"}, nil, nil)
+	m := NewModel(sampleState(), deps)
+
+	// Down moves cursor from 0 (clipboard) to 1 (alpha).
+	next, _ := m.Update(keyMsg("down"))
+	m = next.(Model)
+	if m.cursor != 1 {
+		t.Fatalf("cursor after Down = %d, want 1", m.cursor)
+	}
+
+	next, cmd := m.Update(keyMsg("enter"))
+	got := next.(Model)
+
+	if !got.pendingSubmit {
+		t.Fatal("Enter on prompt row must set pendingSubmit")
+	}
+	if cmd == nil {
+		t.Fatal("Enter on prompt row must return a submit cmd")
+	}
+	msg := runCmd(cmd)
+	sr, ok := msg.(submitResultMsg)
+	if !ok {
+		t.Fatalf("cmd emitted %T, want submitResultMsg", msg)
+	}
+	if sr.result.Action != ActionPrompt {
+		t.Fatalf("Action = %q, want %q", sr.result.Action, ActionPrompt)
+	}
+	if sr.result.PromptID != "alpha" {
+		t.Fatalf("PromptID = %q, want %q", sr.result.PromptID, "alpha")
+	}
+	if len(sub.calls) != 1 || sub.calls[0].PromptID != "alpha" {
+		t.Fatalf("Submitter calls = %+v, want one call for alpha", sub.calls)
+	}
+}
+
+func TestUpdate_EnterOnBoardSubmitsPromptAtCursor(t *testing.T) {
+	deps, sub, _ := promptDeps(map[string]string{"code-review": "body-cr"}, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.cursor = 3 // code-review row
+
+	_, cmd := m.Update(keyMsg("enter"))
+	if cmd == nil {
+		t.Fatal("Enter must dispatch a submit cmd")
+	}
+	if msg, ok := runCmd(cmd).(submitResultMsg); !ok || msg.result.PromptID != "code-review" {
+		t.Fatalf("submitResultMsg = %+v, want PromptID code-review", msg)
+	}
+	if len(sub.calls) != 1 || sub.calls[0].PromptID != "code-review" {
+		t.Fatalf("Submitter calls = %+v, want one call for code-review", sub.calls)
+	}
+}
+
+func TestUpdate_EnterOnBoardWhilePendingSubmitIsNoOp(t *testing.T) {
+	deps, sub, _ := promptDeps(map[string]string{"alpha": "body"}, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.cursor = 1
+	m.pendingSubmit = true
+
+	next, cmd := m.Update(keyMsg("enter"))
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("Enter while pendingSubmit must be no-op, got cmd %T", cmd())
+	}
+	if !got.pendingSubmit {
+		t.Fatal("pendingSubmit must remain true")
+	}
+	if len(sub.calls) != 0 {
+		t.Fatalf("Submitter must not be invoked, got calls = %+v", sub.calls)
+	}
+}
+
+func TestUpdate_EnterOnBoardWhilePendingClipboardIsNoOp(t *testing.T) {
+	deps, sub, clip := clipboardDeps([]byte("ok"), nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.pendingClipboard = true
+
+	next, cmd := m.Update(keyMsg("enter"))
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("Enter while pendingClipboard must be no-op, got cmd %T", cmd())
+	}
+	if !got.pendingClipboard {
+		t.Fatal("pendingClipboard must remain true")
+	}
+	if clip.calls != 0 {
+		t.Fatalf("Clipboard reader must not be invoked, got calls = %d", clip.calls)
+	}
+	if len(sub.calls) != 0 {
+		t.Fatalf("Submitter must not be invoked, got calls = %+v", sub.calls)
+	}
+}
+
+func TestUpdate_RemappedSelectOnBoardSelectsRow(t *testing.T) {
+	// A user can rebind Select to a printable rune. The board must honor that
+	// remapping the same way search mode does — the remapped key wins over
+	// rune-based prompt-key dispatch.
+	state := sampleState()
+	state.Reserved.Select = ReservedBinding{Printable: 'g'}
+	deps, sub, _ := promptDeps(map[string]string{"alpha": "body"}, nil, nil)
+	m := NewModel(state, deps)
+	m.cursor = 1 // alpha
+
+	_, cmd := m.Update(keyMsg("g"))
+	if cmd == nil {
+		t.Fatal("remapped Select key must dispatch submit cmd")
+	}
+	if msg, ok := runCmd(cmd).(submitResultMsg); !ok || msg.result.PromptID != "alpha" {
+		t.Fatalf("submitResultMsg = %+v, want PromptID alpha", msg)
+	}
+	if len(sub.calls) != 1 || sub.calls[0].PromptID != "alpha" {
+		t.Fatalf("Submitter calls = %+v, want one call for alpha", sub.calls)
+	}
+}
+
+func TestView_BoardFooterIncludesSelectHint(t *testing.T) {
+	deps, _, _ := promptDeps(map[string]string{"alpha": "body"}, nil, nil)
+	m := NewModel(sampleState(), deps)
+	m.width = 80
+	m.height = 20
+
+	out := m.View()
+	if !strings.Contains(out, "[Enter select]") {
+		t.Fatalf("board footer must include [Enter select]. Got:\n%s", out)
+	}
+}

@@ -263,7 +263,31 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.enterSearch(), nil
 	}
 
+	// Select fires after the switch so a remapped binding (e.g. Reserved.Select
+	// = a printable rune) still wins over the rune-based prompt-key dispatch
+	// below. The default Enter binding lands here as well.
+	if matchesReserved(msg, m.state.Reserved.Select) {
+		return m.boardSelectHighlighted()
+	}
+
 	return m.tryPromptSelect(msg)
+}
+
+// boardSelectHighlighted resolves the row at the board cursor. Mirrors
+// searchSelectHighlighted: both gate on pending submit/clipboard and route
+// the pinned clipboard row through selectClipboard.
+func (m Model) boardSelectHighlighted() (tea.Model, tea.Cmd) {
+	if m.pendingSubmit || m.pendingClipboard {
+		return m, nil
+	}
+	if m.cursor < 0 || m.cursor >= len(m.state.Rows) {
+		return m, nil
+	}
+	row := m.state.Rows[m.cursor]
+	if row.PromptID == "" {
+		return m.selectClipboard()
+	}
+	return m.selectPrompt(row)
 }
 
 // tryPromptSelect matches a single-rune printable keypress against the
@@ -712,6 +736,9 @@ func (m Model) footerHints() string {
 	var parts []string
 	if search := m.boardSearchHint(); search != "" {
 		parts = append(parts, search)
+	}
+	if sel := footerHint(m.state.Reserved.Select, "select"); sel != "" {
+		parts = append(parts, sel)
 	}
 	if cancel := footerHint(m.state.Reserved.Cancel, "cancel"); cancel != "" {
 		parts = append(parts, cancel)
