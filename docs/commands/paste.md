@@ -17,7 +17,7 @@ Flags (mirror `tprompt send` for uniformity):
 - `--target-pane <pane-id>` — tmux pane to deliver into; defaults to current pane context when running inside tmux
 - `--mode paste|type` — default `paste` (bracketed); `type` uses `send-keys -l` fallback
 - `--enter` — opt-in; sends a trailing Enter keypress outside the bracketed wrapper
-- `--sanitize strict|safe|off` — overrides config default (which defaults to `off`)
+- `--sanitize strict|safe|off` — overrides config default (which defaults to `safe`)
 
 See `docs/tmux/delivery.md` for the exact tmux command construction.
 

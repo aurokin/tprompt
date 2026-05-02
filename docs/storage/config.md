@@ -28,10 +28,10 @@ post_injection_verification = false     # opt-in diagnostic warning only
 
 # Clipboard
 clipboard_read_command = ""            # empty = auto-detect (pbpaste/wl-paste/xclip/xsel)
-max_paste_bytes = 1048576              # 1 MiB cap on paste size
+max_paste_bytes = 2097152              # 2 MiB cap on paste size
 
 # Sanitization
-sanitize = "off"                       # "off" | "safe" | "strict"
+sanitize = "safe"                      # "off" | "safe" | "strict"
 
 # TUI keybinds
 keybind_pool = "12345qerfgtzxc"        # auto-assign pool order
@@ -158,7 +158,7 @@ clipboard = ""     # disable clipboard keybind; still accessible via search
 
 ## Sanitize
 
-`sanitize` accepts `"off"`, `"safe"`, or `"strict"`. Invalid values fail config validation. See `docs/implementation/sanitization.md`.
+`sanitize` accepts `"off"`, `"safe"`, or `"strict"`. Default is `"safe"`: strips dangerous control sequences (OSC, DCS, mode toggles, bracketed-paste protocol terminators) while preserving cosmetic CSI (SGR colors, cursor movement). See `docs/implementation/sanitization.md` for the full denylist and the rationale behind the default. `"off"` is opt-in for users who legitimately need raw escape passthrough; `"strict"` rejects on any escape sequence and reports class plus byte offset. Invalid values fail config validation.
 
 ## Daemon Auto-Start
 
@@ -172,7 +172,7 @@ start the daemon implicitly.
 
 Applies to both `tprompt paste` and prompt body delivery. Content exceeding this cap is rejected before any tmux command runs.
 
-Sensible default: 1 MiB (1048576 bytes). Users can raise it but the adapter still caps per-chunk size in `type` mode (see `docs/tmux/delivery.md`).
+Default: 2 MiB (2,097,152 bytes). The cap exists to bound accidental large pastes (truncated binaries, runaway logs); the primary defense against malicious payloads is sanitization (default `safe`). Raise it in config if you legitimately paste larger content. The adapter still caps per-chunk size in `type` mode (see `docs/tmux/delivery.md`).
 
 ## Post-injection verification
 

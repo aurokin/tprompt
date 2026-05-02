@@ -48,8 +48,8 @@ func Default() Config {
 		VerificationPollIntervalMS: 100,
 		PostInjectionVerification:  false,
 		ClipboardReadCommand:       "",
-		MaxPasteBytes:              1 << 20,
-		Sanitize:                   "off",
+		MaxPasteBytes:              1 << 21,
+		Sanitize:                   "safe",
 		KeybindPool:                "12345qerfgtzxc",
 		ReservedKeys: map[string]string{
 			"clipboard": "P",
