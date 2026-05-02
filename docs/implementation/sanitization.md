@@ -29,6 +29,7 @@ Classes the sanitizer recognizes. `safe` strips the dangerous set; `strict` reje
 | OSC (Operating System Command) | `ESC]0;title BEL`, `ESC]52;c;<base64> BEL` | Can set title, copy to clipboard (OSC-52 write can clobber user clipboard), or trigger terminal-specific behavior |
 | DCS (Device Control String) | `ESC P … ESC \` | Device-specific control, historically exploitable |
 | CSI mode toggles | `ESC[?1000h` (enable mouse), `ESC[?1049h` (alt screen), `ESC[?2004h` (bracketed paste) | Alters terminal state persistently |
+| Bracketed-paste terminators | `ESC[200~`, `ESC[201~` | The bracketed-paste protocol delimiters used by `paste-buffer -p`. Embedded in content they close the wrapper early and let subsequent bytes execute as raw keystrokes (see `docs/tmux/delivery.md`). Stripped even though they are otherwise indistinguishable from cosmetic `~`-final CSI sequences. |
 | Application keypad mode | `ESC=`, `ESC>` | Changes how keypad input is reported |
 | Private mode sequences | `ESC[?<n>h`, `ESC[?<n>l` | Catch-all for DEC private modes |
 
@@ -131,6 +132,7 @@ Bracketed paste (default delivery mode) provides **some** protection — bracket
 
 - not all target apps respect the wrapper
 - the terminal itself still sees the bytes, and some terminal-level sequences (title change, clipboard write) fire regardless of app behavior
+- an embedded `ESC[201~` in the content closes the wrapper early, after which subsequent newlines fire as Enter and other bytes are interpreted as raw keystrokes. `safe` mode strips both `ESC[200~` and `ESC[201~` to defend against this; `strict` already rejects them as CSI
 
 Sanitization is therefore layered on top of bracketed paste, not a substitute for it.
 

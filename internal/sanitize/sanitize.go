@@ -165,7 +165,8 @@ func findStringTerm(b []byte, from int) int {
 
 // scanCSI walks params (0x30-0x3F), intermediates (0x20-0x2F), final
 // (0x40-0x7E). Returns one past the final byte and whether the sequence is
-// dangerous (has '?' params, or final is 'h'/'l' mode set/reset).
+// dangerous (has '?' params, or final is 'h'/'l' mode set/reset, or matches
+// the bracketed-paste protocol terminators CSI 200~ / CSI 201~).
 func scanCSI(b []byte, from int) (end int, dangerous bool) {
 	j := from
 	hasPrivate := false
@@ -175,6 +176,7 @@ func scanCSI(b []byte, from int) (end int, dangerous bool) {
 		}
 		j++
 	}
+	paramEnd := j
 	for j < len(b) && b[j] >= 0x20 && b[j] <= 0x2F {
 		j++
 	}
@@ -191,5 +193,19 @@ func scanCSI(b []byte, from int) (end int, dangerous bool) {
 	if final < 0x40 || final > 0x7E {
 		return j, true
 	}
+	if final == '~' && isBracketedPasteParams(b[from:paramEnd]) {
+		// CSI 200~ and CSI 201~ are the bracketed-paste START / END
+		// terminators. They defeat the bracketed-paste delivery wrapper
+		// (docs/tmux/delivery.md) when embedded in content, so safe must
+		// strip them regardless of the cosmetic-CSI rule below.
+		return j, true
+	}
 	return j, hasPrivate || final == 'h' || final == 'l'
+}
+
+// isBracketedPasteParams reports whether the parameter byte slice is exactly
+// "200" or "201" — the only two values that, paired with a `~` final, form
+// the bracketed-paste protocol terminators we must strip.
+func isBracketedPasteParams(p []byte) bool {
+	return string(p) == "200" || string(p) == "201"
 }

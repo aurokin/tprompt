@@ -303,3 +303,99 @@ func TestStrictOffsetCountsBytesNotRunes(t *testing.T) {
 		t.Fatalf("offset = %d, want 4 (byte index)", sre.Offset)
 	}
 }
+
+// AUR-162: bracketed-paste protocol terminators are dangerous regardless of
+// the generic cosmetic-CSI rule, because tprompt's own delivery wrapper uses
+// `paste-buffer -p` (load-buffer + ESC[200~ … ESC[201~). An embedded ESC[201~
+// closes the wrapper early and lets subsequent bytes execute as raw keystrokes.
+
+func TestSafeStripsBracketedPasteEnd(t *testing.T) {
+	input := []byte("before\x1b[201~after")
+	got, err := New(ModeSafe).Process(input)
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if string(got) != "beforeafter" {
+		t.Fatalf("got %q, want %q", got, "beforeafter")
+	}
+}
+
+func TestSafeStripsBracketedPasteStart(t *testing.T) {
+	input := []byte("a\x1b[200~b")
+	got, err := New(ModeSafe).Process(input)
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if string(got) != "ab" {
+		t.Fatalf("got %q, want %q", got, "ab")
+	}
+}
+
+func TestSafeStripsBracketedPasteRoundTrip(t *testing.T) {
+	// Mirrors the AUR-162 manual repro payload: the bracketed-paste end
+	// terminator embedded mid-string, an OSC set-window-title, and a bare BEL.
+	// safe must strip the CSI 201~ and the OSC; the bare BEL is preserved
+	// (non-ESC control bytes are out of scope for the sanitizer's denylist).
+	input := []byte("before \x1b[201~ after \x1b]0;evil\x07 osc-end \x07 bell-alone\n")
+	got, err := New(ModeSafe).Process(input)
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	want := "before  after  osc-end \x07 bell-alone\n"
+	if string(got) != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestSafePreservesOtherTildeFinalCSI(t *testing.T) {
+	// `~`-final CSI sequences other than the two bracketed-paste terminators
+	// are function-key / editing-key reports (Home, End, F-keys) emitted from
+	// the keyboard. They are cosmetic and must be preserved.
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{"Home", "before\x1b[1~after"},
+		{"End", "before\x1b[4~after"},
+		{"F5", "before\x1b[15~after"},
+		{"three-digit non-paste", "before\x1b[202~after"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := New(ModeSafe).Process([]byte(tc.input))
+			if err != nil {
+				t.Fatalf("Process: %v", err)
+			}
+			if string(got) != tc.input {
+				t.Fatalf("got %q, want %q (sequence must be preserved)", got, tc.input)
+			}
+		})
+	}
+}
+
+func TestStrictStillRejectsBracketedPasteTerminators(t *testing.T) {
+	// strict rejects on any ESC; the bracketed-paste terminators must surface
+	// as CSI rejections at the ESC byte's offset, no special-casing.
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{"start", "abc\x1b[200~rest"},
+		{"end", "abc\x1b[201~rest"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := New(ModeStrict).Process([]byte(tc.input))
+			var sre *StrictRejectError
+			if !errors.As(err, &sre) {
+				t.Fatalf("want *StrictRejectError, got %v", err)
+			}
+			if sre.Class != "CSI" {
+				t.Errorf("class = %q, want CSI", sre.Class)
+			}
+			if sre.Offset != 3 {
+				t.Errorf("offset = %d, want 3", sre.Offset)
+			}
+		})
+	}
+}
