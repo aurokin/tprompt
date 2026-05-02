@@ -10,6 +10,42 @@ Default dispatch: when stdin is a tty **and** `$TMUX` is set, the invocation is 
 
 Because rewriting happens before flag parsing, `tui`'s required `--target-pane` still fires — bare `tprompt` with no flags inside tmux+tty errors clearly with exit 2. This is intentional: see DECISIONS.md §30 and `examples/tmux-bindings.md`.
 
+### `tprompt new <id>`
+
+Scaffolds a new prompt markdown file with every supported frontmatter field
+stubbed empty, then prints the absolute path of the created file. Empty
+frontmatter values are tolerated at load time (see
+`docs/storage/prompt-store.md`), so a freshly scaffolded file loads cleanly
+without further edits.
+
+Flags:
+
+- `--project` — scaffold into `<gitroot>/tprompt/` instead of the primary
+  global prompts directory. Outside any git tree the command fails with a
+  clear `no project root found` error so users do not accidentally create a
+  stray `tprompt/` folder somewhere unexpected.
+
+ID validation (rejected up front, exit 2):
+
+- empty id
+- contains a path separator (`/` or `\`)
+- starts with a dot (would produce a hidden file the store skips)
+- ends with `.md` (pass the bare id; the extension is implied)
+- contains non-printable runes
+
+Behavior:
+
+- Without `--project`, writes to the primary global source. The default
+  global path (`$XDG_CONFIG_HOME/tprompt/prompts` or
+  `~/.config/tprompt/prompts`) is auto-created on first use; an explicit
+  `prompts_dir` must already exist.
+- With `--project`, writes to `<gitroot>/tprompt/`, auto-creating that
+  directory if missing.
+- Refuses to overwrite if any markdown file under the resolved tier already
+  has the same filename stem — even nested in a subdirectory, since
+  directories do not namespace IDs. Exits non-zero (exit 3) and names the
+  conflicting path.
+
 ### `tprompt list`
 
 Lists all available prompt IDs with their resolved TUI board key state.

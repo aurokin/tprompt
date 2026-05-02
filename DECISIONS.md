@@ -166,9 +166,10 @@ Prompts are scanned **alphabetically by `id`** to assign from this pool. Once th
 ### 18. Project overlays and shadowing
 
 Project prompt overlays are discovered by walking up from the current working
-directory. A `tprompt/` directory inside a git tree activates a project source;
-reaching `.git` first means no overlay is active. The walk stops at the user's
-home directory or filesystem root.
+directory toward the git root. A `tprompt/` directory inside a git tree
+activates a project source; reaching `.git` first means no overlay is active.
+The walk stops at the user's home directory or filesystem root, so a stray
+`~/tprompt` folder is never treated as project scope.
 
 When a prompt ID exists in both the global and project tiers,
 `prompt_priority` selects the winner. The default is `global` so adopting a
@@ -177,6 +178,13 @@ project overlay does not silently replace existing muscle-memory prompts.
 it appears in `tprompt list`, is reported by `tprompt show <id>` on the
 winner, and remains selectable through TUI search. Shadowed prompts receive no
 board key.
+
+Cross-tier collisions are the only collisions resolved by `prompt_priority`.
+Duplicate IDs **within** a single tier — two global sources that both expose
+`code-review`, or two files inside the project overlay with the same stem —
+remain hard errors per §4. The multi-source model only relaxes the original
+single-source rule across tiers; it never silently picks between two prompts
+of the same scope.
 
 ### 19. Reserved keys are reconfigurable
 

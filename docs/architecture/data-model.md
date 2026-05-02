@@ -8,6 +8,10 @@ Suggested logical model:
 Prompt {
   id: string            // filename stem only
   path: string          // absolute or canonical path
+  scope: "global" | "project"  // source tier this prompt was discovered in
+  shadowed: bool        // true when a cross-tier counterpart won prompt_priority
+  shadowed_by: string?  // id of the winning counterpart (set on the loser)
+  shadow_path: string?  // absolute path of the winning counterpart (set on the loser)
   title: string?        // optional frontmatter
   description: string?  // optional frontmatter
   tags: []string        // optional frontmatter
@@ -25,6 +29,22 @@ Prompt {
 - duplicate across prompts → hard error
 - collision with a reserved key → hard error
 - malformed (multi-char, empty, non-printable) → hard error
+
+## Source scope and shadow markers
+
+Prompts are discovered through an ordered list of sources (see
+`docs/storage/config.md`). Each source carries a tier:
+
+- **global** — primary `prompts_dir` plus any `additional_prompts_dirs`.
+- **project** — the nearest project `tprompt/` overlay walked up from cwd.
+
+Within a single tier, duplicate IDs are a hard error. Across tiers,
+`prompt_priority` (`global` by default, `project` opt-in) selects the winner.
+The losing prompt is **shadowed**: it remains in the in-memory model with
+`shadowed = true` and a `shadowed_by` / `shadow_path` pointer at the winner,
+so `tprompt list` can mark it, `tprompt show <id>` (on the winner) can report
+the shadowed counterpart, and the TUI can keep it reachable through search.
+Shadowed prompts receive no board key — overflow rules apply.
 
 ## Duplicate prompt record
 
