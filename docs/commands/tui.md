@@ -89,13 +89,22 @@ Triggered by `/`. All prompts (including overflow and shadowed prompts) are sear
 
 The TUI renders a single-line footer showing context-sensitive hints:
 
-- board view: `[/ search]  [Esc cancel]`, or `[/ search (N more)]  [Esc cancel]` when overflow exists
+- board view: `[/ search]  [Enter select]  [Esc cancel]`, or `[/ search (N more)]  [Enter select]  [Esc cancel]` when overflow exists
 - search view: `/query    [Esc exit search]  [Enter select]  [N matches]`
 - error view: `clipboard is empty — choose another option  [Esc cancel]`
 
+## Selection
+
+There are two ways to deliver a row from the board:
+
+- **Single-key shortcut.** Press the printable rune in `[brackets]` next to the row (e.g. `c` for the `code-review` row). Submits immediately; works regardless of cursor position.
+- **Cursor + Select.** Move the cursor with `↑`/`↓`, then press the **Select** key (default `Enter`). Submits the row currently under the cursor. The Select binding is reconfigurable via `[reserved_keys]` in `config.toml`.
+
+Both paths route through the same `selectPrompt` / `selectClipboard` flow: the pinned clipboard row triggers a clipboard read; a prompt row resolves the body and submits to the daemon.
+
 ## Scrolling
 
-If the board (frontmatter-declared + auto-assigned rows + clipboard) exceeds the available height, vertical scrolling is permitted with `↑`/`↓` but single-key selection continues to work regardless of scroll position.
+If the board (frontmatter-declared + auto-assigned rows + clipboard) exceeds the available height, the cursor stays visible by adjusting the scroll offset as `↑`/`↓` move it. Single-key selection continues to work regardless of scroll position.
 
 Overflow rows (those past the auto-assign pool) are not visible in the board even with scrolling.
 
