@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -613,8 +612,7 @@ func runDaemonStop(deps Deps, timeout time.Duration) error {
 		return err
 	}
 	if _, err := client.Stop(); err != nil {
-		var socketErr *daemon.SocketUnavailableError
-		if errors.As(err, &socketErr) {
+		if daemon.IsDaemonGone(err) {
 			_, _ = fmt.Fprintln(deps.Stdout, "daemon not running")
 			return nil
 		}
@@ -624,8 +622,7 @@ func runDaemonStop(deps Deps, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if _, err := client.Status(); err != nil {
-			var socketErr *daemon.SocketUnavailableError
-			if errors.As(err, &socketErr) {
+			if daemon.IsDaemonGone(err) {
 				_, _ = fmt.Fprintln(deps.Stdout, "tprompt daemon stopped")
 				return nil
 			}

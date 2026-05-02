@@ -3,9 +3,12 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -267,6 +270,76 @@ func TestDaemonStopNoDaemonRunningPrintsClearMessage(t *testing.T) {
 		},
 		statusFn: func() (daemon.StatusResponse, error) {
 			t.Fatal("Status should not be called when daemon is not running")
+			return daemon.StatusResponse{}, nil
+		},
+	}
+
+	deps := daemonDeps(t, client)
+	stdout, _, err := executeRootWith(t, deps, "daemon", "stop")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "daemon not running") {
+		t.Fatalf("stdout = %q, want not-running message", stdout)
+	}
+}
+
+func TestDaemonStopTreatsPeerCloseAsStopped(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{name: "EOF on Status read", err: io.EOF},
+		{name: "ErrUnexpectedEOF on Status read", err: io.ErrUnexpectedEOF},
+		{name: "net.ErrClosed on Status write", err: net.ErrClosed},
+		{name: "ECONNRESET on Status read", err: syscall.ECONNRESET},
+		{name: "EPIPE on Status write", err: syscall.EPIPE},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			statusCalls := 0
+			client := &fakeDaemonClient{
+				stopFn: func() (daemon.StopResponse, error) {
+					return daemon.StopResponse{Accepted: true}, nil
+				},
+				statusFn: func() (daemon.StatusResponse, error) {
+					statusCalls++
+					if statusCalls == 1 {
+						return daemon.StatusResponse{Socket: "/tmp/x.sock"}, nil
+					}
+					return daemon.StatusResponse{}, &daemon.IPCError{
+						Path:   "/tmp/x.sock",
+						Op:     "read response",
+						Reason: tc.err.Error(),
+						Err:    tc.err,
+					}
+				},
+			}
+
+			deps := daemonDeps(t, client)
+			stdout, _, err := executeRootWith(t, deps, "daemon", "stop")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(stdout, "tprompt daemon stopped") {
+				t.Fatalf("stdout = %q, want stopped message", stdout)
+			}
+		})
+	}
+}
+
+func TestDaemonStopTreatsPeerCloseOnAckAsNotRunning(t *testing.T) {
+	client := &fakeDaemonClient{
+		stopFn: func() (daemon.StopResponse, error) {
+			return daemon.StopResponse{}, &daemon.IPCError{
+				Path:   "/tmp/x.sock",
+				Op:     "read response",
+				Reason: io.EOF.Error(),
+				Err:    io.EOF,
+			}
+		},
+		statusFn: func() (daemon.StatusResponse, error) {
+			t.Fatal("Status should not be called when Stop reports daemon gone")
 			return daemon.StatusResponse{}, nil
 		},
 	}
