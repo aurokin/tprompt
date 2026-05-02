@@ -44,8 +44,8 @@ func TestDefaultMatchesDocumentedMVPValues(t *testing.T) {
 	if got.ClipboardReadCommand != "" {
 		t.Fatalf("Default().ClipboardReadCommand = %q, want empty string", got.ClipboardReadCommand)
 	}
-	if got.MaxPasteBytes != 1<<20 {
-		t.Fatalf("Default().MaxPasteBytes = %d, want %d", got.MaxPasteBytes, 1<<20)
+	if got.MaxPasteBytes != 1<<21 {
+		t.Fatalf("Default().MaxPasteBytes = %d, want %d", got.MaxPasteBytes, 1<<21)
 	}
 	if got.PostInjectionVerification {
 		t.Fatal("Default().PostInjectionVerification = true, want false")
@@ -55,9 +55,9 @@ func TestDefaultMatchesDocumentedMVPValues(t *testing.T) {
 	}
 }
 
-func TestDefaultSanitizeIsOff(t *testing.T) {
-	if got := Default().Sanitize; got != "off" {
-		t.Fatalf("Default().Sanitize = %q, want %q", got, "off")
+func TestDefaultSanitizeIsSafe(t *testing.T) {
+	if got := Default().Sanitize; got != "safe" {
+		t.Fatalf("Default().Sanitize = %q, want %q", got, "safe")
 	}
 }
 

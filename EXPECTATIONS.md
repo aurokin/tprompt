@@ -69,7 +69,7 @@ tracker; planned work lives in Linear.
 ## Sanitization
 
 - Supported modes are `off`, `safe`, and `strict`.
-- Default mode is `off`.
+- Default mode is `safe`.
 - `safe` strips dangerous terminal control classes while preserving cosmetic sequences.
 - `strict` rejects any escape sequence and reports class plus byte offset.
 - The same sanitization contract applies to `send`, `paste`, and daemon-executed TUI jobs.

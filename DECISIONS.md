@@ -220,9 +220,11 @@ The reader is chosen at runtime from platform/env signals:
 
 Users can override via `clipboard_read_command` in `config.toml`. `doctor` reports which reader was chosen and whether it is installed.
 
-### 24. Sanitization is opt-in with three tested modes
+### 24. Sanitization defaults to safe
 
-`sanitize = "strict" | "safe" | "off"`, default `off`. The rule applies uniformly to `tprompt paste` and `tprompt send <id>`. Both `strict` and `safe` require tested implementations before release.
+`sanitize = "strict" | "safe" | "off"`, default `safe`. The rule applies uniformly to `tprompt paste` and `tprompt send <id>`. Both `strict` and `safe` require tested implementations before release.
+
+Originally defaulted to `off` on a fail-open posture: assume the user has authored their own prompts and pasted their own clipboards, no sanitization needed. Revisited after AUR-162 demonstrated that an embedded bracketed-paste end terminator (`ESC[201~`) escapes the delivery wrapper and lets subsequent bytes execute as raw keystrokes — a real footgun, not a theoretical one. AUR-161 flipped the default so the standard install ships with the dangerous-class denylist active. `off` remains available for users who legitimately need raw passthrough.
 
 ### 25. Search is fuzzy, scope-limited
 

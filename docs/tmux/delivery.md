@@ -62,7 +62,7 @@ The adapter uses `pane_id` as the authoritative `-t` delivery target. The daemon
 - Exceeded for `paste` mode → delivery is rejected before `load-buffer` is called.
 - Exceeded for `type` mode → same — the cap is a policy decision, not an implementation detail of a specific tmux primitive.
 
-Default cap: 1,048,576 bytes (1 MiB). Users can raise it in config but the adapter will still refuse to run `send-keys` with content larger than one chunk per call.
+Default cap: 2,097,152 bytes (2 MiB). Users can raise it in config but the adapter will still refuse to run `send-keys` with content larger than one chunk per call.
 
 ## Sanitization interaction
 

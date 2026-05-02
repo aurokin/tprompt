@@ -99,19 +99,19 @@ When a delivery is rejected by `strict`, the daemon log records the error messag
 
 ```toml
 # ~/.config/tprompt/config.toml
-sanitize = "off"         # default
-# sanitize = "safe"      # recommended for heavy clipboard users
-# sanitize = "strict"    # audited environments
+sanitize = "safe"        # default
+# sanitize = "off"       # opt out for raw passthrough (rare)
+# sanitize = "strict"    # audited environments — reject any escape
 ```
 
 Per-invocation flag:
 
 ```bash
-tprompt send code-review --sanitize safe
+tprompt send code-review --sanitize off
 tprompt paste --sanitize strict
 ```
 
-Precedence: flag > config > built-in default (`off`).
+Precedence: flag > config > built-in default (`safe`).
 
 ## Ordering with `max_paste_bytes`
 
