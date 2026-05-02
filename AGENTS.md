@@ -32,7 +32,7 @@ Testscripts in `cmd/tprompt/testdata/script/*.txtar` exec real `tmux`. Confirm w
 
 ## Workflow
 
-- Pick up a Linear issue (project Tprompt, team Aurokin). Branch name matches the issue's `gitBranchName` (e.g., `aur-144-empty-value-frontmatter-tolerance`).
+- Pick up a Linear issue (project Tprompt, team Aurokin). Branch name is the lowercase issue identifier (e.g., `aur-160`). Do not append the issue title slug.
 - One vertical slice per PR; tests accompany code.
 - Open PR → comment `@codex please review` → address findings → merge with merge commit, delete remote branch.
 - After merging, mark the Linear issue Done.
