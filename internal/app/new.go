@@ -17,17 +17,21 @@ import (
 )
 
 // scaffoldTemplate is the literal body written by `tprompt new`. Every
-// currently-supported frontmatter field is stubbed empty so authors see the
-// schema without consulting docs (AUR-146 acceptance criterion). Empty
-// frontmatter values are treated as absent at load time (AUR-144), so the
-// scaffolded file loads cleanly.
+// currently-supported frontmatter field appears so authors see the schema
+// without consulting docs (AUR-146 acceptance criterion). Narrow,
+// constrained fields with an obvious safe default (`mode`, `enter`) emit
+// the inherited config-level default verbatim, so the scaffold doubles as
+// documentation of what the prompt would do if left untouched. Open-ended
+// fields (free-form strings, user-defined lists, auto-assigned key) stay
+// as bare stubs. Empty values are treated as absent at load time
+// (AUR-144), so the scaffolded file loads cleanly either way.
 const scaffoldTemplate = `---
 title:
 description:
-tags: []
+tags:
 key:
-mode:
-enter:
+mode: paste
+enter: false
 ---
 `
 
@@ -77,9 +81,11 @@ non-zero. The parent directory is auto-created on first use when it is
 the default global path. With --project, <gitroot>/tprompt is auto-created.
 Explicit prompts_dir paths must already exist.
 
-The scaffolded file stubs every supported frontmatter field with an empty
-value so authors can see the schema without consulting docs. Empty
-frontmatter values are ignored at load.`,
+The scaffolded file lists every supported frontmatter field so authors
+can see the schema without consulting docs. Narrow delivery fields
+(mode, enter) emit the inherited config-level default verbatim;
+open-ended fields stay as bare stubs. Empty frontmatter values are
+ignored at load.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return runNew(deps, args[0], newFlags{project: project})

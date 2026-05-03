@@ -60,6 +60,12 @@ were absent:
 
 This rule is a strict relaxation: nothing previously valid becomes invalid.
 
+The `tprompt new` scaffold emits the inherited config-level defaults
+explicitly for the narrow delivery fields (`mode: paste`, `enter: false`),
+so the scaffold doubles as documentation of what the prompt will do if
+left untouched. Hand-clearing those lines remains valid per the empty-value
+tolerance above.
+
 ## `key:` validation
 
 `key` accepts **a single printable character**. The following are hard errors at load time:

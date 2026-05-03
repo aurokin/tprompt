@@ -28,8 +28,8 @@ prompts_dir = "prompts"
 ---
 title:
 description:
-tags: []
+tags:
 key:
-mode:
-enter:
+mode: paste
+enter: false
 ---

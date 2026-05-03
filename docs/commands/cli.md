@@ -12,11 +12,14 @@ Because rewriting happens before flag parsing, `tui`'s required `--target-pane` 
 
 ### `tprompt new <id>`
 
-Scaffolds a new prompt markdown file with every supported frontmatter field
-stubbed empty, then prints the absolute path of the created file. Empty
-frontmatter values are tolerated at load time (see
-`docs/storage/prompt-store.md`), so a freshly scaffolded file loads cleanly
-without further edits.
+Scaffolds a new prompt markdown file listing every supported frontmatter
+field, then prints the absolute path of the created file. Narrow delivery
+fields (`mode`, `enter`) emit the inherited config-level default verbatim,
+so the scaffold doubles as documentation of what the prompt would do if
+left untouched. Open-ended fields (free-form strings, user-defined lists,
+auto-assigned key) stay as bare stubs. Empty frontmatter values are
+tolerated at load time (see `docs/storage/prompt-store.md`), so a freshly
+scaffolded file loads cleanly without further edits.
 
 Flags:
 
