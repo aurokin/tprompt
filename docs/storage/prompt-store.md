@@ -86,6 +86,29 @@ Only the markdown body is injected.
 
 Frontmatter is never injected.
 
+### Body trimming
+
+The parser strips **one** trailing line break (`\n` or `\r\n`) from the body.
+Most editors enforce a POSIX end-of-file newline; without trimming, that
+newline would land in the target as an extra blank line at paste time. A
+single trailing line break is treated as a file convention, not as content.
+
+The trim is one-only — `body\n\n` becomes `body\n` so authors who deliberately
+end a prompt with a blank line keep that blank line.
+
+A single leading line break immediately after the closing `---` fence is also
+stripped, so the canonical layout
+
+```markdown
+---
+title: Foo
+---
+
+Body text.
+```
+
+yields exactly `Body text.` (no leading blank line, no trailing newline).
+
 ## Example
 
 ```markdown

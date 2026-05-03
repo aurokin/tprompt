@@ -93,8 +93,8 @@ Go deeper.
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if prompt.Body != "Review this code.\n" {
-		t.Fatalf("Body = %q, want %q", prompt.Body, "Review this code.\n")
+	if prompt.Body != "Review this code." {
+		t.Fatalf("Body = %q, want %q", prompt.Body, "Review this code.")
 	}
 	if prompt.Defaults.Mode != "paste" {
 		t.Fatalf("Defaults.Mode = %q, want %q", prompt.Defaults.Mode, "paste")
@@ -278,7 +278,7 @@ Stubbed body.
 	if prompt.Defaults.Enter != nil {
 		t.Fatalf("Defaults.Enter = %v, want nil", prompt.Defaults.Enter)
 	}
-	if prompt.Body != "Stubbed body.\n" {
+	if prompt.Body != "Stubbed body." {
 		t.Fatalf("Body = %q", prompt.Body)
 	}
 }
@@ -320,8 +320,9 @@ func TestFSStoreTreatsLeadingFenceWithoutClosingFenceAsBody(t *testing.T) {
 		t.Fatalf("Resolve: %v", err)
 	}
 
-	if prompt.Body != content {
-		t.Fatalf("Body = %q, want %q", prompt.Body, content)
+	want := "---\nHeading below"
+	if prompt.Body != want {
+		t.Fatalf("Body = %q, want %q", prompt.Body, want)
 	}
 	if prompt.Title != "" || prompt.Description != "" || len(prompt.Tags) != 0 {
 		t.Fatalf("Summary metadata = %#v, want zero values", prompt.Summary)
@@ -443,8 +444,9 @@ func TestFSStoreTreatsNonMappingFenceAsBody(t *testing.T) {
 		t.Fatalf("Resolve: %v", err)
 	}
 
-	if prompt.Body != content {
-		t.Fatalf("Body = %q, want %q", prompt.Body, content)
+	want := "---\nHeading\n---\nbody"
+	if prompt.Body != want {
+		t.Fatalf("Body = %q, want %q", prompt.Body, want)
 	}
 	if prompt.Title != "" || prompt.Description != "" || len(prompt.Tags) != 0 {
 		t.Fatalf("Summary metadata = %#v, want zero values", prompt.Summary)
@@ -672,16 +674,16 @@ func TestMultiSourceStoreShadowsCrossTierDuplicateByPolicy(t *testing.T) {
 		{
 			name:        "global wins",
 			policy:      ConflictPolicyGlobal,
-			wantWinner:  "global body\n",
-			wantShadow:  "project body\n",
+			wantWinner:  "global body",
+			wantShadow:  "project body",
 			wantScope:   "global",
 			shadowScope: "project",
 		},
 		{
 			name:        "project wins",
 			policy:      ConflictPolicyProject,
-			wantWinner:  "project body\n",
-			wantShadow:  "global body\n",
+			wantWinner:  "project body",
+			wantShadow:  "global body",
 			wantScope:   "project",
 			shadowScope: "global",
 		},
@@ -804,8 +806,9 @@ func TestFSStoreStripsEscapesFromMetadataButPreservesBody(t *testing.T) {
 	if diff := cmp.Diff(wantTags, prompt.Tags); diff != "" {
 		t.Fatalf("Tags mismatch (-want +got):\n%s", diff)
 	}
-	if prompt.Body != bodyBytes {
-		t.Fatalf("Body = %q, want %q (body must be preserved byte-for-byte)", prompt.Body, bodyBytes)
+	wantBody := "evil\x1b]0;pwn\x07tail"
+	if prompt.Body != wantBody {
+		t.Fatalf("Body = %q, want %q (escape sequences in body must be preserved)", prompt.Body, wantBody)
 	}
 }
 
