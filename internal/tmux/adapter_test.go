@@ -375,6 +375,68 @@ func TestExec_IsTargetSelectedFallsBackWhenOriginatingClientDisappears(t *testin
 	}
 }
 
+func TestExec_IsTargetSelectedFallsBackWhenOriginatingClientMovedAway(t *testing.T) {
+	// Client is reachable but currently viewing a different pane (e.g., the
+	// user switched sessions after popup submission). Verification must fall
+	// through to the pane-foreground check rather than block delivery on the
+	// client returning to the target pane.
+	sr := &scriptedRunner{
+		resultQ: []scriptedResult{
+			{stdout: []byte("$9|@9|%99\n")},
+			{stdout: []byte("$1|@2|%3|1|1\n")},
+		},
+	}
+	e := newTestExec(sr)
+
+	ok, err := e.IsTargetSelected(context.Background(), TargetContext{
+		Session:   "$1",
+		Window:    "@2",
+		PaneID:    "%3",
+		ClientTTY: "/dev/pts/7",
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !ok {
+		t.Fatal("foreground pane should be treated as selected even when client is on another pane")
+	}
+	if len(sr.calls) != 2 {
+		t.Fatalf("want 2 display-message calls (client probe + pane probe), got %d", len(sr.calls))
+	}
+	if got := sr.calls[0].Argv; argAfter(got, "-c") != "/dev/pts/7" {
+		t.Fatalf("first call should be client-scoped, got %v", got)
+	}
+	if got := sr.calls[1].Argv; argAfter(got, "-t") != "%3" {
+		t.Fatalf("second call should fall back to pane target, got %v", got)
+	}
+}
+
+func TestExec_IsTargetSelectedFallbackRejectsBackgroundedPaneWhenClientMovedAway(t *testing.T) {
+	// Client moved away AND the pane's window is no longer active in its
+	// session. The fall-through must still apply pane_active && window_active,
+	// otherwise we'd deliver to a pane the user can never see.
+	sr := &scriptedRunner{
+		resultQ: []scriptedResult{
+			{stdout: []byte("$9|@9|%99\n")},
+			{stdout: []byte("$1|@2|%3|1|0\n")},
+		},
+	}
+	e := newTestExec(sr)
+
+	ok, err := e.IsTargetSelected(context.Background(), TargetContext{
+		Session:   "$1",
+		Window:    "@2",
+		PaneID:    "%3",
+		ClientTTY: "/dev/pts/7",
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if ok {
+		t.Fatal("background-windowed pane must not be treated as selected via fallback")
+	}
+}
+
 func TestExec_IsTargetSelectedPreservesCancellationFromClientProbe(t *testing.T) {
 	fr := &fakeRunner{
 		errOn: map[string]error{
