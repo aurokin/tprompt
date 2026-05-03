@@ -82,12 +82,16 @@ func (e *Exec) PaneExists(parent context.Context, paneID string) (bool, error) {
 func (e *Exec) IsTargetSelected(parent context.Context, target TargetContext) (bool, error) {
 	if target.ClientTTY != "" {
 		ok, err := e.isClientOnTarget(parent, target)
-		if err == nil {
-			return ok, nil
+		if err == nil && ok {
+			return true, nil
 		}
-		if !isMissingClientError(err) {
+		if err != nil && !isMissingClientError(err) {
 			return false, err
 		}
+		// Client is reachable but viewing a different pane, or the client is
+		// missing entirely. Either way, fall through to the pane-foreground
+		// check so async delivery doesn't require the originating client to
+		// stay glued to the target pane after popup teardown.
 	}
 	return e.isPaneForegroundSelected(parent, target)
 }
