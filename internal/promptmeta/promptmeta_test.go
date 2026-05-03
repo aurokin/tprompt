@@ -32,7 +32,7 @@ func TestParseFrontmatterAndBody(t *testing.T) {
 	if parsed.Meta.Enter == nil || *parsed.Meta.Enter {
 		t.Fatalf("Enter = %v, want false", parsed.Meta.Enter)
 	}
-	wantBody := "Review this code for correctness, risk, and missing tests.\n"
+	wantBody := "Review this code for correctness, risk, and missing tests."
 	if parsed.Body != wantBody {
 		t.Fatalf("Body = %q, want %q", parsed.Body, wantBody)
 	}
@@ -55,8 +55,8 @@ func TestParseFrontmatterAndBodyWithCRLF(t *testing.T) {
 	if !parsed.Meta.KeyDeclared {
 		t.Fatal("KeyDeclared = false, want true")
 	}
-	if parsed.Body != "Body\r\n" {
-		t.Fatalf("Body = %q, want %q", parsed.Body, "Body\r\n")
+	if parsed.Body != "Body" {
+		t.Fatalf("Body = %q, want %q", parsed.Body, "Body")
 	}
 }
 
@@ -77,8 +77,8 @@ func TestParseFrontmatterAndBodyWithUTF8BOM(t *testing.T) {
 	if !parsed.Meta.KeyDeclared {
 		t.Fatal("KeyDeclared = false, want true")
 	}
-	if parsed.Body != "Body\n" {
-		t.Fatalf("Body = %q, want %q", parsed.Body, "Body\n")
+	if parsed.Body != "Body" {
+		t.Fatalf("Body = %q, want %q", parsed.Body, "Body")
 	}
 }
 
@@ -90,7 +90,7 @@ func TestParseWithoutFrontmatterReturnsWholeBody(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 
-	wantBody := "Just a body, no frontmatter. ID is derived from the filename stem.\n"
+	wantBody := "Just a body, no frontmatter. ID is derived from the filename stem."
 	if parsed.Body != wantBody {
 		t.Fatalf("Body = %q, want %q", parsed.Body, wantBody)
 	}
@@ -107,8 +107,8 @@ func TestParseIgnoresUnknownFields(t *testing.T) {
 	if parsed.Meta.Title != "Demo" {
 		t.Fatalf("Title = %q, want %q", parsed.Meta.Title, "Demo")
 	}
-	if parsed.Body != "body\n" {
-		t.Fatalf("Body = %q, want %q", parsed.Body, "body\n")
+	if parsed.Body != "body" {
+		t.Fatalf("Body = %q, want %q", parsed.Body, "body")
 	}
 }
 
@@ -120,8 +120,9 @@ func TestParseTreatsLeadingFenceWithoutClosingFenceAsBody(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 
-	if parsed.Body != string(content) {
-		t.Fatalf("Body = %q, want %q", parsed.Body, string(content))
+	want := string(content[:len(content)-1])
+	if parsed.Body != want {
+		t.Fatalf("Body = %q, want %q", parsed.Body, want)
 	}
 	if parsed.Meta.Title != "" || parsed.Meta.Description != "" || len(parsed.Meta.Tags) != 0 ||
 		parsed.Meta.Mode != "" || parsed.Meta.Enter != nil || parsed.Meta.Key != nil || parsed.Meta.KeyDeclared {
@@ -137,8 +138,9 @@ func TestParseTreatsNonMappingFenceAsBody(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 
-	if parsed.Body != string(content) {
-		t.Fatalf("Body = %q, want %q", parsed.Body, string(content))
+	want := string(content[:len(content)-1])
+	if parsed.Body != want {
+		t.Fatalf("Body = %q, want %q", parsed.Body, want)
 	}
 	if parsed.Meta.Title != "" || parsed.Meta.Description != "" || len(parsed.Meta.Tags) != 0 ||
 		parsed.Meta.Mode != "" || parsed.Meta.Enter != nil || parsed.Meta.Key != nil || parsed.Meta.KeyDeclared {
@@ -158,8 +160,36 @@ func TestParseTrimsOnlyOneLeadingLineBreakAfterFence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if parsed.Body != "\nbody\n" {
-		t.Fatalf("Body = %q, want %q", parsed.Body, "\nbody\n")
+	if parsed.Body != "\nbody" {
+		t.Fatalf("Body = %q, want %q", parsed.Body, "\nbody")
+	}
+}
+
+func TestParseTrimsOnlyOneTrailingLineBreak(t *testing.T) {
+	tests := map[string]struct {
+		input string
+		want  string
+	}{
+		"frontmatter LF":         {"---\ntitle: Demo\n---\nbody\n\n", "body\n"},
+		"frontmatter CRLF":       {"---\r\ntitle: Demo\r\n---\r\nbody\r\n\r\n", "body\r\n"},
+		"no frontmatter LF":      {"body\n\n", "body\n"},
+		"no frontmatter CRLF":    {"body\r\n\r\n", "body\r\n"},
+		"no trailing newline":    {"---\ntitle: Demo\n---\nbody", "body"},
+		"single trailing LF":     {"---\ntitle: Demo\n---\nbody\n", "body"},
+		"single trailing CRLF":   {"---\ntitle: Demo\n---\r\nbody\r\n", "body"},
+		"empty body after fence": {"---\ntitle: Demo\n---\n", ""},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			parsed, err := Parse([]byte(tc.input))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if parsed.Body != tc.want {
+				t.Fatalf("Body = %q, want %q", parsed.Body, tc.want)
+			}
+		})
 	}
 }
 
@@ -257,7 +287,7 @@ func TestParseStubEmptyFixtureLoadsCleanly(t *testing.T) {
 	if parsed.Meta.Enter != nil {
 		t.Fatalf("Enter = %v, want nil", parsed.Meta.Enter)
 	}
-	if parsed.Body != "Stubbed-empty body.\n" {
+	if parsed.Body != "Stubbed-empty body." {
 		t.Fatalf("Body = %q", parsed.Body)
 	}
 }

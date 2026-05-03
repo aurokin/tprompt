@@ -21,6 +21,7 @@ tracker; planned work lives in Linear.
 - Optional YAML frontmatter may define metadata such as `title`,
   `description`, `tags`, delivery defaults, and `key`.
 - Frontmatter is metadata only. Delivery injects the markdown body, not the frontmatter.
+- The parser strips one leading line break after the closing frontmatter fence and one trailing line break (`\n` or `\r\n`) from the body, so the canonical blank-line-after-fence and POSIX EOF newline that editors enforce do not become extra blank lines at paste time.
 - Duplicate, reserved, or malformed `key:` values are invalid.
 
 ## CLI Behavior

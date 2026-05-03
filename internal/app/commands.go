@@ -90,7 +90,7 @@ func newShowCmd(deps Deps) *cobra.Command {
 				_, _ = fmt.Fprintf(w, "Shadowed counterpart: %s\n", p.ShadowPath)
 			}
 			_, _ = fmt.Fprintln(w)
-			_, _ = fmt.Fprint(w, p.Body)
+			_, _ = fmt.Fprintln(w, p.Body)
 			return nil
 		},
 	}

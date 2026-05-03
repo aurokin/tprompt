@@ -342,7 +342,7 @@ func TestShowFullMetadata(t *testing.T) {
 					KeySource:   store.KeySourceExplicit,
 					Path:        "/prompts/code-review.md",
 				},
-				Body: "Review this code.\n",
+				Body: "Review this code.",
 				Defaults: store.DeliveryDefaults{
 					Mode:  "paste",
 					Enter: &enter,
@@ -384,7 +384,7 @@ func TestShowPrintsShadowedCounterpartPath(t *testing.T) {
 					KeySource:  store.KeySourceAuto,
 					ShadowPath: "/project/alpha.md",
 				},
-				Body: "Global body.\n",
+				Body: "Global body.",
 			},
 		},
 	}
@@ -404,7 +404,7 @@ func TestShowMinimalMetadata(t *testing.T) {
 					Path:      "/prompts/bare.md",
 					KeySource: store.KeySourceOverflow,
 				},
-				Body: "Just a body.\n",
+				Body: "Just a body.",
 			},
 		},
 	}
@@ -429,7 +429,7 @@ func TestShowMinimalWithAutoAssignedKey(t *testing.T) {
 					Key:       "b",
 					KeySource: store.KeySourceAuto,
 				},
-				Body: "Just a body.\n",
+				Body: "Just a body.",
 			},
 		},
 	}

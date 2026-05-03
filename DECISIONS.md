@@ -68,6 +68,11 @@ Two delivery modes are required:
 
 If markdown files include YAML frontmatter, only the markdown body is injected. Frontmatter is metadata only.
 
+The parser strips one leading and one trailing line break from the body so the
+canonical layout (a blank line after the closing fence, a POSIX EOF newline)
+does not introduce extra blank lines at paste time. See
+[docs/storage/prompt-store.md](docs/storage/prompt-store.md) "Body trimming".
+
 ### 10. `tprompt` is tmux-first
 
 Outside-tmux support is not part of the current product contract.

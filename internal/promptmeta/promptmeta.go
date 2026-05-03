@@ -28,6 +28,13 @@ type Parsed struct {
 }
 
 // Parse reads prompt-file bytes and returns frontmatter metadata plus body.
+//
+// Two line breaks are stripped from the body to normalize file-convention
+// whitespace away from injected content: one immediately after the closing
+// `---` fence (so the canonical blank line between frontmatter and body does
+// not show up at paste time), and one trailing `\n` or `\r\n` (so the POSIX
+// end-of-file newline most editors enforce does not become an extra blank
+// line at paste time). See docs/storage/prompt-store.md ("Body trimming").
 func Parse(content []byte) (Parsed, error) {
 	normalized := trimUTF8BOM(content)
 
@@ -36,7 +43,7 @@ func Parse(content []byte) (Parsed, error) {
 		return Parsed{}, err
 	}
 	if !ok {
-		return Parsed{Body: string(normalized)}, nil
+		return Parsed{Body: string(trimSingleTrailingLineBreak(normalized))}, nil
 	}
 
 	var meta Meta
@@ -46,7 +53,7 @@ func Parse(content []byte) (Parsed, error) {
 
 	return Parsed{
 		Meta: meta,
-		Body: string(body),
+		Body: string(trimSingleTrailingLineBreak(body)),
 	}, nil
 }
 
@@ -147,6 +154,17 @@ func trimSingleLeadingLineBreak(body []byte) []byte {
 		return body[2:]
 	case bytes.HasPrefix(body, []byte("\n")):
 		return body[1:]
+	default:
+		return body
+	}
+}
+
+func trimSingleTrailingLineBreak(body []byte) []byte {
+	switch {
+	case bytes.HasSuffix(body, []byte("\r\n")):
+		return body[:len(body)-2]
+	case bytes.HasSuffix(body, []byte("\n")):
+		return body[:len(body)-1]
 	default:
 		return body
 	}

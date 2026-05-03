@@ -40,7 +40,9 @@ Assert:
 - unsupported file extensions ignored
 - supported frontmatter fields parsed
 - invalid prompt delivery defaults rejected
-- metadata escape stripping preserves body bytes
+- metadata escape stripping preserves body bytes (after the parser's single
+  leading and single trailing line-break trim — see
+  docs/storage/prompt-store.md "Body trimming")
 - resolved prompt and list data are returned as cloned values
 
 ### Config
