@@ -1,4 +1,5 @@
 /bin/
+/tprompt
 /dist/
 .tmp-review/
 .ws/
