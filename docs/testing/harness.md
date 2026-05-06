@@ -8,9 +8,28 @@ daemon queue, submitter, and TUI model.
 Good tests assert public behavior and failure contracts. Avoid tests that only
 mirror private helper structure.
 
+## Harness Engineering Principles
+
+- Start with the public contract: command output, exit code, daemon response,
+  tmux command shape, rendered TUI behavior, or stored prompt metadata.
+- Prefer the narrowest seam that proves the contract: pure unit test, fake
+  runner/client, Unix socket round trip, testscript, then live tmux smoke.
+- Keep planning artifacts out of the repo. Put PRDs and issue splits in Linear;
+  keep repo docs focused on contracts, invariants, interfaces, and proof.
+- When a contract changes, update three things together: the user-facing doc,
+  the implementation seam, and the proof surface.
+- Do not assert private helper structure unless the helper is the seam being
+  intentionally hardened.
+
 ## Health Gates
 
-Fast local gate:
+Focused local iteration:
+
+```bash
+go test ./internal/<pkg>/
+```
+
+Broad local gate when tmux state is disposable:
 
 ```bash
 go test ./...
@@ -24,6 +43,18 @@ make check
 
 `make check` runs formatting, linting, and the race-enabled test target from
 the `Makefile`.
+
+Testscripts in `cmd/tprompt/testdata/script/*.txtar` execute real `tmux`.
+Use package-scoped tests while iterating, and avoid broad `go test ./...` runs
+from a shell whose tmux state matters unless that state is disposable.
+
+## Test Selection Ladder
+
+1. Pure unit test for parsing, resolution, sanitization, ranking, and policy.
+2. Fake dependency test for command construction, app orchestration, and error mapping.
+3. Unix socket or temp-filesystem integration test for daemon/store behavior.
+4. `testscript` for black-box CLI behavior and exit codes.
+5. Manual/live tmux smoke only when real tmux focus or popup timing is the contract.
 
 ## Proof Surface By Subsystem
 

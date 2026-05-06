@@ -16,7 +16,7 @@ Go module project (`go.mod`). Pinned via `mise.toml`: Go 1.26.2, `golangci-lint 
 
 ## Health Gate
 
-`make check` (fmt-check + lint + race-enabled tests) must pass before merge. See [docs/testing/harness.md](docs/testing/harness.md). Never bypass with `--no-verify` or `--no-gpg-sign`.
+`make check` (fmt-check + lint + race-enabled tests) must pass before merge. See [docs/testing/harness.md](docs/testing/harness.md). Never bypass hooks with `--no-verify` or `--no-gpg-sign`.
 
 ## Contracts that must not regress
 
@@ -37,6 +37,7 @@ Testscripts in `cmd/tprompt/testdata/script/*.txtar` exec real `tmux`. Confirm w
 - Open PR → comment `@codex please review` → address findings → merge with merge commit, delete remote branch.
 - After merging, mark the Linear issue Done.
 - Planning artifacts (PRDs, issue breakdowns) live in the Linear milestone description, not in the repo.
+- Durable repo docs are contracts, decisions, architecture, interfaces, and proof surfaces. Keep them progressively disclosed from `README.md` → `docs/README.md` → narrow subsystem docs.
 
 ## Git safety
 
@@ -47,8 +48,9 @@ Testscripts in `cmd/tprompt/testdata/script/*.txtar` exec real `tmux`. Confirm w
 
 ## Where to look next
 
+- [README.md](README.md) — product overview, command map, and documentation entrypoint.
 - [docs/README.md](docs/README.md) — progressive-disclosure index ("I want to change X" → narrowest doc).
 - [docs/architecture/overview.md](docs/architecture/overview.md) — system shape and data flow.
 - [docs/implementation/interfaces.md](docs/implementation/interfaces.md) — module seams.
 - [docs/testing/harness.md](docs/testing/harness.md) — proof surfaces per subsystem.
-- [docs/roadmap/future-phases.md](docs/roadmap/future-phases.md) — intentionally deferred ideas.
+- [DECISIONS.md](DECISIONS.md) / [EXPECTATIONS.md](EXPECTATIONS.md) — locked decisions and user-visible contract.

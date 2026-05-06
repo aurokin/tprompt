@@ -50,9 +50,9 @@ set. Outside tmux, it prints help.
 
 ## Current Contract
 
-- Prompt source of truth is a configured directory of markdown files.
+- Prompt source of truth is markdown files loaded from global prompt sources and an optional project overlay.
 - Prompt IDs are filename stems; directories organize files but do not namespace IDs.
-- Duplicate prompt IDs are invalid.
+- Duplicate prompt IDs within a source tier are invalid; global/project collisions resolve through the documented priority policy.
 - Frontmatter is metadata only; only the markdown body is delivered.
 - Direct `send` and `paste` deliver synchronously through tmux.
 - TUI selections are submitted to a local daemon for verified deferred delivery.
@@ -60,7 +60,7 @@ set. Outside tmux, it prints help.
 - `type` mode is available as a fallback using `send-keys -l`.
 - `--enter` is opt-in and sends Enter outside the paste wrapper.
 - Clipboard reads are same-host only.
-- Sanitization is opt-in: `off`, `safe`, or `strict`.
+- Sanitization defaults to `safe`; `off` and `strict` are explicit config/flag choices.
 - Deferred-job failures are surfaced through `tmux display-message` and the daemon log.
 
 For the full contract, read [EXPECTATIONS.md](EXPECTATIONS.md).
@@ -74,14 +74,17 @@ High-value references:
 
 - [AGENTS.md](AGENTS.md) - agent / contributor entry point (also linked as CLAUDE.md).
 - [DECISIONS.md](DECISIONS.md) - locked product and engineering decisions.
+- [EXPECTATIONS.md](EXPECTATIONS.md) - user-visible behavior contract.
 - [docs/architecture/overview.md](docs/architecture/overview.md) - system shape and data flow.
 - [docs/commands/cli.md](docs/commands/cli.md) - command behavior and exit codes.
+- [docs/implementation/interfaces.md](docs/implementation/interfaces.md) - subsystem seams.
 - [docs/testing/harness.md](docs/testing/harness.md) - proof surfaces and test strategy.
 - [examples/tmux-bindings.md](examples/tmux-bindings.md) - tmux popup binding examples.
 
 Execution tracking lives in Linear. Repo docs are durable harness engineering
 material: behavior contracts, invariants, seams, failure semantics, and proof
-surfaces.
+surfaces. Do not keep temporary PRDs or issue breakdowns in the repo after they
+are uploaded to Linear.
 
 ## Tool Bootstrap
 
@@ -104,12 +107,13 @@ That installs:
 ## Health Gate
 
 ```bash
-go test ./...
 make check
 ```
 
 `make check` runs format checking, linting, and the race-enabled test target
-defined in the project `Makefile`.
+defined in the project `Makefile`. Testscripts execute real `tmux`; see
+[docs/testing/harness.md](docs/testing/harness.md) before running broad test
+targets in a shell with tmux state that matters.
 
 ## Out Of Scope
 

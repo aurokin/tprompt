@@ -1,10 +1,20 @@
 # tprompt Docs
 
-These docs use progressive disclosure. Read the narrowest document that answers
-your question, then follow links only when you need deeper context.
+These docs use progressive disclosure. Start from the intent that matches your
+work, read the narrowest contract first, then follow links only when you need
+deeper context.
 
-Execution tracking lives in Linear. This repository documents durable truth:
-contracts, invariants, test seams, failure semantics, and proof surfaces.
+Execution tracking lives in Linear. This repository documents durable harness
+engineering material: user-visible contracts, locked decisions, architecture,
+interfaces, failure semantics, and proof surfaces. PRDs and issue breakdowns
+belong in Linear milestones, not in the repo.
+
+## Documentation Rules
+
+- Keep entrypoints short: `README.md` for product orientation, this file for routing, subsystem docs for details.
+- Link to the narrowest durable doc instead of duplicating contracts across files.
+- When behavior changes, update the behavior contract, the subsystem doc, and the proof surface together.
+- When adding a new doc, add it here under the intent it serves.
 
 ## I Want To Use `tprompt`
 
@@ -22,6 +32,7 @@ contracts, invariants, test seams, failure semantics, and proof surfaces.
 - [Error handling](implementation/error-handling.md) - exit codes and error taxonomy.
 - [Config](storage/config.md) - config fields and precedence.
 - [Prompt store](storage/prompt-store.md) - prompt IDs, frontmatter, and keybinds.
+- [Testing harness](testing/harness.md) - app-level and testscript proof surfaces.
 
 ## I Want To Change The TUI
 
@@ -46,6 +57,21 @@ contracts, invariants, test seams, failure semantics, and proof surfaces.
 - [Components](architecture/components.md) - package responsibilities.
 - [Interfaces](implementation/interfaces.md) - daemon client/server seams.
 - [Testing harness](testing/harness.md) - socket, queue, executor, and logging tests.
+
+## I Want To Change Prompt Storage Or Config
+
+- [Prompt store](storage/prompt-store.md) - discovery, frontmatter, IDs, shadowing, and keybinds.
+- [Config](storage/config.md) - config fields, defaults, and validation.
+- [Clipboard](storage/clipboard.md) - same-host clipboard detection and validation.
+- [Testing harness](testing/harness.md) - store/config/clipboard proof surfaces.
+
+## I Want To Change Architecture Or Module Boundaries
+
+- [Architecture overview](architecture/overview.md) - system shape and data flow.
+- [Components](architecture/components.md) - package responsibilities.
+- [Data model](architecture/data-model.md) - stable structs and wire shapes.
+- [Interfaces](implementation/interfaces.md) - seams designed for isolation.
+- [Tech stack](implementation/tech-stack.md) - toolchain and implementation choices.
 
 ## I Want To Add Tests
 
