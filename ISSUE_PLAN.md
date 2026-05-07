@@ -1,163 +1,184 @@
-# ISSUE_PLAN — AUR-265 Make `daemon start` backgrounded
+# ISSUE_PLAN — AUR-314 macOS implicit auto-start trust gate
 
 ## Goal
 
-Convert `tprompt daemon start` into an explicit background launcher.
-The launcher:
+Wire the `TrustAssessor` seam (introduced in AUR-265 as a no-op) to a
+real macOS executable-trust preflight that runs only for implicit
+auto-start. Goals are inherited from the milestone plan §3:
 
-1. Probes the existing daemon socket via `Status` first. If a
-   compatible daemon answers, exit 0 with a clear "already running"
-   message. This check happens before opening the daemon log file or
-   the tmux adapter.
-2. Acquires the lifecycle start lock from AUR-263 to serialize
-   concurrent cold starts.
-3. Re-probes Status under the lock (the previous start-lock holder
-   might have just spawned a daemon).
-4. Calls a `StartIntent`-aware trust-gate hook (no-op until AUR-314
-   wires the macOS assessor).
-5. Appends pre-spawn diagnostics (parent pid, intent, exec, canonical
-   exec, socket path, lifecycle paths, log path, env removed/forwarded,
-   trust-gate result) to the daemon log on a best-effort basis.
-6. Spawns `tprompt daemon run --config <path>` detached (`Setsid`),
-   stdout discarded, stderr appended to the daemon log.
-7. Polls `Status` until it succeeds, the readiness deadline expires
-   (default 5 s), or the child exits early.
-8. Returns a `lifecycle.StartResult` distinguishing
-   `Started`/`AlreadyRunning`/`Failed`.
-
-The TUI implicit auto-start path (`Deps.StartDaemon`) is replumbed
-through the same launcher. The parent's spawn argv now ends in
-`daemon run` (not `daemon start`), eliminating the recursion class of
-bug.
+- Reject ad-hoc signed binaries.
+- Reject invalid (unsigned, tampered) code signatures.
+- Reject Gatekeeper-rejected binaries.
+- Allow validly signed CLI binaries that Gatekeeper labels "valid but
+  not an app" (the common case for our binary).
+- `TPROMPT_UNSAFE_SKIP_TRUST_GATE=1` short-circuits before any
+  `codesign`/`spctl` invocation.
+- Explicit `daemon start` and `daemon run` keep bypassing the gate
+  (already implemented via `StartIntent`).
+- Failure detail is path-specific and only suggests flags/commands the
+  invoking command actually accepts.
+- Compiled only on darwin where it runs; non-darwin gets a no-op
+  assessor.
 
 ## Files
 
 New:
 
-- `internal/app/lifecycle/launcher.go` — `Launcher`, `Options`,
-  `StartIntent` enum (`IntentExplicitStart | IntentExplicitRun |
-  IntentImplicitTUI`), `Start(ctx, intent)` returning
-  `lifecycle.StartResult`. Pre-spawn diagnostic builder that emits a
-  single logfmt line.
-- `internal/app/lifecycle/launcher_test.go` — fakes for
-  `StatusProber`, `Spawner`, `TrustAssessor`, and the start-lock
-  probe path. Tests cover already-running short-circuit, post-lock
-  re-probe, spawn → readiness, readiness timeout, child early exit,
-  trust-gate rejection mapping, and concurrent cold starts (two
-  goroutines call Start; one observes Started, the other
-  AlreadyRunning).
-- `internal/app/lifecycle/spawn.go` — production `Spawner` that
-  builds the `exec.Cmd` (`Setsid`, stdout discarded, stderr appended
-  to daemon log). Lives in its own file because it touches `os/exec`
-  and `syscall.SysProcAttr`.
+- `internal/app/lifecycle/trust_darwin.go` — `//go:build darwin`. Exports
+  `ProductionAssessor() TrustAssessor` returning a `darwinAssessor`
+  that consults `codesign` and `spctl` through an injectable runner.
+  Format failure detail with a path-specific recovery line that names
+  `tprompt daemon start` / `tprompt daemon run` and the env var.
+- `internal/app/lifecycle/trust_other.go` — `//go:build !darwin`.
+  Exports `ProductionAssessor() TrustAssessor` returning the existing
+  `noopAssessor{}`. One-line comment notes the override env var is
+  darwin-only.
+- `internal/app/lifecycle/trust_darwin_test.go` — `//go:build darwin`.
+  Table-driven unit tests using a fake `runner` that pre-cans
+  codesign/spctl invocations: ad-hoc, invalid signature,
+  Gatekeeper-rejected, valid CLI ("not an app" case),
+  validly-signed-and-Gatekeeper-accepted, debug-override short-circuit
+  (asserts no runner calls happened), debug-override-with-known-negative
+  (asserts gate stays active).
+- `internal/app/lifecycle/trust_darwin_integration_test.go` —
+  `//go:build darwin`. Tests against the real `/usr/bin/codesign` and
+  `/usr/bin/spctl`. Each test `t.Skip`s if the corresponding tool
+  binary is missing. Cases:
+  1. `/usr/bin/git` (notarized Apple binary) → Allow (or rejected-as-CLI
+     fallback Allow on hosts where spctl rejects it as not-an-app).
+  2. The current go test binary (`os.Executable()`) → Allow when the
+     test binary is signed validly; otherwise we just assert the
+     decision is reasoned (Allow for valid CLI, Reject otherwise).
+  3. A freshly-built ad-hoc binary (`clang -o /tmp/x x.c` then
+     `codesign --remove-signature && codesign -fs - /tmp/x`) →
+     RejectAdHoc. This is the load-bearing case and is the one most
+     likely to drift if a future macOS release changes codesign
+     output.
+     The test skips if `clang` is missing.
 
 Edit:
 
-- `internal/app/deps.go` — replace `StartDaemon`'s production
-  implementation with one that calls `lifecycle.Launcher.Start` with
-  `IntentImplicitTUI`. The production Spawner spawns
-  `daemon run --config <path>` instead of `daemon start`.
-- `internal/app/commands.go` — `daemon start` no longer calls
-  `runDaemonForeground`; it builds a `Launcher` with
-  `IntentExplicitStart` and prints the result. The dual-purpose
-  handler `runDaemonForeground` is renamed back to `runDaemonRun` (or
-  inline) since only `daemon run` calls it.
-- `internal/app/tui.go` — `autoStartTUIDaemon` now consumes a
-  `StartResult` from the launcher. Failure mapping to daemon/IPC error
-  preserves today's error class.
-- `internal/app/daemon_test.go` — start-flavored tests that injected a
-  fake `runDaemon` to exercise the previous foreground-start handler
-  drop the foreground assumption and cover the launcher seam through a
-  fake Launcher.
-- `cmd/tprompt/testdata/script/*.txtar` — testscripts that previously
-  did `tprompt daemon start --config ... &` migrate to
-  `tprompt daemon run --config ... &` so they keep getting a
-  foreground process to manage. Affected scripts (per AUR-269 plan):
-  `tui_cancel.txtar`, `tui_clipboard_happy.txtar`,
-  `tui_clipboard_oversize.txtar`, `tui_pane_missing.txtar`. These
-  migrations land here in AUR-265 because otherwise the existing
-  testscripts break the moment `daemon start` becomes background.
+- `internal/app/lifecycle/launcher.go` — no behavior change.
+- `internal/app/deps.go` — `productionNewLauncher` sets
+  `Assessor: applife.ProductionAssessor()`.
 
-## Wire shape
+## Trust signal interpretation
 
-```go
-package lifecycle  // internal/app/lifecycle
+The assessor consults two macOS tools by absolute path
+(`/usr/bin/codesign`, `/usr/bin/spctl`) — both are part of the macOS
+base system on every supported version. We do not honor `$PATH` for
+these, so a user mucking with their PATH cannot bypass the gate.
 
-type StartIntent int
-const (
-    IntentExplicitStart StartIntent = iota
-    IntentExplicitRun
-    IntentImplicitTUI
-)
+If either binary is missing (developer stripped /usr/bin) we ALLOW
+with a reason of `trust tools unavailable`. This degradation is
+documented in the failure-detail message so an operator sees what
+happened. Rationale: macOS base system always ships these binaries;
+absence implies an exotic host where the user has opted out of
+standard tooling, and we'd rather not lock them out of auto-start.
 
-type Options struct {
-    SocketPath       string
-    LogPath          string
-    ConfigPath       string  // forwarded as --config when set
-    Executable       string  // exec spawned for `daemon run`
-    ReadinessTimeout time.Duration
-    PollInterval     time.Duration
-    Now              func() time.Time
-    Status           StatusProber
-    Spawner          Spawner
-    TrustAssessor    TrustAssessor       // optional; no-op default
-    LogPreSpawn      func(parent string) // optional logger sink
-}
+Order: codesign verify → codesign -d -vv → spctl. We keep this order
+because for the developer-signed common case, spctl will reject with
+"valid but not an app", which means we'd fall through anyway; running
+codesign first lets us reject the unsigned/ad-hoc/tampered cases
+without touching spctl. Documented inline in `trust_darwin.go`.
 
-type StatusProber interface {
-    Probe(ctx context.Context) error
-}
-type Spawner interface {
-    Spawn(ctx context.Context, exec string, args []string, logPath string) error
-}
-type TrustAssessor interface {
-    Assess(intent StartIntent, exec string) AssessResult
-}
-type AssessResult struct {
-    Allow  bool
-    Reason string
-}
+1. `codesign --verify --strict <exec>` — exit 0 means the signature
+   verifies cryptographically. Non-zero is `RejectInvalidSignature`
+   (covers "code object is not signed at all" and tampering). The
+   stderr first line is captured into the reason for diagnostics.
+   `--deep` is intentionally not used; per `man codesign`, it is for
+   nested code (frameworks/dylibs in app bundles), and using it on a
+   standalone Mach-O CLI is a no-op or worse.
 
-type Launcher struct{ /* opts */ }
+2. `codesign -d -vv <exec>` — describes the signing identity. We parse
+   stderr for either of two ad-hoc markers:
+   - `Signature=adhoc` literal line, OR
+   - `flags=...adhoc...` substring on the `CodeDirectory` line (e.g.,
+     `flags=0x20002(adhoc,linker-signed)`).
+   Either match → `RejectAdHoc`. We match BOTH because clang's
+   linker-signed output emits both lines, but other code paths (e.g.,
+   `codesign -fs - <path>` retroactively applied) emit only one.
+   We do NOT use "missing Authority=" as an ad-hoc signal because a
+   developer-signed binary with a self-signed identity has Authority
+   lines but is still validly signed and not ad-hoc — that case
+   should fall through to spctl.
 
-func New(opts Options) *Launcher
-func (l *Launcher) Start(ctx context.Context, intent StartIntent) dlife.StartResult
-```
+3. `spctl --assess --type execute -vv <exec>` — Gatekeeper.
+   - exit 0 → `Allow`.
+   - exit non-zero AND stderr contains literal
+     `the code is valid but does not seem to be an app` → `Allow`
+     (CLI bypass; matches the format on macOS 14/15 verified
+     empirically against `/usr/bin/git` and `/bin/sh`).
+   - otherwise → `RejectGatekeeper`, with the first stderr line as
+     the reason detail.
+   We do not pass `--ignore-cache`. Matching OS behavior is the right
+   default; developers flipping signatures during testing can opt out
+   with the env-var override.
 
-`dlife` is the `internal/daemon/lifecycle` package alias.
+## Debug override
 
-## Tests
+`TPROMPT_UNSAFE_SKIP_TRUST_GATE` value handling (value-required, per
+MILESTONE_PLAN.md §3):
 
-* `Launcher_AlreadyRunningShortCircuits` — Status returns nil before
-  any work; result.Outcome == AlreadyRunning, no spawn.
-* `Launcher_SpawnAndPollUntilReady` — Status returns error then nil;
-  Spawner invoked with `daemon run` argv.
-* `Launcher_ReadinessTimeoutMapsToFailed` — Status always errs;
-  Outcome == Failed, Reason == ReasonReadinessTimeout, cooldown
-  recorded for ImplicitTUI, NOT recorded for explicit intents.
-* `Launcher_ChildExitEarlyMapsToFailed` — Spawner reports child exited
-  before the readiness deadline; Reason == ReasonChildExitedEarly.
-* `Launcher_ConcurrentCallsExactlyOneStart` — two goroutines call
-  Start; the second observes AlreadyRunning thanks to start-lock
-  serialization.
-* `Launcher_TrustGateRejection` — TrustAssessor returns Allow=false
-  for ImplicitTUI; Outcome == Failed, Reason == ReasonTrustGate, no
-  spawn occurs. Same TrustAssessor returning Deny for ExplicitStart
-  is bypassed (gate only fires for ImplicitTUI).
-* `Launcher_PreSpawnDiagnosticsLogged` — LogPreSpawn captured a
-  logfmt line that includes parent pid, intent, exec, socket, log,
-  trust-gate result.
-* `productionStartDaemon` test in `daemon_test.go` is removed; its
-  coverage moves to the launcher tests.
-* CLI-level: `daemon start` against a missing daemon → spawn observed
-  via fake; against an already-running daemon → "already running"
-  printed and exit 0; against a non-Status-responding socket → exit
-  daemon-error.
+- Empty / unset → gate is active.
+- Case-insensitive `1`, `true`, `yes`, `on` → bypass with a "debug
+  override" reason. Short-circuits BEFORE any runner invocation.
+- Any other non-empty value (including `0`, `false`, `no`, `off`,
+  garbage) → gate stays active. We log a warning at the assessor
+  reason boundary so the operator sees the literal value they set.
+
+The short-circuit is unit-testable because the runner is injectable
+and the override path returns `Allow` with `runner.calls == 0`.
+
+## Failure-detail copy
+
+When `Assess` rejects, the launcher sets
+`StartResult.Reason = ReasonTrustGate` and
+`StartResult.Detail = <assessor reason>`. The assessor reason is:
+
+> `daemon executable %q failed macOS trust check (%s). Run 'tprompt daemon start' to start the daemon explicitly, or set TPROMPT_UNSAFE_SKIP_TRUST_GATE=1 for local builds. See %s for details.`
+
+Where `%s` is one of: `ad-hoc signature`, `invalid signature: <stderr first line>`, `Gatekeeper rejected: <stderr first line>`, `trust tools unavailable: <which one>`. The third `%s` is the daemon log path (mirrors the cooldown error format already used in launcher.go:262-263). When LogPath is empty we omit the trailing "See ... for details." sentence.
+
+The string suggests `tprompt daemon start` (a separate command). It does NOT suggest TUI flags, because no TUI flag exists to disable the gate (the gate is a property of implicit auto-start, not a user knob).
+
+stderr captures collapse internal newlines to spaces and trim runs
+of whitespace so the failure reason fits on one logfmt line in the
+pre-spawn diagnostic and one ANSI line in the TUI failure banner.
+
+## Test plan
+
+Unit (mock runner):
+- Each darwinAssessor branch: ad-hoc (both signal variants),
+  unsigned/invalid, Gatekeeper-rejected (non-CLI), CLI-bypass,
+  fully-allowed, codesign-missing, spctl-missing, debug-override-true,
+  debug-override-1, debug-override-yes, debug-override-FALSE (gate
+  active), debug-override-bogus (gate active).
+- runner.calls assertions for the override cases.
+- Reason strings include the executable path, name `tprompt daemon
+  start`, name the env var.
+
+Integration (real tools, build-tagged + skipped when missing):
+- `/usr/bin/git` → Allow (CLI bypass branch in practice).
+- Freshly-built clang ad-hoc binary → RejectAdHoc.
+
+Launcher-level: `TestLauncherTrustGateRejectionImplicitOnly` already
+covers the StartIntent gating with stubAssessor. No change needed.
+
+## Risks / open questions
+
+- `codesign`/`spctl` output formats are stable on macOS 14/15 (verified
+  empirically). If a future release changes them, the integration test
+  will catch it before the unit tests do — that's the whole point of
+  M5.
+- An adversary controlling a co-installed binary path could rename
+  it to look like ours, but they can't tamper with the binary
+  contents without breaking codesign verify. The trust gate is about
+  signature integrity, not anti-tampering of the launching tprompt
+  process itself.
 
 ## Out of scope
 
-* Default-on TUI auto-start (AUR-266).
-* macOS trust gate implementation (AUR-314 wires the assessor).
-* Adding new lifecycle testscripts (AUR-269).
-* `daemon stop` behavior changes (AUR-268; current Stop RPC already
-  works against any daemon owning the socket).
+- AUR-266 wires the launcher into the TUI default-on path.
+- AUR-270 adds doctor warning + DECISIONS entry for the override env var.
+- Caching the assessor result across invocations.
