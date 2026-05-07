@@ -69,7 +69,7 @@ func TestSubcommandHelpText(t *testing.T) {
 		},
 		{
 			path: []string{"daemon", "start"},
-			want: []string{"foreground"},
+			want: []string{"background", "already running"},
 		},
 		{
 			path: []string{"daemon", "run"},

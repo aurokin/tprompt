@@ -12,10 +12,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	applife "github.com/hsadler/tprompt/internal/app/lifecycle"
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
-	"github.com/hsadler/tprompt/internal/daemon/lifecycle"
+	dlife "github.com/hsadler/tprompt/internal/daemon/lifecycle"
 	"github.com/hsadler/tprompt/internal/sanitize"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
@@ -485,16 +486,17 @@ TUI-selected prompts after the TUI process exits. Lifecycle subcommands:
 	cmd.AddCommand(
 		&cobra.Command{
 			Use:   "start",
-			Short: "Start the daemon in the foreground (backgrounded in a follow-up change)",
-			Long: `Start the daemon. Currently runs in the foreground; a follow-up
-change converts this to a backgrounded launcher that spawns 'daemon
-run' detached. The daemon listens on the configured socket and processes
-deferred delivery jobs submitted by 'tprompt tui'. Send SIGINT or
-SIGTERM (or run 'tprompt daemon stop' from another shell) to request
-graceful shutdown.`,
+			Short: "Start the daemon in the background (idempotent if already running)",
+			Long: `Start the daemon in the background. Spawns a detached 'daemon run'
+process if no compatible daemon is already running, redirects child
+stderr to the configured daemon log, polls the daemon Status RPC until
+readiness, then returns. If a compatible daemon is already running,
+prints "already running" and exits successfully — making this command
+idempotent for shell scripts and tmux popup bindings. Failures map to
+daemon/IPC errors and mention the daemon log path where relevant.`,
 			Args: cobra.NoArgs,
 			RunE: func(c *cobra.Command, _ []string) error {
-				return runDaemonForeground(c.Context(), deps)
+				return runDaemonStartBackground(c.Context(), deps)
 			},
 		},
 		&cobra.Command{
@@ -538,10 +540,47 @@ down within a short bounded wait, exits with a daemon/IPC error.`,
 	return cmd
 }
 
-// runDaemonForeground is the shared handler for `daemon run` and (in this
-// commit) `daemon start`. It runs the daemon server loop in the calling
-// process. The run-lock + identity sidecar from AUR-263 enforce one
-// daemon per socket regardless of which subcommand the user chose.
+// runDaemonStartBackground is the explicit `daemon start` handler. It
+// dispatches to the lifecycle launcher with IntentExplicitStart so the
+// trust gate is bypassed (explicit recovery commands always proceed) and
+// any active cooldown is cleared on success. The launcher spawns
+// `daemon run` detached, polls Status until ready, then returns. If a
+// compatible daemon is already running this is an idempotent success.
+func runDaemonStartBackground(parent context.Context, deps Deps) error {
+	cfg, err := deps.LoadDaemonConfig(*deps.ConfigPath)
+	if err != nil {
+		return err
+	}
+	if err := validateDaemonStartConfig(cfg); err != nil {
+		return err
+	}
+	launcher := deps.NewLauncher(cfg, explicitConfigPath(deps))
+	res := launcher.Start(parent, applife.IntentExplicitStart)
+	switch res.Outcome {
+	case dlife.OutcomeAlreadyRunning:
+		_, _ = fmt.Fprintf(deps.Stdout, "tprompt daemon already running on %s\n", cfg.SocketPath)
+		return nil
+	case dlife.OutcomeStarted:
+		_, _ = fmt.Fprintf(deps.Stdout, "tprompt daemon started on %s\n", cfg.SocketPath)
+		return nil
+	default:
+		detail := res.Detail
+		if detail == "" {
+			detail = string(res.Reason)
+		}
+		return &daemon.IPCError{
+			Path:   cfg.SocketPath,
+			Op:     "daemon start",
+			Reason: detail,
+		}
+	}
+}
+
+// runDaemonForeground is the shared handler for `daemon run`. It runs the
+// daemon server loop in the calling process. The run-lock + identity
+// sidecar from AUR-263 enforce one daemon per socket; collisions surface
+// as daemon/IPC errors with the same exit-code mapping the launcher
+// uses.
 func runDaemonForeground(parent context.Context, deps Deps) error {
 	cfg, err := deps.LoadDaemonConfig(*deps.ConfigPath)
 	if err != nil {
@@ -585,8 +624,8 @@ func runDaemonForeground(parent context.Context, deps Deps) error {
 				Version:     appVersion,
 			}
 		},
-		IdentityFn: func() lifecycle.Identity {
-			return lifecycle.Identity{
+		IdentityFn: func() dlife.Identity {
+			return dlife.Identity{
 				PID:       os.Getpid(),
 				StartTime: started,
 				Exec:      exec,

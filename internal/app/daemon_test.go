@@ -166,7 +166,7 @@ func TestDaemonStatusDoesNotAutoStart(t *testing.T) {
 			DaemonAutoStart: true,
 		}, nil
 	}
-	deps.StartDaemon = func(config.Resolved, string) error {
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
 		t.Fatal("daemon status must not auto-start")
 		return nil
 	}

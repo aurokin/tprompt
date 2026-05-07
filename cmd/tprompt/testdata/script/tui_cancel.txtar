@@ -10,7 +10,7 @@ exec tmux display-message -p '#{socket_path}'
 stdout $SHORT_TMPDIR
 
 mkdir prompts state
-tprompt daemon start --config config.toml &
+tprompt daemon run --config config.toml &
 
 exec sh -c 'for i in $(seq 1 50); do test -S state/daemon.sock && exit 0; sleep 0.1; done; exit 1'
 

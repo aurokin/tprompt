@@ -5,12 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/spf13/cobra"
 
+	applife "github.com/hsadler/tprompt/internal/app/lifecycle"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
+	dlife "github.com/hsadler/tprompt/internal/daemon/lifecycle"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
 	"github.com/hsadler/tprompt/internal/tui"
@@ -25,11 +26,11 @@ type tuiFlags struct {
 	daemonAutoStartSet bool
 }
 
-var (
-	daemonAutoStartReadyTimeout = 2 * time.Second
-	daemonAutoStartPollInterval = 50 * time.Millisecond
-	daemonAutoStartMu           sync.Mutex
-)
+// daemonAutoStartMu serializes the in-process auto-start window so two
+// concurrent runTUI calls in the same process do not both invoke the
+// launcher. Cross-process serialization is handled by the lifecycle
+// start lock inside the launcher itself.
+var daemonAutoStartMu sync.Mutex
 
 func newTUICmd(deps Deps) *cobra.Command {
 	var f tuiFlags
@@ -175,30 +176,36 @@ func autoStartTUIDaemon(deps Deps, cfg config.Resolved, client daemon.Client) er
 	if err := validateDaemonStartConfig(cfg); err != nil {
 		return err
 	}
-	if err := deps.StartDaemon(cfg, explicitConfigPath(deps)); err != nil {
-		return &daemon.IPCError{Path: cfg.SocketPath, Op: "auto-start daemon", Reason: err.Error()}
+
+	launcher := deps.NewLauncher(cfg, explicitConfigPath(deps))
+	res := launcher.Start(context.Background(), applife.IntentImplicitTUI)
+	switch res.Outcome {
+	case dlife.OutcomeStarted, dlife.OutcomeAlreadyRunning:
+		return nil
+	default:
+		return &daemon.IPCError{
+			Path:   cfg.SocketPath,
+			Op:     "auto-start daemon",
+			Reason: launcherFailureMessage(res, cfg.LogPath),
+		}
 	}
-	return waitForTUIDaemonReady(deps, cfg)
 }
 
-func waitForTUIDaemonReady(deps Deps, cfg config.Resolved) error {
-	deadline := time.Now().Add(daemonAutoStartReadyTimeout)
-	var lastErr error
-	for time.Now().Before(deadline) {
-		remaining := time.Until(deadline)
-		client := deps.NewDaemonReadinessClient(cfg, remaining)
-		if _, err := client.Status(); err == nil {
-			return nil
-		} else {
-			lastErr = err
-		}
-		time.Sleep(daemonAutoStartPollInterval)
+// launcherFailureMessage formats a StartResult for surfacing as a daemon
+// IPC error. The TUI's recovery hint must only suggest options the TUI
+// command path accepts, so the message embeds the daemon log path (where
+// real diagnostics land) but does not invite the user to retry with a
+// different flag. Explicit recovery via `tprompt daemon start` /
+// `tprompt daemon run` is documented elsewhere.
+func launcherFailureMessage(res dlife.StartResult, logPath string) string {
+	detail := res.Detail
+	if detail == "" {
+		detail = string(res.Reason)
 	}
-	reason := "daemon did not become ready"
-	if lastErr != nil {
-		reason = lastErr.Error()
+	if logPath == "" {
+		return detail
 	}
-	return &daemon.IPCError{Path: cfg.SocketPath, Op: "auto-start readiness", Reason: reason}
+	return fmt.Sprintf("%s (see %s)", detail, logPath)
 }
 
 func explicitConfigPath(deps Deps) string {
