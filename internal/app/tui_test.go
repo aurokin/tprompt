@@ -51,7 +51,8 @@ func tuiDeps(t *testing.T, fs *fakeStore, rend tui.Renderer, cfgOverride ...func
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
 		cfg := config.Resolved{
-			PromptsDir: "/prompts",
+			PromptsDir:      "/prompts",
+			DaemonAutoStart: true, // matches Default() after AUR-266
 			ReservedPrintable: map[rune]string{
 				'p': "clipboard",
 				'/': "search",
@@ -385,7 +386,12 @@ func TestTUI_StoreErrorShortCircuits(t *testing.T) {
 
 func TestTUI_DaemonUnreachableExitsDaemon(t *testing.T) {
 	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
-	deps := tuiDeps(t, &fakeStore{}, rend)
+	// Auto-start is on by default after AUR-266; this test exercises the
+	// "auto-start explicitly disabled, socket unreachable" path so we
+	// override the default off.
+	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
+		c.DaemonAutoStart = false
+	})
 	tmuxCalled := false
 	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
 		return &fakeDaemonClient{
@@ -519,6 +525,95 @@ func TestTUI_DaemonAutoStartFlagFalseOverridesConfig(t *testing.T) {
 	var su *daemon.SocketUnavailableError
 	if !errors.As(err, &su) {
 		t.Fatalf("want SocketUnavailableError, got %T: %v", err, err)
+	}
+}
+
+// TestTUI_DaemonAutoStartDefaultOn verifies the AUR-266 contract: with
+// no flag and no explicit config opt-out, the launcher fires when the
+// socket is unreachable.
+func TestTUI_DaemonAutoStartDefaultOn(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	// Note: tuiDeps provides cfg with DaemonAutoStart untouched; the
+	// default after AUR-266 is true. We explicitly do not set it here
+	// so a future regression flips the assertion, not the seed.
+	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
+		c.SocketPath = "/tmp/tprompt-test.sock"
+		c.LogPath = "/tmp/tprompt-test.log"
+		c.MaxPasteBytes = 1 << 20
+	})
+	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+		return &fakeDaemonClient{
+			statusFn: func() (daemon.StatusResponse, error) {
+				return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Path: "/tmp/tprompt-test.sock"}
+			},
+		}, nil
+	}
+	launcher := &fakeLauncher{
+		onStart: func() dlife.StartResult {
+			return dlife.StartResult{Outcome: dlife.OutcomeStarted}
+		},
+	}
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher { return launcher }
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	if err != nil {
+		t.Fatalf("want nil with default-on auto-start, got %v", err)
+	}
+	if launcher.calls != 1 {
+		t.Fatalf("launcher.Start calls = %d, want 1", launcher.calls)
+	}
+}
+
+// TestTUI_NoDaemonAutoStartFlagOptsOut verifies the readable opt-out
+// alias bypasses the launcher even when config has it on.
+func TestTUI_NoDaemonAutoStartFlagOptsOut(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
+		c.DaemonAutoStart = true
+		c.SocketPath = "/tmp/tprompt-test.sock"
+		c.LogPath = "/tmp/tprompt-test.log"
+		c.MaxPasteBytes = 1 << 20
+	})
+	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+		return &fakeDaemonClient{
+			statusFn: func() (daemon.StatusResponse, error) {
+				return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Path: "/tmp/tprompt-test.sock"}
+			},
+		}, nil
+	}
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
+		t.Fatal("NewLauncher must not be called when --no-daemon-auto-start is set")
+		return nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0", "--no-daemon-auto-start")
+	var su *daemon.SocketUnavailableError
+	if !errors.As(err, &su) {
+		t.Fatalf("want SocketUnavailableError, got %T: %v", err, err)
+	}
+}
+
+// TestTUI_ConflictingAutoStartFlagsErrors verifies that setting both
+// --daemon-auto-start and --no-daemon-auto-start on the same
+// invocation is a user error rather than a silent precedence pick.
+func TestTUI_ConflictingAutoStartFlagsErrors(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
+		c.SocketPath = "/tmp/tprompt-test.sock"
+		c.LogPath = "/tmp/tprompt-test.log"
+		c.MaxPasteBytes = 1 << 20
+	})
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
+		t.Fatal("NewLauncher must not be called when flags conflict")
+		return nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0", "--daemon-auto-start", "--no-daemon-auto-start")
+	if err == nil {
+		t.Fatal("want error for conflicting flags, got nil")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("err = %v, want 'mutually exclusive' message", err)
 	}
 }
 

@@ -22,11 +22,15 @@ Allow the user to select a prompt **or** paste the clipboard from the TUI, then 
 7. Daemon runs the sanitizer over the request body.
 8. Daemon injects via the tmux adapter.
 
-Daemon auto-start is opt-in. By default, the TUI exits with a daemon/IPC error
-when the configured daemon socket is unreachable. When `daemon_auto_start =
-true` is configured, or `--daemon-auto-start` is passed to `tprompt tui`, the
-TUI attempts one daemon start, waits briefly for readiness, then retries the
-daemon preflight before rendering.
+Daemon auto-start is on by default. When `tprompt tui` (or bare
+`tprompt` dispatching to TUI inside tmux) finds the configured daemon
+socket unreachable, it goes through the lifecycle launcher: spawns a
+detached daemon, waits briefly for readiness, then retries the daemon
+preflight before rendering. Pass `--no-daemon-auto-start` (or
+`--daemon-auto-start=false`) to skip auto-start for one invocation, or
+set `daemon_auto_start = false` in config to opt out permanently. On
+macOS, implicit auto-start is gated by an executable-trust assessment;
+explicit `tprompt daemon start` always bypasses that gate.
 
 ## Cancellation
 

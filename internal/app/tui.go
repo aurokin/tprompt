@@ -17,13 +17,20 @@ import (
 	"github.com/hsadler/tprompt/internal/tui"
 )
 
-// tuiFlags captures the --target-pane / --client-tty / --session-id inputs.
+// tuiFlags captures the --target-pane / --client-tty / --session-id /
+// --daemon-auto-start / --no-daemon-auto-start inputs.
+//
+// daemonAutoStartSet records whether --daemon-auto-start was named on
+// the command line (cobra's Flag.Changed semantics). noDaemonAutoStart
+// is the readable opt-out alias; setting it forces the auto-start
+// branch off regardless of config.
 type tuiFlags struct {
 	targetPane         string
 	clientTTY          string
 	sessionID          string
 	daemonAutoStart    bool
 	daemonAutoStartSet bool
+	noDaemonAutoStart  bool
 }
 
 // daemonAutoStartMu serializes the in-process auto-start window so two
@@ -50,9 +57,11 @@ from a tmux popup binding that passes the originating context, e.g.:
   tprompt tui --target-pane '#{pane_id}' --client-tty '#{client_tty}' \
     --session-id '#{session_id}'
 
-Daemon auto-start is opt-in: pass --daemon-auto-start (or set
-'daemon_auto_start = true' in config) to start the daemon once if it is
-unreachable when the TUI runs.`,
+Daemon auto-start is on by default: when the TUI runs and the daemon
+is unreachable, tprompt spawns a background daemon and waits for
+readiness. To turn it off for one invocation, pass
+--no-daemon-auto-start (or --daemon-auto-start=false). To turn it off
+permanently, set 'daemon_auto_start = false' in config.`,
 		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			return runTUI(deps, f)
@@ -61,7 +70,8 @@ unreachable when the TUI runs.`,
 	cmd.Flags().StringVar(&f.targetPane, "target-pane", "", "tmux pane ID to deliver into (required)")
 	cmd.Flags().StringVar(&f.clientTTY, "client-tty", "", "originating tmux client TTY for failure banners")
 	cmd.Flags().StringVar(&f.sessionID, "session-id", "", "originating tmux session ID for delivery context")
-	cmd.Flags().BoolVar(&f.daemonAutoStart, "daemon-auto-start", false, "opt in to auto-starting the daemon for this TUI run if unreachable")
+	cmd.Flags().BoolVar(&f.daemonAutoStart, "daemon-auto-start", true, "auto-start the daemon for this TUI run if unreachable (default true)")
+	cmd.Flags().BoolVar(&f.noDaemonAutoStart, "no-daemon-auto-start", false, "skip auto-starting the daemon for this TUI run (alias for --daemon-auto-start=false)")
 	if err := cmd.MarkFlagRequired("target-pane"); err != nil {
 		panic(fmt.Sprintf("tui: mark --target-pane required: %v", err))
 	}
@@ -72,6 +82,9 @@ unreachable when the TUI runs.`,
 }
 
 func runTUI(deps Deps, f tuiFlags) error {
+	if f.daemonAutoStartSet && f.noDaemonAutoStart {
+		return errors.New("tui: --daemon-auto-start and --no-daemon-auto-start are mutually exclusive")
+	}
 	// Pre-flight chain: config → store → daemon → pane. Each step short-circuits
 	// on error so the user sees the most-fundamental broken layer first.
 	cfg, err := deps.LoadConfig(*deps.ConfigPath)
@@ -144,6 +157,9 @@ func runTUI(deps Deps, f tuiFlags) error {
 }
 
 func (f tuiFlags) daemonAutoStartEnabled(cfg config.Resolved) bool {
+	if f.noDaemonAutoStart {
+		return false
+	}
 	if f.daemonAutoStartSet {
 		return f.daemonAutoStart
 	}

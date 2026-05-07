@@ -60,7 +60,7 @@ func TestSubcommandHelpText(t *testing.T) {
 		},
 		{
 			path:   []string{"tui"},
-			want:   []string{"daemon", "--target-pane", "--daemon-auto-start"},
+			want:   []string{"daemon", "--target-pane", "--daemon-auto-start", "--no-daemon-auto-start"},
 			banned: []string{"templat"},
 		},
 		{
