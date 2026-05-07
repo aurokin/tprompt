@@ -15,6 +15,7 @@ import (
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
+	"github.com/hsadler/tprompt/internal/daemon/lifecycle"
 	"github.com/hsadler/tprompt/internal/sanitize"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
@@ -546,6 +547,8 @@ func runDaemonStart(parent context.Context, deps Deps) error {
 	ctx, stop := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	exec, _ := os.Executable()
+
 	server := daemon.NewServer(daemon.ServerConfig{
 		SocketPath: cfg.SocketPath,
 		Queue:      queue,
@@ -559,6 +562,16 @@ func runDaemonStart(parent context.Context, deps Deps) error {
 				UptimeSec:   int64(time.Since(started).Seconds()),
 				PendingJobs: queue.Pending(),
 				Version:     appVersion,
+			}
+		},
+		IdentityFn: func() lifecycle.Identity {
+			return lifecycle.Identity{
+				PID:       os.Getpid(),
+				StartTime: started,
+				Exec:      exec,
+				Socket:    cfg.SocketPath,
+				Log:       cfg.LogPath,
+				Version:   appVersion,
 			}
 		},
 	})

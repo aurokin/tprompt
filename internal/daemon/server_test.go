@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+
+	"github.com/hsadler/tprompt/internal/daemon/lifecycle"
 )
 
 // socketPath returns a short Unix socket path under t.TempDir, skipping the
@@ -615,5 +617,187 @@ func TestRunReturnsListenError(t *testing.T) {
 	}
 	if readyCalled {
 		t.Fatal("onReady must not fire when Listen fails")
+	}
+}
+
+// TestListenAcquiresAndReleasesRunLock proves the run lock is held during
+// the daemon lifetime and released on Close. After Close, a fresh Listen
+// on the same socket must succeed.
+func TestListenAcquiresAndReleasesRunLock(t *testing.T) {
+	path := socketPath(t)
+	first, _, _ := newTestServer(t, path, nil)
+	if err := first.Listen(); err != nil {
+		t.Fatalf("first Listen: %v", err)
+	}
+	// While the first daemon holds the run lock, a second Listen must fail
+	// with the lifecycle reason — not the legacy "already running" path.
+	second, _, _ := newTestServer(t, path, nil)
+	if err := second.Listen(); err == nil {
+		t.Fatal("second Listen succeeded; want SocketUnavailableError")
+	} else {
+		var sue *SocketUnavailableError
+		if !errors.As(err, &sue) {
+			t.Fatalf("want SocketUnavailableError, got %T: %v", err, err)
+		}
+		if !strings.Contains(sue.Reason, "already running") &&
+			!strings.Contains(sue.Reason, "run lock held") {
+			t.Fatalf("Reason = %q, want already-running or run-lock-held", sue.Reason)
+		}
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("first Close: %v", err)
+	}
+
+	third, _, _ := newTestServer(t, path, nil)
+	if err := third.Listen(); err != nil {
+		t.Fatalf("third Listen after release: %v", err)
+	}
+	if err := third.Close(); err != nil {
+		t.Fatalf("third Close: %v", err)
+	}
+}
+
+// TestListenReleasesLockOnPostLockFailure proves that if Listen acquires
+// the run lock but then fails before binding succeeds, the run lock is
+// released so a retry can proceed.
+func TestListenReleasesLockOnPostLockFailure(t *testing.T) {
+	path := socketPath(t)
+	// Plant a regular (non-socket) file at the path so cleanupStaleSocket
+	// fails after the run lock is held.
+	if err := os.WriteFile(path, []byte("not a socket"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	srv, _, _ := newTestServer(t, path, nil)
+	if err := srv.Listen(); err == nil {
+		t.Fatal("Listen succeeded over non-socket file; want failure")
+	}
+	// Cleanup the planter so the next Listen has a clean socket path.
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove planted file: %v", err)
+	}
+
+	retry, _, _ := newTestServer(t, path, nil)
+	if err := retry.Listen(); err != nil {
+		t.Fatalf("retry Listen after run-lock failure path: %v", err)
+	}
+	if err := retry.Close(); err != nil {
+		t.Fatalf("retry Close: %v", err)
+	}
+}
+
+// TestServerWritesAndRemovesIdentitySidecar exercises the IdentityFn
+// hook end-to-end through Listen+Close.
+func TestServerWritesAndRemovesIdentitySidecar(t *testing.T) {
+	path := socketPath(t)
+	adapter := &fakeAdapter{}
+	logger := NewLoggerWriter(&bytes.Buffer{})
+	queue := NewQueue(adapter, logger, func(context.Context, Job) bool { return true })
+
+	identityCalls := 0
+	srv := NewServer(ServerConfig{
+		SocketPath: path,
+		Queue:      queue,
+		Logger:     logger,
+		StatusFn: func() StatusResponse {
+			return StatusResponse{}
+		},
+		IdentityFn: func() lifecycle.Identity {
+			identityCalls++
+			return lifecycle.Identity{
+				PID:       424242,
+				StartTime: time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC),
+				Exec:      "/usr/local/bin/tprompt",
+				Socket:    path,
+				Log:       "/tmp/log",
+				Version:   "test",
+			}
+		},
+	})
+
+	if err := srv.Listen(); err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	if identityCalls != 1 {
+		t.Fatalf("identityFn called %d times, want 1", identityCalls)
+	}
+	idPath := path + ".identity.json"
+	if _, err := os.Stat(idPath); err != nil {
+		t.Fatalf("identity file missing after Listen: %v", err)
+	}
+	if err := srv.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := os.Stat(idPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("identity file should be removed after Close; stat err=%v", err)
+	}
+}
+
+// TestListenReleasesLockOnIdentityWriteFailure proves that when Listen
+// successfully binds the socket but identity write fails, the socket is
+// unlinked and the run lock is released so a retry succeeds.
+func TestListenReleasesLockOnIdentityWriteFailure(t *testing.T) {
+	path := socketPath(t)
+	// Pre-create a directory at the identity sidecar path. The atomic
+	// rename in lifecycle.WriteIdentity will fail because rename(file →
+	// existing dir) returns EISDIR/ENOTDIR depending on platform.
+	idPath := path + ".identity.json"
+	if err := os.MkdirAll(idPath, 0o700); err != nil {
+		t.Fatalf("MkdirAll identity-as-dir: %v", err)
+	}
+
+	adapter := &fakeAdapter{}
+	logger := NewLoggerWriter(&bytes.Buffer{})
+	queue := NewQueue(adapter, logger, func(context.Context, Job) bool { return true })
+	srv := NewServer(ServerConfig{
+		SocketPath: path,
+		Queue:      queue,
+		Logger:     logger,
+		StatusFn:   func() StatusResponse { return StatusResponse{} },
+		IdentityFn: func() lifecycle.Identity {
+			return lifecycle.Identity{PID: 1, StartTime: time.Now().UTC(), Socket: path}
+		},
+	})
+
+	if err := srv.Listen(); err == nil {
+		_ = srv.Close()
+		t.Fatal("Listen succeeded despite identity-write blocked; want error")
+	}
+
+	// Cleanup the directory so the retry can write its sidecar.
+	if err := os.Remove(idPath); err != nil {
+		t.Fatalf("remove identity-as-dir: %v", err)
+	}
+
+	retry, _, _ := newTestServer(t, path, nil)
+	if err := retry.Listen(); err != nil {
+		t.Fatalf("retry Listen after identity-write failure: %v", err)
+	}
+	if err := retry.Close(); err != nil {
+		t.Fatalf("retry Close: %v", err)
+	}
+}
+
+// TestListenDropsOrphanIdentityWhenLockFree verifies that when no daemon
+// holds the run lock and a leftover identity sidecar exists, Listen wipes
+// the orphan during stale cleanup so the new daemon's identity is the
+// only one observable.
+func TestListenDropsOrphanIdentityWhenLockFree(t *testing.T) {
+	path := socketPath(t)
+	idPath := path + ".identity.json"
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(idPath, []byte(`{"pid":1}`), 0o600); err != nil {
+		t.Fatalf("seed identity: %v", err)
+	}
+
+	srv, _, _ := newTestServer(t, path, nil)
+	if err := srv.Listen(); err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	if _, err := os.Stat(idPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("orphan identity should be dropped; stat err=%v", err)
 	}
 }

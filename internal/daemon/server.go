@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/hsadler/tprompt/internal/daemon/lifecycle"
 )
 
 // DefaultHandlerDeadline bounds how long a single request/response cycle on
@@ -28,6 +30,13 @@ const StaleSocketProbeTimeout = 200 * time.Millisecond
 // uptime, etc.) without the server depending on a clock or process info.
 type StatusFunc func() StatusResponse
 
+// IdentityFunc returns the lifecycle.Identity to write next to the socket
+// after Listen acquires the run lock. Callers know pid/exec/version; the
+// daemon package stays free of CLI-version knowledge. When IdentityFunc is
+// nil, no identity sidecar is written and the corresponding remove on
+// Close is skipped.
+type IdentityFunc func() lifecycle.Identity
+
 // ServerConfig wires a Server with the queue it submits to and the metadata
 // emitter for status requests.
 type ServerConfig struct {
@@ -36,6 +45,10 @@ type ServerConfig struct {
 	Logger     *Logger
 	StatusFn   StatusFunc
 	ShutdownFn func()
+	// IdentityFn supplies the per-daemon ownership record written to
+	// <socket>.identity.json after the run lock is acquired. Optional in
+	// tests; production callers populate it.
+	IdentityFn IdentityFunc
 }
 
 // Server accepts JSON-framed daemon requests on a Unix domain socket.
@@ -46,10 +59,17 @@ type Server struct {
 	logger     *Logger
 	statusFn   StatusFunc
 	shutdownFn func()
+	identityFn IdentityFunc
 
 	jobCounter atomic.Uint64
 	now        func() time.Time
 	dial       func(network, address string, timeout time.Duration) (net.Conn, error)
+
+	// Lifecycle-ownership state captured during Listen.
+	paths        lifecycle.Paths
+	runLock      *lifecycle.RunLock
+	identity     lifecycle.Identity
+	identityWrit bool
 
 	listener  net.Listener
 	handlerWG sync.WaitGroup
@@ -76,6 +96,7 @@ func NewServer(cfg ServerConfig) *Server {
 		logger:     cfg.Logger,
 		statusFn:   cfg.StatusFn,
 		shutdownFn: cfg.ShutdownFn,
+		identityFn: cfg.IdentityFn,
 		now:        time.Now,
 		dial:       net.DialTimeout,
 	}
@@ -89,11 +110,20 @@ func (s *Server) nextJobID() string {
 	return fmt.Sprintf("j-%d-%d", s.now().UnixNano(), s.jobCounter.Add(1))
 }
 
-// Listen binds the Unix socket. Mkdir-p's the parent directory at 0700 and
-// chmod's the socket to 0600. If a stale socket file exists at the path,
-// Listen probes it: a successful dial means another daemon already owns
-// this socket and Listen returns SocketUnavailableError; only a definitive
-// "no listener" dial failure is treated as stale and unlinked before bind.
+// Listen binds the Unix socket. Sequence:
+//
+//  1. Acquire the lifecycle run lock (`<socket>.lock`) before any other
+//     filesystem state mutation. Two daemons cannot pass this point
+//     simultaneously.
+//  2. Run conservative stale-socket cleanup, which now consults the run
+//     lock and identity sidecar to decide whether a leftover socket is
+//     safe to unlink.
+//  3. Bind the unix socket and chmod it 0600.
+//  4. Write the identity sidecar so other processes can identify the
+//     owner.
+//
+// If any step after run-lock acquisition fails, the run lock is released
+// before returning so a retry can proceed.
 func (s *Server) Listen() error {
 	if s.socketPath == "" {
 		return &SocketUnavailableError{Reason: "socket path is empty"}
@@ -101,20 +131,53 @@ func (s *Server) Listen() error {
 	if err := os.MkdirAll(filepath.Dir(s.socketPath), 0o700); err != nil {
 		return &SocketUnavailableError{Path: s.socketPath, Reason: "create dir: " + err.Error()}
 	}
+	paths, err := lifecycle.PathsFor(s.socketPath)
+	if err != nil {
+		return &SocketUnavailableError{Path: s.socketPath, Reason: "lifecycle paths: " + err.Error()}
+	}
+	s.paths = paths
+
+	runLock, err := lifecycle.AcquireRunLock(paths)
+	if err != nil {
+		if errors.Is(err, lifecycle.ErrLockHeld) {
+			return &SocketUnavailableError{Path: s.socketPath, Reason: "run lock held by another daemon"}
+		}
+		return &SocketUnavailableError{Path: s.socketPath, Reason: "acquire run lock: " + err.Error()}
+	}
+	s.runLock = runLock
+
 	if err := s.cleanupStaleSocket(); err != nil {
+		_ = s.runLock.Release()
+		s.runLock = nil
 		return err
 	}
 
 	listener, err := net.Listen("unix", s.socketPath)
 	if err != nil {
+		_ = s.runLock.Release()
+		s.runLock = nil
 		return &SocketUnavailableError{Path: s.socketPath, Reason: err.Error()}
 	}
 	if err := os.Chmod(s.socketPath, 0o600); err != nil {
 		_ = listener.Close()
 		_ = os.Remove(s.socketPath)
+		_ = s.runLock.Release()
+		s.runLock = nil
 		return &SocketUnavailableError{Path: s.socketPath, Reason: "chmod: " + err.Error()}
 	}
 	s.listener = listener
+
+	if s.identityFn != nil {
+		s.identity = s.identityFn()
+		if err := lifecycle.WriteIdentity(paths, s.identity); err != nil {
+			_ = listener.Close()
+			_ = os.Remove(s.socketPath)
+			_ = s.runLock.Release()
+			s.runLock = nil
+			return &SocketUnavailableError{Path: s.socketPath, Reason: "write identity: " + err.Error()}
+		}
+		s.identityWrit = true
+	}
 	return nil
 }
 
@@ -146,7 +209,9 @@ func (s *Server) Serve() error {
 
 // Close stops accepting new connections and waits for in-flight handlers to
 // finish. The Unix listener unlinks the socket file on Close (per stdlib).
-// Idempotent and safe to call concurrently.
+// After the listener is closed the lifecycle ownership artifacts are torn
+// down: identity sidecar removed only when it still matches our daemon,
+// then run lock released. Idempotent and safe to call concurrently.
 func (s *Server) Close() error {
 	s.closeOnce.Do(func() {
 		if s.listener == nil {
@@ -154,6 +219,21 @@ func (s *Server) Close() error {
 		}
 		s.closeErr = s.listener.Close()
 		s.handlerWG.Wait()
+
+		// Lifecycle teardown. Identity is removed first so a competing
+		// daemon that inherits the lock after release does not refuse on
+		// the basis of a stale identity it does not own.
+		if s.identityWrit {
+			if err := lifecycle.RemoveIdentityIfOwned(s.paths, s.identity); err != nil && !errors.Is(err, lifecycle.ErrIdentityNotOwned) {
+				_ = s.logger.Log(Entry{Outcome: OutcomeIPCError, Msg: "remove identity: " + err.Error()})
+			}
+		}
+		if s.runLock != nil {
+			if err := s.runLock.Release(); err != nil {
+				_ = s.logger.Log(Entry{Outcome: OutcomeIPCError, Msg: "release run lock: " + err.Error()})
+			}
+			s.runLock = nil
+		}
 	})
 	return s.closeErr
 }
@@ -176,10 +256,28 @@ type RunResult struct {
 	ExitReason RunExitReason
 }
 
+// cleanupStaleSocket inspects the socket and identity sidecar to decide
+// what to do before the caller binds. The caller already holds the run
+// lock, so {socket=present, lock=held} cannot occur from another live
+// daemon at this point — only an orphaned socket left behind by a crashed
+// daemon (lock=free at probe time, but we already grabbed it). The four
+// cells in MILESTONE_PLAN reduce here to:
+//
+//   - socket missing → no-op (lock=free in our hand, nothing to clean).
+//   - socket present, dial succeeds → another daemon answered after we
+//     grabbed the lock, which means we lost a race — refuse.
+//   - socket present, dial fails definitively → orphan socket; remove
+//     socket + leftover identity + cooldown so the bind can proceed.
+//   - non-socket file at the path → refuse.
 func (s *Server) cleanupStaleSocket() error {
 	info, err := os.Stat(s.socketPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			// Lock=held (we hold it) + socket=absent: clean state. Drop
+			// any stale identity/cooldown left over from a previous
+			// daemon that crashed between Listen failure and identity
+			// remove.
+			s.dropStaleSidecars()
 			return nil
 		}
 		return &SocketUnavailableError{Path: s.socketPath, Reason: "stat: " + err.Error()}
@@ -204,7 +302,23 @@ func (s *Server) cleanupStaleSocket() error {
 			Reason: fmt.Sprintf("remove stale socket: %v", rmErr),
 		}
 	}
+	s.dropStaleSidecars()
 	return nil
+}
+
+// dropStaleSidecars best-effort removes the identity sidecar left behind
+// by a previous daemon that crashed; we hold the run lock now, so no live
+// daemon owns it. Cooldown markers are intentionally NOT touched here:
+// cooldown is parent-side recovery state owned by the launcher, which
+// clears it on its own success path. Errors are logged and otherwise
+// ignored so a transient sidecar issue does not block startup.
+func (s *Server) dropStaleSidecars() {
+	if s.paths.Identity == "" {
+		return
+	}
+	if err := os.Remove(s.paths.Identity); err != nil && !errors.Is(err, os.ErrNotExist) {
+		_ = s.logger.Log(Entry{Outcome: OutcomeIPCError, Msg: "remove stale identity: " + err.Error()})
+	}
 }
 
 func isDefinitivelyStaleSocketProbeError(err error) bool {
