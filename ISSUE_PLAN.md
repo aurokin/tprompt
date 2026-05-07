@@ -1,51 +1,68 @@
-# ISSUE_PLAN — AUR-267 Preserve non-daemon command contracts
+# ISSUE_PLAN — AUR-268 daemon stop across all modes
 
 ## Goal
 
-Lock in via tests that direct delivery (`send`, `paste`) and
-diagnostics (`doctor`, `daemon status`) do not call the lifecycle
-launcher even after AUR-266 made auto-start default-on. Today's
-implementation already follows this contract; the issue exists to
-prevent regression.
-
-`daemon status` already has a launcher-fatal test
-(`TestDaemonStatusDaemonUnreachableExitsDaemon`,
-`internal/app/daemon_test.go:169`). AUR-267 adds the equivalent
-guards for `send`, `paste`, and `doctor`.
+Verify and document that `tprompt daemon stop` works the same way
+regardless of how the daemon was started: TUI auto-start, explicit
+`daemon start`, or foreground `daemon run`. The implementation is
+already mode-agnostic — the launcher in AUR-265 spawns `daemon run`
+detached for both auto-start and `daemon start` paths, so all three
+modes produce a Server bound to the same socket and tear down via
+the same `Server.Close()` lifecycle. AUR-268 is mostly a verification
++ test pass.
 
 ## Files
 
-Edit (test-only):
+Edit:
 
-- `internal/app/send_test.go` — add `TestSend_NeverInvokesLauncher`.
-- `internal/app/paste_test.go` — add `TestPaste_NeverInvokesLauncher`.
-- `internal/app/doctor_test.go` — add `TestDoctor_NeverInvokesLauncher`.
+- `internal/app/commands.go` — small docstring on `runDaemonStop`
+  pinning the mode-agnostic contract.
+- `internal/app/daemon_test.go` — add
+  `TestDaemonStop_ModeAgnosticAcrossAutoStartBackgroundForeground`
+  that exercises the CLI handler with daemon-state matrices
+  (foreground-running, background-running, autostart-spawned,
+  not-running) and asserts the same handler succeeds in each.
 
-Each test:
-- Builds `workingDeps` with `cfg.DaemonAutoStart = true` so the
-  default-on path is exercised.
-- Overrides `deps.NewLauncher` with a `t.Fatal`-emitting stub.
-- Runs the command. If `NewLauncher` is invoked, the test fails.
+## Existing coverage we lean on
 
-The `doctor` test additionally seeds the daemon socket path to a
-deliberately-unreachable location so the diagnostic reports
-"daemon unreachable" without trying to start one.
+- `TestServerStopRoundTripCancelsRun` — server side: Stop RPC cancels
+  Run, idle-for-2s teardown.
+- `TestListenAcquiresAndReleasesRunLock` — lifecycle artifacts (run
+  lock, identity sidecar, socket file) are released on `Close`, and a
+  fresh Listen on the same path then succeeds. Combined, this proves
+  that after stop, a follow-up start works regardless of which mode
+  spawned the prior daemon.
+- `TestDaemonStopPrintsStoppedAfterSocketDisappears` — CLI happy path.
+- `TestDaemonStopNoDaemonRunningPrintsClearMessage` — idempotent
+  no-daemon case.
+- `TestDaemonStopTreatsPeerCloseAsStopped`,
+  `TestDaemonStopTreatsPeerCloseOnAckAsNotRunning` — race-condition
+  flavors of "daemon already gone".
+- `TestDaemonStopTimeoutMapsToExitDaemon` — bounded wait.
+
+## Why mode-agnosticism is structural
+
+After AUR-264/265 the only daemon binary is `daemon run`. Both
+implicit (TUI launcher) and explicit (`daemon start` launcher) paths
+spawn `tprompt daemon run` detached; the only differences are the
+parent's argv and which env-var bypasses the trust gate. Once the
+daemon is bound to the socket, all three modes converge on the
+same Server lifecycle. `runDaemonStop` connects to the socket and
+issues the Stop RPC; nothing in that path depends on parent
+provenance.
 
 ## Acceptance-criteria mapping
 
-- "tprompt send never starts or contacts the daemon" → already true;
-  send_test launcher-fatal stub locks it in.
-- "tprompt paste never starts or contacts the daemon" → ditto.
-- "tprompt doctor does not auto-start the daemon" → ditto.
-- "tprompt daemon status does not auto-start the daemon" → already
-  covered by `TestDaemonStatusDaemonUnreachableExitsDaemon`.
-- "Existing direct-send and direct-paste behavior is unchanged" → no
-  production code change.
-- "Tests prove these commands do not invoke the lifecycle launcher" →
-  the new tests.
+- "stops a daemon created by TUI auto-start" → mode-agnostic: same
+  socket, same RPC. Test asserts.
+- "stops a daemon created by `daemon start`" → ditto.
+- "stops a foreground `daemon run` process" → ditto.
+- "remains idempotent when no daemon is running" → already covered.
+- "Stop uses existing daemon stop RPC" → unchanged.
+- "Tests cover ... across auto-started, background-started,
+  foreground-run, and not-running" → the new parameterized test.
 
 ## Out of scope
 
-- No production code changes.
-- No docs changes (the existing tui-flow / daemon docs already note
-  that `send`/`paste`/`doctor` are direct-path).
+- Production code changes beyond the docstring.
+- Testscript-level coverage (lands in AUR-269).
