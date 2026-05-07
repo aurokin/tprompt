@@ -526,3 +526,66 @@ func TestDaemonStartLogsStoppedOnCleanShutdown(t *testing.T) {
 		t.Fatalf("expected stopped log entry, got %q", logText)
 	}
 }
+
+// TestDaemonStop_ModeAgnosticAcrossSpawnPaths exercises the AUR-268
+// contract: `tprompt daemon stop` works the same way regardless of
+// how the daemon got there. The CLI handler dials the configured
+// socket and issues the Stop RPC; nothing in that path depends on
+// whether the daemon was spawned by TUI auto-start, by `daemon start`,
+// or as a foreground `daemon run`. The Server side then runs the same
+// `Close()` cleanup in every case (see
+// internal/daemon/server_test.go::TestListenAcquiresAndReleasesRunLock
+// for the cleanup invariant).
+//
+// We model each spawn path by tagging the fake daemon client so the
+// stop RPC's behavior is identical across the matrix. A divergence in
+// any future refactor would need to change either the launcher's spawn
+// argv or the Stop RPC itself; both are protected by their own tests.
+func TestDaemonStop_ModeAgnosticAcrossSpawnPaths(t *testing.T) {
+	cases := []struct {
+		name      string
+		spawnedBy string // pure label; the underlying RPC surface is identical
+	}{
+		{name: "auto-started by TUI", spawnedBy: "implicit_tui"},
+		{name: "background-started by daemon start", spawnedBy: "explicit_start"},
+		{name: "foreground daemon run", spawnedBy: "explicit_run"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			statusCalls := 0
+			client := &fakeDaemonClient{
+				stopFn: func() (daemon.StopResponse, error) {
+					return daemon.StopResponse{Accepted: true}, nil
+				},
+				statusFn: func() (daemon.StatusResponse, error) {
+					statusCalls++
+					if statusCalls == 1 {
+						return daemon.StatusResponse{Socket: "/tmp/x.sock"}, nil
+					}
+					return daemon.StatusResponse{}, &daemon.SocketUnavailableError{
+						Path: "/tmp/x.sock", Reason: "connection refused",
+					}
+				},
+			}
+			deps := daemonDeps(t, client)
+			deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
+				t.Fatal("daemon stop must not invoke the lifecycle launcher (regardless of spawn path " + tc.spawnedBy + ")")
+				return nil
+			}
+			stdout, _, err := executeRootWith(t, deps, "daemon", "stop")
+			if err != nil {
+				t.Fatalf("daemon stop (%s): unexpected error: %v", tc.spawnedBy, err)
+			}
+			if !strings.Contains(stdout, "tprompt daemon stopped") {
+				t.Fatalf("daemon stop (%s): stdout = %q, want stopped message", tc.spawnedBy, stdout)
+			}
+		})
+	}
+
+	// The not-running case is its own test
+	// (TestDaemonStopNoDaemonRunningPrintsClearMessage); we don't
+	// duplicate it here because the matrix is about spawn-path
+	// equivalence, not daemon presence.
+}

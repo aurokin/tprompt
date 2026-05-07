@@ -672,6 +672,13 @@ func runDaemonStatus(deps Deps) error {
 	return nil
 }
 
+// runDaemonStop sends the Stop RPC over the daemon socket and waits
+// (bounded) for the socket to disappear. The handler is mode-agnostic
+// by construction: after AUR-264/265 the only daemon binary is
+// `daemon run`, and both implicit (TUI auto-start) and explicit
+// (`daemon start`) paths spawn `daemon run` detached. All three modes
+// converge on the same Server lifecycle once the daemon is bound,
+// so the same Stop RPC tears down whichever daemon owns the socket.
 func runDaemonStop(deps Deps, timeout time.Duration) error {
 	cfg, err := deps.LoadDaemonConfig(*deps.ConfigPath)
 	if err != nil {
