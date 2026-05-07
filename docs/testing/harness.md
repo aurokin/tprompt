@@ -175,6 +175,71 @@ Assert:
 - socket permissions and stale-socket behavior are correct
 - status responses expose pid, socket, log, uptime, pending jobs, and version
 
+### Daemon lifecycle and TUI auto-start
+
+Proof surface: unit tests for the launcher seams and primitives, integration
+tests for the macOS trust gate, and testscript end-to-end for the CLI flows.
+
+Assert (`internal/daemon/lifecycle/`):
+
+- run lock primitive holds during daemon lifetime and releases on Close
+- run lock probe is non-mutating (does not create the lock file)
+- start lock primitive serializes concurrent acquirers
+- identity sidecar atomic write + ownership match (pid, start_time)
+- cooldown sidecar atomic write, expiry semantics, idempotent clear
+- `PathsFor` canonicalizes via `filepath.Abs` + `Clean`
+- `Server.Listen` acquires the run lock, drops stale sidecars under the
+  documented four-cell matrix, binds, then writes the identity
+- `Server.Close` removes identity-if-owned then releases the run lock,
+  and a fresh `Listen` on the same path then succeeds
+- `Server.Listen` releases the run lock if a post-lock failure happens
+- a competing `Listen` over a held run lock fails with
+  `SocketUnavailableError`
+
+Assert (`internal/app/lifecycle/`):
+
+- `Launcher.Start` short-circuits on `ProbeOK` (already running)
+- `ProbeReachableBroken` refuses to spawn (manual recovery message)
+- spawn happens once under concurrent calls (in-process mutex +
+  cross-process start lock)
+- readiness timeout maps to `ReasonReadinessTimeout` with daemon log
+  path in detail
+- child early-exit (kill(pid, 0) -> ESRCH) maps to
+  `ReasonChildExitedEarly` without burning the full readiness budget
+- explicit intent: cooldown and trust gate both bypassed
+- implicit intent: failure records cooldown; subsequent implicit
+  start is gated until expiry
+- pre-spawn diagnostic includes `parent_pid`, `intent`, `exec`,
+  `socket`, lifecycle paths, `log`, `config`, and trust verdict
+
+Assert (`internal/app/lifecycle/trust_darwin*`):
+
+- ad-hoc detection via both `Signature=adhoc` and `flags=...adhoc...`
+- invalid-signature reject (codesign --verify exit non-zero)
+- Gatekeeper reject for non-CLI rejection
+- CLI-bypass for "the code is valid but does not seem to be an app"
+- override env var honors `1`/`true`/`yes`/`on`; ignores other values
+- override short-circuits before any `codesign`/`spctl` invocation
+- tools-missing fails closed with "trust tools unavailable"
+- integration tests exercise real `/usr/bin/git` (Allow) and a
+  freshly-built ad-hoc clang binary (RejectAdHoc), guarded with skips
+
+Assert (testscripts in `cmd/tprompt/testdata/script/`):
+
+- `daemon_start_stop_roundtrip.txtar` — explicit start spawns, status
+  succeeds, stop tears down, post-stop status fails
+- `daemon_start_idempotent_when_running.txtar` — repeat starts
+  short-circuit; daemon log retains exactly one `outcome=started`
+- `daemon_run_collision_with_existing.txtar` — second `daemon run`
+  fails with daemon/IPC and the run-lock primitive's wording
+- `tui_auto_start_cold_start.txtar` — TUI cold start spawns daemon
+  via launcher (with override env to bypass ad-hoc gate on test binary)
+- `tui_auto_start_warm_reuse.txtar` — TUI invocations against a
+  running daemon reuse it (one `outcome=started` only)
+
+Locked decisions: see [DECISIONS.md §33](../../DECISIONS.md). Narrative:
+[docs/lifecycle/auto-start.md](../lifecycle/auto-start.md).
+
 ### TUI
 
 Proof surface: pure model/update/view tests. Avoid brittle terminal snapshot
