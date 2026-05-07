@@ -207,6 +207,16 @@ func (l *Launcher) Start(ctx context.Context, intent StartIntent) dlife.StartRes
 		return res
 	}
 
+	// Re-check the cooldown marker AFTER acquiring the start lock.
+	// Without this, a concurrent implicit caller that was waiting on
+	// the start lock would bypass a cooldown that the previous holder
+	// just recorded (after its own trust-gate or spawn failure). The
+	// post-lock probe above handles the "already running" race; this
+	// handles the "just failed and recorded a cooldown" race.
+	if res, gated := l.checkCooldown(paths, intent); gated {
+		return res
+	}
+
 	assessment, gateRes, gated := l.runTrustGate(intent)
 	if gated {
 		l.recordImplicitFailure(paths, intent, gateRes)

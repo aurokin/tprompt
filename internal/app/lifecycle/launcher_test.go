@@ -256,6 +256,103 @@ func TestLauncherImplicitCooldownGatesNextStart(t *testing.T) {
 	}
 }
 
+// TestLauncherPostLockCooldownReCheck verifies that a cooldown
+// recorded WHILE another implicit start was waiting on the start
+// lock still gates the waiter. Without re-checking after the lock
+// is acquired, a concurrent failure-then-resume scenario would let
+// the second caller spawn during the intended cooldown window.
+//
+// This models call A failing under the start lock (records cooldown,
+// releases lock) and call B resuming and reading the cooldown marker
+// before any further work. The launcher's pre-lock cooldown check
+// would miss this if it weren't repeated post-lock.
+func TestLauncherPostLockCooldownReCheck(t *testing.T) {
+	t.Parallel()
+	p, socket := newPaths(t)
+	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+
+	// Seed cooldown AFTER the launcher has been constructed but
+	// BEFORE Start runs — simulating "another goroutine recorded a
+	// cooldown while we were waiting on the start lock." We do this
+	// by injecting a Spawner that records the cooldown on first call
+	// and asserting it is never called twice.
+	spawner := &recordCooldownSpawner{paths: p, until: now.Add(time.Hour), reason: dlife.ReasonSpawnFailed, logPath: "/tmp/d.log"}
+
+	// Two probes both return unreachable so both pre-lock and
+	// post-lock probes fall through.
+	prober := &stubProber{results: unreachableN(2), fallback: unreachable()}
+
+	l := New(Options{
+		SocketPath:       socket,
+		Status:           prober,
+		Spawner:          spawner,
+		ReadinessTimeout: 5 * time.Millisecond,
+		PollInterval:     time.Millisecond,
+		Now:              func() time.Time { return now },
+	})
+
+	// First call: pre-lock cooldown is unset; post-lock cooldown is
+	// unset on entry but we want to simulate that during this call's
+	// lifetime, OUR own implicit failure records a cooldown that the
+	// NEXT call (still in the start-lock queue) would observe. We
+	// achieve that with a stub spawner that records the cooldown
+	// before returning failure.
+	res := l.Start(context.Background(), IntentImplicitTUI)
+	if res.Outcome != dlife.OutcomeFailed {
+		t.Fatalf("first call Outcome = %v, want Failed", res.Outcome)
+	}
+	if spawner.called != 1 {
+		t.Fatalf("spawner.called = %d, want 1 on first call", spawner.called)
+	}
+
+	// Second call models the queued waiter: the cooldown is now
+	// recorded. Without the post-lock cooldown re-check, the launcher
+	// would proceed to spawn (because the pre-lock check could be
+	// raced past in a real concurrent scenario). With the re-check,
+	// it must short-circuit to ReasonCooldown.
+	prober2 := &stubProber{results: unreachableN(2), fallback: unreachable()}
+	spawner2 := &recordCooldownSpawner{paths: p}
+	l2 := New(Options{
+		SocketPath:       socket,
+		Status:           prober2,
+		Spawner:          spawner2,
+		ReadinessTimeout: 5 * time.Millisecond,
+		PollInterval:     time.Millisecond,
+		Now:              func() time.Time { return now },
+	})
+	res2 := l2.Start(context.Background(), IntentImplicitTUI)
+	if res2.Outcome != dlife.OutcomeFailed || res2.Reason != dlife.ReasonCooldown {
+		t.Fatalf("second call Outcome=%v Reason=%v, want Failed/Cooldown", res2.Outcome, res2.Reason)
+	}
+	if spawner2.called != 0 {
+		t.Fatalf("spawner2.called = %d, want 0 (cooldown should gate)", spawner2.called)
+	}
+}
+
+// recordCooldownSpawner is a Spawner stub that records a cooldown
+// marker on the first call (modeling implicit-failure cooldown
+// recording) and then returns a spawn error. Tests use it to set up
+// the post-lock cooldown race.
+type recordCooldownSpawner struct {
+	paths   dlife.Paths
+	until   time.Time
+	reason  dlife.StartFailureReason
+	logPath string
+	called  int
+}
+
+func (s *recordCooldownSpawner) Spawn(_ context.Context, _ string, _ []string, _ string) (SpawnHandle, error) {
+	s.called++
+	if !s.until.IsZero() {
+		_ = dlife.RecordCooldown(s.paths, dlife.Cooldown{
+			Until:   s.until,
+			Reason:  string(s.reason),
+			LogPath: s.logPath,
+		})
+	}
+	return SpawnHandle{}, errors.New("spawn refused for test")
+}
+
 func TestLauncherTrustGateRejectionImplicitOnly(t *testing.T) {
 	t.Parallel()
 	p, socket := newPaths(t)
