@@ -1,12 +1,35 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
+	applife "github.com/hsadler/tprompt/internal/app/lifecycle"
+	dlife "github.com/hsadler/tprompt/internal/daemon/lifecycle"
 	"github.com/hsadler/tprompt/internal/tui"
 )
+
+// TestErrLauncherSurfacesConfigFailure asserts that errLauncher
+// (returned by productionNewLauncher when os.Executable() fails) maps
+// to a structured StartResult with ReasonConfig and a detail that
+// names the underlying resolution failure. Without this, callers
+// would see a generic spawn error like "empty executable path" much
+// later, with no signal that executable resolution is the root cause.
+func TestErrLauncherSurfacesConfigFailure(t *testing.T) {
+	l := errLauncher{detail: "resolve executable path: boom"}
+	res := l.Start(context.Background(), applife.IntentExplicitStart)
+	if res.Outcome != dlife.OutcomeFailed {
+		t.Fatalf("Outcome = %v, want Failed", res.Outcome)
+	}
+	if res.Reason != dlife.ReasonConfig {
+		t.Fatalf("Reason = %v, want Config", res.Reason)
+	}
+	if !strings.Contains(res.Detail, "resolve executable path") {
+		t.Fatalf("Detail = %q, want it to name executable resolution", res.Detail)
+	}
+}
 
 // stubRendererSubmitter captures Submit calls for parseTestRenderer tests.
 type stubRendererSubmitter struct {

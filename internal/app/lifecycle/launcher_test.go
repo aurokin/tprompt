@@ -612,6 +612,44 @@ func TestLauncherChildExitedEarlyMapsToFailed(t *testing.T) {
 	}
 }
 
+// TestLauncherEarlyAlreadyRunningClearsCooldown verifies that the
+// pre-lock ProbeOK path clears any stale cooldown marker, matching the
+// post-lock OutcomeAlreadyRunning branch. Without this, a previous
+// implicit failure's cooldown could outlive the daemon being healthy
+// again and incorrectly gate a later implicit start after the user
+// stops the daemon and the cooldown window has not yet expired.
+func TestLauncherEarlyAlreadyRunningClearsCooldown(t *testing.T) {
+	t.Parallel()
+	p, socket := newPaths(t)
+	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	if err := dlife.RecordCooldown(p, dlife.Cooldown{
+		Until:   now.Add(time.Hour),
+		Reason:  string(dlife.ReasonSpawnFailed),
+		LogPath: "/tmp/d.log",
+	}); err != nil {
+		t.Fatalf("seed cooldown: %v", err)
+	}
+
+	prober := &stubProber{fallback: okFallback()}
+	spawner := &stubSpawner{}
+	l := New(Options{
+		SocketPath: socket,
+		Status:     prober,
+		Spawner:    spawner,
+		Now:        func() time.Time { return now },
+	})
+	res := l.Start(context.Background(), IntentImplicitTUI)
+	if res.Outcome != dlife.OutcomeAlreadyRunning {
+		t.Fatalf("Outcome = %v, want AlreadyRunning", res.Outcome)
+	}
+	if spawner.called != 0 {
+		t.Fatalf("Spawner.Spawn called %d times despite already-running", spawner.called)
+	}
+	if _, active, _ := dlife.ReadCooldown(p, func() time.Time { return now }); active {
+		t.Fatal("cooldown not cleared after early ProbeOK return")
+	}
+}
+
 // Helper types for the concurrent and trust-gate tests.
 
 type probeCallback struct {

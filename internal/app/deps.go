@@ -132,13 +132,35 @@ func productionNewDaemonReadinessClient(cfg config.Resolved, timeout time.Durati
 	return daemon.NewSocketClientWithTimeouts(cfg.SocketPath, dialTimeout, timeout)
 }
 
+// errLauncher is the DaemonLauncher returned when the production
+// launcher cannot be constructed at all — currently only when
+// os.Executable() fails. Start surfaces a structured StartResult with
+// ReasonConfig so callers see a clear "executable resolution failed"
+// message instead of every later spawn failing with the opaque
+// "empty executable path" error.
+type errLauncher struct {
+	detail string
+}
+
+func (e errLauncher) Start(context.Context, applife.StartIntent) dlife.StartResult {
+	return dlife.StartResult{Outcome: dlife.OutcomeFailed, Reason: dlife.ReasonConfig, Detail: e.detail}
+}
+
 // productionNewLauncher wires applife.Launcher with the production
 // status prober (a fresh socket client per probe with a tight readiness
 // timeout), the production spawner (setsid + stderr → daemon log), and a
 // pre-spawn diagnostic appender that writes a single logfmt line to the
 // daemon log so spawn-time failures still leave evidence.
+//
+// If os.Executable() fails (constrained /proc, permissions), we return
+// a fail-closed errLauncher so daemon start / TUI auto-start surface a
+// direct ReasonConfig error rather than failing later inside the
+// spawner with a generic "empty executable path" message.
 func productionNewLauncher(cfg config.Resolved, explicitConfigPath string) DaemonLauncher {
-	executable, _ := os.Executable()
+	executable, err := os.Executable()
+	if err != nil {
+		return errLauncher{detail: "resolve executable path: " + err.Error()}
+	}
 	return applife.New(applife.Options{
 		SocketPath: cfg.SocketPath,
 		LogPath:    cfg.LogPath,

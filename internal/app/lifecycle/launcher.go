@@ -181,13 +181,21 @@ func New(opts Options) *Launcher {
 // structured StartResult — callers (CLI commands, TUI auto-start) map
 // that to user-visible output and exit codes.
 func (l *Launcher) Start(ctx context.Context, intent StartIntent) dlife.StartResult {
-	if res, decided := l.classifyProbe(ctx); decided {
-		return res
-	}
-
 	paths, err := dlife.PathsFor(l.opts.SocketPath)
 	if err != nil {
 		return failed(dlife.ReasonConfig, "lifecycle paths: "+err.Error())
+	}
+
+	if res, decided := l.classifyProbe(ctx); decided {
+		// A successful probe means a compatible daemon owns the
+		// socket. Clear any stale cooldown marker so a later implicit
+		// start (after the user stops the daemon) is not gated by an
+		// expired-window cooldown left over from before this success.
+		// Mirrors the post-lock OutcomeAlreadyRunning branch below.
+		if res.Outcome == dlife.OutcomeAlreadyRunning {
+			_ = dlife.ClearCooldown(paths)
+		}
+		return res
 	}
 
 	if res, gated := l.checkCooldown(paths, intent); gated {
