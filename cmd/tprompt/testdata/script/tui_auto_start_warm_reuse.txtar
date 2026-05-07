@@ -1,0 +1,40 @@
+# Two TUI invocations against an already-running daemon reuse it
+# instead of spawning a duplicate. Verifies the launcher's pre-lock
+# probe + the AUR-266 default-on path: when ProbeOK on entry, the
+# launcher returns OutcomeAlreadyRunning and the TUI just runs.
+
+[!exec:tmux] skip
+
+env TMUX_TMPDIR=$SHORT_TMPDIR
+env TPROMPT_UNSAFE_SKIP_TRUST_GATE=1
+env TPROMPT_TEST_RENDERER=cancel
+
+exec tmux new-session -d -s tuiwarm 'sleep 60'
+exec tmux display-message -p '#{socket_path}'
+stdout $SHORT_TMPDIR
+
+mkdir prompts state
+
+# Pre-warm: spawn a daemon explicitly. Subsequent TUI calls should
+# reuse it.
+tprompt daemon run --config config.toml &
+exec sh -c 'for i in $(seq 1 50); do test -S state/daemon.sock && exit 0; sleep 0.1; done; exit 1'
+
+# Two TUI invocations. Both should succeed without spawning more
+# daemons.
+tprompt tui --target-pane %0 --config config.toml
+! stderr .
+tprompt tui --target-pane %0 --config config.toml
+! stderr .
+
+# Daemon log retains exactly ONE outcome=started entry — the TUI
+# invocations did not re-spawn.
+exec sh -c 'grep -c outcome=started state/daemon.log'
+stdout '^1$'
+
+exec tmux kill-server
+
+-- config.toml --
+prompts_dir = "prompts"
+socket_path = "state/daemon.sock"
+log_path = "state/daemon.log"

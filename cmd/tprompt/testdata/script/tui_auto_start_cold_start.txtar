@@ -1,0 +1,40 @@
+# Cold-start TUI auto-spawns the daemon via the AUR-265/AUR-266
+# launcher path. Verifies the AUR-266 default-on contract end-to-end.
+# Sets TPROMPT_UNSAFE_SKIP_TRUST_GATE=1 because the test binary built
+# by `go test` is ad-hoc-signed; the AUR-314 trust gate would
+# otherwise reject implicit auto-start. The override exercises the
+# documented developer-recovery path.
+
+[!exec:tmux] skip
+
+env TMUX_TMPDIR=$SHORT_TMPDIR
+env TPROMPT_UNSAFE_SKIP_TRUST_GATE=1
+env TPROMPT_TEST_RENDERER=cancel
+
+exec tmux new-session -d -s tuiauto 'sleep 60'
+exec tmux display-message -p '#{socket_path}'
+stdout $SHORT_TMPDIR
+
+mkdir prompts state
+
+# No `daemon run &` here — the TUI's auto-start should spawn a
+# detached daemon for us. The cancel renderer exits cleanly without
+# a real bubbletea TUI.
+tprompt tui --target-pane %0 --config config.toml
+! stderr .
+
+# Daemon should be reachable now.
+tprompt daemon status --config config.toml
+stdout 'tprompt daemon'
+
+# Clean up: stop the daemon we spawned. Without this, the detached
+# daemon would survive testscript's process group teardown.
+tprompt daemon stop --config config.toml
+stdout 'tprompt daemon stopped'
+
+exec tmux kill-server
+
+-- config.toml --
+prompts_dir = "prompts"
+socket_path = "state/daemon.sock"
+log_path = "state/daemon.log"
