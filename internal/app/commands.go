@@ -472,9 +472,11 @@ func newDaemonCmd(deps Deps) *cobra.Command {
 		Use:   "daemon",
 		Short: "Manage the deferred-delivery daemon",
 		Long: `Manage the local tprompt daemon, which performs deferred delivery of
-TUI-selected prompts after the TUI process exits. Lifecycle is explicit:
+TUI-selected prompts after the TUI process exits. Lifecycle subcommands:
 
-  start    Run the daemon in the foreground listening on the socket.
+  start    Start the daemon (currently foreground; backgrounded launcher
+           in a follow-up change).
+  run      Run the daemon in the foreground listening on the socket.
   status   Read-only status check; does not start the daemon implicitly.
   stop     Request graceful shutdown over the local IPC socket.
 
@@ -482,16 +484,31 @@ TUI-selected prompts after the TUI process exits. Lifecycle is explicit:
 	}
 	cmd.AddCommand(
 		&cobra.Command{
-			Use:     "start",
-			Aliases: []string{"run"},
-			Short:   "Start the daemon in the foreground",
-			Long: `Start the daemon in the foreground. The daemon listens on the configured
-socket and processes deferred delivery jobs submitted by 'tprompt tui'.
-Send SIGINT or SIGTERM (or run 'tprompt daemon stop' from another shell)
-to request graceful shutdown.`,
+			Use:   "start",
+			Short: "Start the daemon in the foreground (backgrounded in a follow-up change)",
+			Long: `Start the daemon. Currently runs in the foreground; a follow-up
+change converts this to a backgrounded launcher that spawns 'daemon
+run' detached. The daemon listens on the configured socket and processes
+deferred delivery jobs submitted by 'tprompt tui'. Send SIGINT or
+SIGTERM (or run 'tprompt daemon stop' from another shell) to request
+graceful shutdown.`,
 			Args: cobra.NoArgs,
 			RunE: func(c *cobra.Command, _ []string) error {
-				return runDaemonStart(c.Context(), deps)
+				return runDaemonForeground(c.Context(), deps)
+			},
+		},
+		&cobra.Command{
+			Use:   "run",
+			Short: "Run the daemon in the foreground",
+			Long: `Run the daemon in the foreground. The daemon listens on the configured
+socket and processes deferred delivery jobs submitted by 'tprompt tui'.
+'daemon run' acquires the lifecycle run lock before binding the socket
+and refuses to start when a compatible daemon already owns it. Send
+SIGINT or SIGTERM (or run 'tprompt daemon stop' from another shell) to
+request graceful shutdown.`,
+			Args: cobra.NoArgs,
+			RunE: func(c *cobra.Command, _ []string) error {
+				return runDaemonForeground(c.Context(), deps)
 			},
 		},
 		&cobra.Command{
@@ -521,7 +538,11 @@ down within a short bounded wait, exits with a daemon/IPC error.`,
 	return cmd
 }
 
-func runDaemonStart(parent context.Context, deps Deps) error {
+// runDaemonForeground is the shared handler for `daemon run` and (in this
+// commit) `daemon start`. It runs the daemon server loop in the calling
+// process. The run-lock + identity sidecar from AUR-263 enforce one
+// daemon per socket regardless of which subcommand the user chose.
+func runDaemonForeground(parent context.Context, deps Deps) error {
 	cfg, err := deps.LoadDaemonConfig(*deps.ConfigPath)
 	if err != nil {
 		return err

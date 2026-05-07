@@ -418,7 +418,7 @@ func TestDaemonStartIgnoresPromptConfigValidation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if err := runDaemonStart(ctx, deps); err != nil {
+	if err := runDaemonForeground(ctx, deps); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -436,7 +436,7 @@ func TestDaemonStartRejectsEmptyLogPath(t *testing.T) {
 		return nil, nil
 	}
 
-	err := runDaemonStart(context.Background(), deps)
+	err := runDaemonForeground(context.Background(), deps)
 	var ve *config.ValidationError
 	if !errors.As(err, &ve) {
 		t.Fatalf("want ValidationError, got %T: %v", err, err)
@@ -469,9 +469,9 @@ func TestDaemonStartSkipsStoppedLogWhenRunReturnsError(t *testing.T) {
 	}
 	t.Cleanup(func() { runDaemon = prevRunDaemon })
 
-	err := runDaemonStart(context.Background(), deps)
+	err := runDaemonForeground(context.Background(), deps)
 	if err == nil || err.Error() != "boom" {
-		t.Fatalf("runDaemonStart error = %v, want boom", err)
+		t.Fatalf("runDaemonForeground error = %v, want boom", err)
 	}
 
 	logged, readErr := os.ReadFile(logPath)
@@ -510,8 +510,8 @@ func TestDaemonStartLogsStoppedOnCleanShutdown(t *testing.T) {
 	}
 	t.Cleanup(func() { runDaemon = prevRunDaemon })
 
-	if err := runDaemonStart(context.Background(), deps); err != nil {
-		t.Fatalf("runDaemonStart: %v", err)
+	if err := runDaemonForeground(context.Background(), deps); err != nil {
+		t.Fatalf("runDaemonForeground: %v", err)
 	}
 
 	logged, readErr := os.ReadFile(logPath)

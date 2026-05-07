@@ -65,11 +65,15 @@ func TestSubcommandHelpText(t *testing.T) {
 		},
 		{
 			path: []string{"daemon"},
-			want: []string{"start", "status", "stop"},
+			want: []string{"start", "run", "status", "stop"},
 		},
 		{
 			path: []string{"daemon", "start"},
 			want: []string{"foreground"},
+		},
+		{
+			path: []string{"daemon", "run"},
+			want: []string{"foreground", "run lock"},
 		},
 		{
 			path: []string{"daemon", "status"},
