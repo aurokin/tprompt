@@ -1,186 +1,159 @@
-# ISSUE_PLAN — AUR-314 macOS implicit auto-start trust gate
+# ISSUE_PLAN — AUR-266 Default TUI auto-start
 
 ## Goal
 
-Wire the `TrustAssessor` seam (introduced in AUR-265 as a no-op) to a
-real macOS executable-trust preflight that runs only for implicit
-auto-start. Goals are inherited from the milestone plan §3:
-
-- Reject ad-hoc signed binaries.
-- Reject invalid (unsigned, tampered) code signatures.
-- Reject Gatekeeper-rejected binaries.
-- Allow validly signed CLI binaries that Gatekeeper labels "valid but
-  not an app" (the common case for our binary).
-- `TPROMPT_UNSAFE_SKIP_TRUST_GATE=1` short-circuits before any
-  `codesign`/`spctl` invocation.
-- Explicit `daemon start` and `daemon run` keep bypassing the gate
-  (already implemented via `StartIntent`).
-- Failure detail is path-specific and only suggests flags/commands the
-  invoking command actually accepts.
-- Compiled only on darwin where it runs; non-darwin gets a no-op
-  assessor.
+Flip the daemon auto-start default to ON for daemon-backed TUI flows.
+After AUR-265 the launcher is non-blocking and structured; after
+AUR-314 it has a real darwin trust gate. AUR-266 makes the new
+launcher the default user experience: bare `tprompt` (and explicit
+`tprompt tui`) inside tmux+tty auto-start the daemon when needed,
+without the user opting in.
 
 ## Files
 
-New:
-
-- `internal/app/lifecycle/trust_darwin.go` — `//go:build darwin`. Exports
-  `ProductionAssessor() TrustAssessor` returning a `darwinAssessor`
-  that consults `codesign` and `spctl` through an injectable runner.
-  Format failure detail with a path-specific recovery line that names
-  `tprompt daemon start` / `tprompt daemon run` and the env var.
-- `internal/app/lifecycle/trust_other.go` — `//go:build !darwin`.
-  Exports `ProductionAssessor() TrustAssessor` returning the existing
-  `noopAssessor{}`. One-line comment notes the override env var is
-  darwin-only.
-- `internal/app/lifecycle/trust_darwin_test.go` — `//go:build darwin`.
-  Table-driven unit tests using a fake `runner` that pre-cans
-  codesign/spctl invocations: ad-hoc, invalid signature,
-  Gatekeeper-rejected, valid CLI ("not an app" case),
-  validly-signed-and-Gatekeeper-accepted, debug-override short-circuit
-  (asserts no runner calls happened), debug-override-with-known-negative
-  (asserts gate stays active).
-- `internal/app/lifecycle/trust_darwin_integration_test.go` —
-  `//go:build darwin`. Tests against the real `/usr/bin/codesign` and
-  `/usr/bin/spctl`. Each test `t.Skip`s if the corresponding tool
-  binary is missing. Cases:
-  1. `/usr/bin/git` (notarized Apple binary) → Allow (or rejected-as-CLI
-     fallback Allow on hosts where spctl rejects it as not-an-app).
-  2. The current go test binary (`os.Executable()`) → Allow when the
-     test binary is signed validly; otherwise we just assert the
-     decision is reasoned (Allow for valid CLI, Reject otherwise).
-  3. A freshly-built ad-hoc binary (`clang -o /tmp/x x.c` then
-     `codesign --remove-signature && codesign -fs - /tmp/x`) →
-     RejectAdHoc. This is the load-bearing case and is the one most
-     likely to drift if a future macOS release changes codesign
-     output.
-     The test skips if `clang` is missing.
-
 Edit:
 
-- `internal/app/lifecycle/launcher.go` — no behavior change.
-- `internal/app/deps.go` — `productionNewLauncher` sets
-  `Assessor: applife.ProductionAssessor()`.
+- `internal/config/config.go` — flip `Default().DaemonAutoStart` from
+  `false` to `true`.
+- `internal/app/tui.go`:
+  - flag default flips to `true`.
+  - add `--no-daemon-auto-start` boolean flag as the readable
+    opt-out alias. When set, it forces `daemonAutoStart=false` for
+    that invocation regardless of config and short-circuits the
+    auto-start branch.
+  - error if BOTH `--daemon-auto-start=true` and
+    `--no-daemon-auto-start` are set on the same command (an obvious
+    user mistake; we'd rather fail loud than silently pick one).
+  - rewrite the `Long` help block so it documents the new default
+    and the opt-out flag rather than the old opt-in framing.
+- `internal/config/config_test.go`:
+  - `TestDefaultConfig` flips: `Default().DaemonAutoStart` should now
+    be `true`.
+  - `TestNormalizeThreadsDaemonAutoStart` and similar tests stay
+    semantically equivalent but the `cfg.DaemonAutoStart = true`
+    seeds become redundant; we keep them as redundant-but-correct so
+    a future flip back catches regression.
+  - Add `TestDefaultConfigDaemonAutoStartIsOn` as a single-line
+    contract check that's hard to lose under a refactor.
+- `internal/app/tui_test.go`:
+  - Existing tests that set `c.DaemonAutoStart = true` still pass;
+    they're now redundant. Leave them as-is for clarity.
+  - Add `TestTUI_DaemonAutoStartDefaultOn` — config left at default,
+    no flag, asserts launcher is invoked.
+  - Add `TestTUI_NoDaemonAutoStartFlagOptsOut` — `--no-daemon-auto-start`
+    on its own (with default-on config) skips the launcher and
+    surfaces the SocketUnavailableError directly.
+  - Add `TestTUI_ConflictingAutoStartFlagsErrors` — both
+    `--daemon-auto-start` and `--no-daemon-auto-start` set returns a
+    cobra error.
+  - Update `TestTUI_DaemonAutoStartFlagFalseOverridesConfig` if it
+    relies on `--daemon-auto-start=false` being the canonical opt-out;
+    this still works since the flag is still bool with a default,
+    but the test should also confirm the alias works the same way.
+- `internal/app/help_test.go` — add `--no-daemon-auto-start` to the
+  `tui` help expectations.
+- `docs/storage/config.md` — flip the documented default to `true`,
+  flip the example block, explain the opt-out alias.
+- `docs/commands/tui-flow.md` — drop the "opt in via flag/config"
+  framing, document the default-on behavior, and the opt-out flag.
+- `docs/commands/daemon.md` — same.
 
-## Trust signal interpretation
+## Behavioral contract
 
-The assessor consults two macOS tools by absolute path
-(`/usr/bin/codesign`, `/usr/bin/spctl`) — both are part of the macOS
-base system on every supported version. We do not honor `$PATH` for
-these, so a user mucking with their PATH cannot bypass the gate.
+Resolution order for "should this TUI invocation auto-start?":
 
-If either binary is missing we DENY with a `trust tools unavailable`
-reason and let the user recover with `tprompt daemon start` (which
-bypasses the gate). Rationale: macOS base system always ships these
-binaries at /usr/bin/codesign and /usr/sbin/spctl on every supported
-version, so missing tools means a stripped or exotic host. Fail-closed
-is the right posture for a security gate; the user has an explicit
-escape hatch and the implicit-start cooldown clears the moment they
-run an explicit start.
+1. If `--no-daemon-auto-start` is set → false.
+2. If `--daemon-auto-start` was explicitly set on the command line →
+   honor its value (so `--daemon-auto-start=false` still works).
+3. Otherwise → fall back to `cfg.DaemonAutoStart`, which now defaults
+   to true.
 
-Order: codesign verify → codesign -d -vv → spctl. We keep this order
-because for the developer-signed common case, spctl will reject with
-"valid but not an app", which means we'd fall through anyway; running
-codesign first lets us reject the unsigned/ad-hoc/tampered cases
-without touching spctl. Documented inline in `trust_darwin.go`.
+Concretely the resolver is updated to consult both flags:
 
-1. `codesign --verify --strict <exec>` — exit 0 means the signature
-   verifies cryptographically. Non-zero is `RejectInvalidSignature`
-   (covers "code object is not signed at all" and tampering). The
-   stderr first line is captured into the reason for diagnostics.
-   `--deep` is intentionally not used; per `man codesign`, it is for
-   nested code (frameworks/dylibs in app bundles), and using it on a
-   standalone Mach-O CLI is a no-op or worse.
+```go
+func (f tuiFlags) daemonAutoStartEnabled(cfg config.Resolved) bool {
+    if f.noDaemonAutoStart { return false }
+    if f.daemonAutoStartSet { return f.daemonAutoStart }
+    return cfg.DaemonAutoStart
+}
+```
 
-2. `codesign -d -vv <exec>` — describes the signing identity. We parse
-   stderr for either of two ad-hoc markers:
-   - `Signature=adhoc` literal line, OR
-   - `flags=...adhoc...` substring on the `CodeDirectory` line (e.g.,
-     `flags=0x20002(adhoc,linker-signed)`).
-   Either match → `RejectAdHoc`. We match BOTH because clang's
-   linker-signed output emits both lines, but other code paths (e.g.,
-   `codesign -fs - <path>` retroactively applied) emit only one.
-   We do NOT use "missing Authority=" as an ad-hoc signal because a
-   developer-signed binary with a self-signed identity has Authority
-   lines but is still validly signed and not ad-hoc — that case
-   should fall through to spctl.
+`runTUI` validates the conflict before reaching the resolver:
 
-3. `spctl --assess --type execute -vv <exec>` — Gatekeeper.
-   - exit 0 → `Allow`.
-   - exit non-zero AND stderr contains literal
-     `the code is valid but does not seem to be an app` → `Allow`
-     (CLI bypass; matches the format on macOS 14/15 verified
-     empirically against `/usr/bin/git` and `/bin/sh`).
-   - otherwise → `RejectGatekeeper`, with the first stderr line as
-     the reason detail.
-   We do not pass `--ignore-cache`. Matching OS behavior is the right
-   default; developers flipping signatures during testing can opt out
-   with the env-var override.
+```go
+if f.daemonAutoStartSet && f.noDaemonAutoStart {
+    return errors.New("tui: --daemon-auto-start and --no-daemon-auto-start are mutually exclusive")
+}
+```
 
-## Debug override
+## Acceptance-criteria mapping
 
-`TPROMPT_UNSAFE_SKIP_TRUST_GATE` value handling (value-required, per
-MILESTONE_PLAN.md §3):
-
-- Empty / unset → gate is active.
-- Case-insensitive `1`, `true`, `yes`, `on` → bypass with a "debug
-  override" reason. Short-circuits BEFORE any runner invocation.
-- Any other non-empty value (including `0`, `false`, `no`, `off`,
-  garbage) → gate stays active. We log a warning at the assessor
-  reason boundary so the operator sees the literal value they set.
-
-The short-circuit is unit-testable because the runner is injectable
-and the override path returns `Allow` with `runner.calls == 0`.
-
-## Failure-detail copy
-
-When `Assess` rejects, the launcher sets
-`StartResult.Reason = ReasonTrustGate` and
-`StartResult.Detail = <assessor reason>`. The assessor reason is:
-
-> `daemon executable %q failed macOS trust check (%s). Run 'tprompt daemon start' to start the daemon explicitly, or set TPROMPT_UNSAFE_SKIP_TRUST_GATE=1 for local builds. See %s for details.`
-
-Where `%s` is one of: `ad-hoc signature`, `invalid signature: <stderr first line>`, `Gatekeeper rejected: <stderr first line>`, `trust tools unavailable: <which one>`. The third `%s` is the daemon log path (mirrors the cooldown error format already used in launcher.go:262-263). When LogPath is empty we omit the trailing "See ... for details." sentence.
-
-The string suggests `tprompt daemon start` (a separate command). It does NOT suggest TUI flags, because no TUI flag exists to disable the gate (the gate is a property of implicit auto-start, not a user knob).
-
-stderr captures collapse internal newlines to spaces and trim runs
-of whitespace so the failure reason fits on one logfmt line in the
-pre-spawn diagnostic and one ANSI line in the TUI failure banner.
+- "daemon_auto_start defaults to enabled" → config.go default flip.
+- "Config tests that currently assert DaemonAutoStart=false are
+  inverted" → config_test.go.
+- "tprompt tui auto-starts a detached daemon when no daemon is
+  reachable" → already works after AUR-265; the default flip turns it
+  on for users who didn't set the flag/config.
+- "Bare tprompt dispatching to TUI inside tmux gets the same
+  behavior" → bare-dispatch already routes through runTUI (root.go
+  dispatchArgs), so flipping the default propagates automatically.
+- "Prompt selection and clipboard-backed TUI delivery both get the
+  same auto-start behavior" → both go through runTUI; nothing extra.
+- "TUI auto-start calls the shared lifecycle launcher directly" →
+  already true after AUR-265.
+- "The launcher receives a typed start intent" → already
+  `IntentImplicitTUI`.
+- "TUI implicit auto-start applies the macOS executable trust policy
+  from AUR-314 before spawning on macOS" → already true after AUR-314
+  wires `applife.ProductionAssessor()` into `productionNewLauncher`.
+- "Existing config and explicit TUI flag behavior can disable
+  auto-start for that invocation" → resolver order above.
+- "--daemon-auto-start=false remains supported, and help/docs either
+  explain it clearly or a clearer --no-daemon-auto-start alias is
+  added" → both: keep `--daemon-auto-start=false` working, add
+  `--no-daemon-auto-start` alias.
+- "Auto-start treats already-running daemons as success and does not
+  spawn duplicates" → already true (the launcher's probe).
+- "Auto-start failures map to daemon/IPC errors, mention the daemon
+  log path where relevant" → already true (`launcherFailureMessage`).
+- "TUI auto-start recovery guidance only suggests options accepted by
+  the TUI command path" → already true; the launcher's deny message
+  now mentions `tprompt daemon start` (a separate command), not a
+  TUI flag.
+- "Concurrent cold TUI auto-start attempts serialize through the
+  lifecycle launcher" → already covered (in-process mutex
+  `daemonAutoStartMu` + cross-process start lock).
+- "Tests cover [the listed scenarios]" → existing tests cover most;
+  this issue adds the default-on, opt-out-alias, and conflict cases.
 
 ## Test plan
 
-Unit (mock runner):
-- Each darwinAssessor branch: ad-hoc (both signal variants),
-  unsigned/invalid, Gatekeeper-rejected (non-CLI), CLI-bypass,
-  fully-allowed, codesign-missing, spctl-missing, debug-override-true,
-  debug-override-1, debug-override-yes, debug-override-FALSE (gate
-  active), debug-override-bogus (gate active).
-- runner.calls assertions for the override cases.
-- Reason strings include the executable path, name `tprompt daemon
-  start`, name the env var.
+Inverted from the existing test suite:
+- `TestDefaultConfig.DaemonAutoStart` flips to `true`.
+- `TestTUI_DaemonAutoStartDefaultOn` (new): nothing set, launcher
+  is called.
+- `TestTUI_NoDaemonAutoStartFlagOptsOut` (new): `--no-daemon-auto-start`
+  bypasses the launcher.
+- `TestTUI_ConflictingAutoStartFlagsErrors` (new): both flags set
+  errors out.
+- Help test flip: tui help mentions `--no-daemon-auto-start`.
 
-Integration (real tools, build-tagged + skipped when missing):
-- `/usr/bin/git` → Allow (CLI bypass branch in practice).
-- Freshly-built clang ad-hoc binary → RejectAdHoc.
-
-Launcher-level: `TestLauncherTrustGateRejectionImplicitOnly` already
-covers the StartIntent gating with stubAssessor. No change needed.
+Manual smoke: confirm `tprompt tui --target-pane=...` from a
+fresh-install state spawns a daemon and surfaces in `tprompt daemon
+status`. (Deferred to AUR-269 testscripts; not blocking here.)
 
 ## Risks / open questions
 
-- `codesign`/`spctl` output formats are stable on macOS 14/15 (verified
-  empirically). If a future release changes them, the integration test
-  will catch it before the unit tests do — that's the whole point of
-  M5.
-- An adversary controlling a co-installed binary path could rename
-  it to look like ours, but they can't tamper with the binary
-  contents without breaking codesign verify. The trust gate is about
-  signature integrity, not anti-tampering of the launching tprompt
-  process itself.
+- Default flip is a user-visible behavior change. EXPECTATIONS.md
+  needs an update; that lands in AUR-270 along with the doctor warning
+  for the override env var. The default flip itself is locked in
+  MILESTONE_PLAN.md §3.3 (Phase 4).
+- The conflict-flag error path requires checking
+  `f.daemonAutoStartSet` plus `f.noDaemonAutoStart` in PreRun before
+  RunE. Cobra runs PreRun after flag parsing, so the order is fine.
 
 ## Out of scope
 
-- AUR-266 wires the launcher into the TUI default-on path.
-- AUR-270 adds doctor warning + DECISIONS entry for the override env var.
-- Caching the assessor result across invocations.
+- Doctor warning for `TPROMPT_UNSAFE_SKIP_TRUST_GATE` (AUR-270).
+- DECISIONS.md entry recording the default flip (AUR-270).
+- Testscript end-to-end coverage (AUR-269).
