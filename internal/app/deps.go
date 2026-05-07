@@ -150,7 +150,8 @@ func productionNewLauncher(cfg config.Resolved, explicitConfigPath string) Daemo
 			rpcTimeout:  500 * time.Millisecond,
 			constructor: daemon.NewSocketClientWithTimeouts,
 		},
-		Spawner: applife.ProductionSpawner{},
+		Spawner:  applife.ProductionSpawner{},
+		Assessor: applife.ProductionAssessor(),
 		LogPreSpawn: func(line string) {
 			if cfg.LogPath == "" {
 				return

@@ -69,12 +69,14 @@ The assessor consults two macOS tools by absolute path
 base system on every supported version. We do not honor `$PATH` for
 these, so a user mucking with their PATH cannot bypass the gate.
 
-If either binary is missing (developer stripped /usr/bin) we ALLOW
-with a reason of `trust tools unavailable`. This degradation is
-documented in the failure-detail message so an operator sees what
-happened. Rationale: macOS base system always ships these binaries;
-absence implies an exotic host where the user has opted out of
-standard tooling, and we'd rather not lock them out of auto-start.
+If either binary is missing we DENY with a `trust tools unavailable`
+reason and let the user recover with `tprompt daemon start` (which
+bypasses the gate). Rationale: macOS base system always ships these
+binaries at /usr/bin/codesign and /usr/sbin/spctl on every supported
+version, so missing tools means a stripped or exotic host. Fail-closed
+is the right posture for a security gate; the user has an explicit
+escape hatch and the implicit-start cooldown clears the moment they
+run an explicit start.
 
 Order: codesign verify → codesign -d -vv → spctl. We keep this order
 because for the developer-signed common case, spctl will reject with

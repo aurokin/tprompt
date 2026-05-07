@@ -350,9 +350,15 @@ func (l *Launcher) logPreSpawn(intent StartIntent, paths dlife.Paths, assess Ass
 	if l.opts.ConfigPath != "" {
 		fmt.Fprintf(&b, " config=%q", l.opts.ConfigPath)
 	}
-	if !assess.Allow {
+	switch {
+	case !assess.Allow:
 		fmt.Fprintf(&b, " trust=denied reason=%q", assess.Reason)
-	} else {
+	case assess.Reason != "":
+		// Allow path with a non-empty reason means the assessor
+		// short-circuited (e.g., debug override). Keep that visible
+		// so operators can see when the gate was bypassed.
+		fmt.Fprintf(&b, " trust=allow_override reason=%q", assess.Reason)
+	default:
 		b.WriteString(" trust=allow")
 	}
 	l.opts.LogPreSpawn(b.String())

@@ -412,6 +412,45 @@ func TestLauncherPreSpawnDiagnosticsLogged(t *testing.T) {
 	}
 }
 
+// allowOverrideAssessor returns an Allow result with a non-empty
+// reason, modeling the macOS trust gate's debug-override path.
+type allowOverrideAssessor struct{ reason string }
+
+func (a allowOverrideAssessor) Assess(StartIntent, string) AssessResult {
+	return AssessResult{Allow: true, Reason: a.reason}
+}
+
+// TestLauncherPreSpawnDiagnosticsAllowOverride verifies the override
+// path is logged with `trust=allow_override` so an operator who set
+// TPROMPT_UNSAFE_SKIP_TRUST_GATE=1 can see the gate was bypassed.
+func TestLauncherPreSpawnDiagnosticsAllowOverride(t *testing.T) {
+	t.Parallel()
+	_, socket := newPaths(t)
+	prober := &stubProber{results: unreachableN(2), fallback: okFallback()}
+	spawner := &stubSpawner{}
+	var captured string
+	l := New(Options{
+		SocketPath:   socket,
+		Executable:   "/usr/local/bin/tprompt",
+		LogPath:      "/tmp/d.log",
+		Status:       prober,
+		Spawner:      spawner,
+		Assessor:     allowOverrideAssessor{reason: "TPROMPT_UNSAFE_SKIP_TRUST_GATE=1 (debug override)"},
+		PollInterval: time.Millisecond,
+		LogPreSpawn:  func(line string) { captured = line },
+	})
+	res := l.Start(context.Background(), IntentImplicitTUI)
+	if res.Outcome != dlife.OutcomeStarted {
+		t.Fatalf("Outcome = %v, want Started", res.Outcome)
+	}
+	if !strings.Contains(captured, "trust=allow_override") {
+		t.Errorf("captured = %q, want trust=allow_override", captured)
+	}
+	if !strings.Contains(captured, "TPROMPT_UNSAFE_SKIP_TRUST_GATE=1") {
+		t.Errorf("captured = %q, want override env literal in reason", captured)
+	}
+}
+
 // TestLauncherReachableBrokenRefusesToSpawn verifies the launcher does
 // NOT respawn over a daemon process whose Status RPC fails (some other
 // process is bound to the socket). Recovery is operator-driven; we'd
