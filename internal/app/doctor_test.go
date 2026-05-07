@@ -482,3 +482,42 @@ func TestDoctorAdditionalPromptsDirThatIsFileIsFailure(t *testing.T) {
 	assertContains(t, stdout, "ok   prompts directory exists (scope global, "+primary+") [explicit]")
 	assertContains(t, stdout, "FAIL prompts directory missing: "+fileSource)
 }
+
+// TestDoctor_NeverInvokesLauncher locks in the AUR-267 contract:
+// `tprompt doctor` is a diagnostic and must not auto-start the
+// daemon, even when daemon auto-start is on. We force the socket
+// path to a deliberately-unreachable location so doctor's
+// daemon-reachability check is exercised but never escalates to a
+// launcher call.
+func TestDoctor_NeverInvokesLauncher(t *testing.T) {
+	dir := t.TempDir()
+	fs := &fakeStore{summaries: []store.Summary{}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{
+			PromptsDir:      dir,
+			SocketPath:      "/tmp/tprompt-doctor-never-listens.sock",
+			DaemonAutoStart: true,
+		}, nil
+	}
+	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+		return &fakeDaemonClient{
+			statusFn: func() (daemon.StatusResponse, error) {
+				return daemon.StatusResponse{}, &daemon.SocketUnavailableError{
+					Path:   "/tmp/tprompt-doctor-never-listens.sock",
+					Reason: "no listener",
+				}
+			},
+		}, nil
+	}
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
+		t.Fatal("doctor must not invoke the lifecycle launcher")
+		return nil
+	}
+
+	_, _, _ = executeRootWith(t, deps, "doctor")
+	// We don't assert err here because doctor reports daemon
+	// unreachability as a warning, not a hard failure; what matters
+	// is that NewLauncher was never called (the t.Fatal would have
+	// fired).
+}
