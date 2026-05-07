@@ -39,7 +39,8 @@ tprompt send code-review
 tprompt paste
 tprompt pick
 tprompt tui --target-pane '#{pane_id}'
-tprompt daemon start
+tprompt daemon start    # spawn detached, idempotent if already running
+tprompt daemon run      # foreground (Ctrl-C / SIGTERM to stop)
 tprompt daemon status
 tprompt daemon stop
 tprompt doctor
@@ -54,8 +55,8 @@ set. Outside tmux, it prints help.
 - Prompt IDs are filename stems; directories organize files but do not namespace IDs.
 - Duplicate prompt IDs within a source tier are invalid; global/project collisions resolve through the documented priority policy.
 - Frontmatter is metadata only; only the markdown body is delivered.
-- Direct `send` and `paste` deliver synchronously through tmux.
-- TUI selections are submitted to a local daemon for verified deferred delivery.
+- Direct `send` and `paste` deliver synchronously through tmux. They never start, contact, or depend on the daemon.
+- TUI selections are submitted to a local daemon for verified deferred delivery. The daemon auto-starts on demand by default; see [`docs/lifecycle/auto-start.md`](docs/lifecycle/auto-start.md) for the modes, the macOS trust gate, and the `TPROMPT_UNSAFE_SKIP_TRUST_GATE` debug override.
 - Default delivery mode is bracketed paste via `tmux load-buffer` and `paste-buffer -p`.
 - `type` mode is available as a fallback using `send-keys -l`.
 - `--enter` is opt-in and sends Enter outside the paste wrapper.

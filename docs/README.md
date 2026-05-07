@@ -53,6 +53,7 @@ belong in Linear milestones, not in the repo.
 ## I Want To Change The Daemon
 
 - [Daemon command](commands/daemon.md) - daemon lifecycle and operator behavior.
+- [Daemon lifecycle and TUI auto-start](lifecycle/auto-start.md) - launcher seams, primitives, macOS trust gate, recovery paths.
 - [Data model](architecture/data-model.md) - deferred job and status shapes.
 - [Components](architecture/components.md) - package responsibilities.
 - [Interfaces](implementation/interfaces.md) - daemon client/server seams.
