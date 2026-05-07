@@ -475,8 +475,8 @@ func newDaemonCmd(deps Deps) *cobra.Command {
 		Long: `Manage the local tprompt daemon, which performs deferred delivery of
 TUI-selected prompts after the TUI process exits. Lifecycle subcommands:
 
-  start    Start the daemon (currently foreground; backgrounded launcher
-           in a follow-up change).
+  start    Start the daemon in the background (idempotent if already
+           running).
   run      Run the daemon in the foreground listening on the socket.
   status   Read-only status check; does not start the daemon implicitly.
   stop     Request graceful shutdown over the local IPC socket.
