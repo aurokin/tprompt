@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeRunner records every invocation and returns pre-canned outputs
@@ -283,6 +284,45 @@ func TestDarwinAssessorOverrideKnownNegativeKeepsGate(t *testing.T) {
 				t.Errorf("runner not invoked despite known-negative value %q", v)
 			}
 		})
+	}
+}
+
+// hangingRunner blocks until the caller's context is canceled,
+// modeling a stuck codesign/spctl invocation. Used to prove the
+// assessor's per-command timeout fires and releases the start lock
+// so other implicit auto-start callers don't queue indefinitely.
+type hangingRunner struct{}
+
+func (hangingRunner) Run(ctx context.Context, _ string, _ ...string) ([]byte, []byte, int, error) {
+	<-ctx.Done()
+	return nil, nil, -1, ctx.Err()
+}
+
+func TestDarwinAssessorBoundsHangingToolWithTimeout(t *testing.T) {
+	t.Parallel()
+	cs, sp := availablePaths()
+	a := darwinAssessor{
+		codesign: cs,
+		spctl:    sp,
+		getenv:   func(string) string { return "" },
+		run:      hangingRunner{},
+		timeout:  25 * time.Millisecond,
+	}
+	start := time.Now()
+	res := a.Assess(IntentImplicitTUI, "/usr/local/bin/tprompt")
+	elapsed := time.Since(start)
+	if res.Allow {
+		t.Fatal("hanging trust tool should be denied")
+	}
+	if !strings.Contains(res.Reason, "timed out") {
+		t.Errorf("reason = %q, want it to mention timeout", res.Reason)
+	}
+	// Generous upper bound: the timeout is 25ms; on a loaded CI host the
+	// goroutine schedule could take a bit longer. 1s is plenty headroom
+	// while still proving the call is bounded (the bug would hang
+	// indefinitely).
+	if elapsed > time.Second {
+		t.Errorf("elapsed %v exceeds bounded window — assessor did not honor per-command timeout", elapsed)
 	}
 }
 

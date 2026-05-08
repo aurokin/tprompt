@@ -10,7 +10,16 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+// DefaultTrustGateCommandTimeout bounds each codesign/spctl invocation
+// so a stuck OS security tool cannot pin the launcher's start lock
+// indefinitely. The two tools normally return in well under a second;
+// 5s is a generous ceiling that fails fast on a hung subprocess while
+// tolerating occasional cold-cache slow paths (e.g., spctl consulting
+// the notarization service on first run).
+const DefaultTrustGateCommandTimeout = 5 * time.Second
 
 // codesignPath and spctlPath are absolute. macOS ships codesign at
 // /usr/bin and spctl at /usr/sbin on every supported version, so
@@ -62,6 +71,12 @@ type darwinAssessor struct {
 	spctl    string
 	getenv   func(string) string
 	run      runner
+	// timeout bounds each codesign/spctl invocation. A zero value
+	// disables the bound (used by unit tests with synchronous fake
+	// runners). Production wires DefaultTrustGateCommandTimeout so a
+	// stuck OS security tool cannot pin the launcher's start lock
+	// indefinitely while implicit auto-start callers queue behind it.
+	timeout time.Duration
 }
 
 // ProductionAssessor returns the macOS trust assessor wired to the
@@ -75,6 +90,7 @@ func ProductionAssessor() TrustAssessor {
 		spctl:    spctlPath,
 		getenv:   os.Getenv,
 		run:      execRunner{},
+		timeout:  DefaultTrustGateCommandTimeout,
 	}
 }
 
@@ -129,10 +145,34 @@ func (a darwinAssessor) checkToolsAvailable(execPath string) (AssessResult, bool
 	return AssessResult{}, true
 }
 
+// runBounded invokes the runner under a per-command timeout when one
+// is configured. The bound is critical for the trust gate: the start
+// lock is held while Assess is in flight, so a hung codesign/spctl
+// would otherwise block every other implicit auto-start caller.
+func (a darwinAssessor) runBounded(parent context.Context, name string, args ...string) ([]byte, []byte, int, error) {
+	if a.timeout <= 0 {
+		return a.run.Run(parent, name, args...)
+	}
+	ctx, cancel := context.WithTimeout(parent, a.timeout)
+	defer cancel()
+	return a.run.Run(ctx, name, args...)
+}
+
+// classifyRunErr produces a human-readable reason for run errors,
+// distinguishing timeouts (so operators see "timed out after 5s"
+// rather than the opaque "context deadline exceeded") from other
+// invocation failures.
+func (a darwinAssessor) classifyRunErr(err error, label string) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Sprintf("%s timed out after %s", label, a.timeout)
+	}
+	return label + " failed to run: " + err.Error()
+}
+
 func (a darwinAssessor) runCodesignVerify(ctx context.Context, execPath string) (AssessResult, bool) {
-	_, stderr, code, err := a.run.Run(ctx, a.codesign, "--verify", "--strict", execPath)
+	_, stderr, code, err := a.runBounded(ctx, a.codesign, "--verify", "--strict", execPath)
 	if err != nil {
-		return a.deny(execPath, "codesign verify failed to run: "+err.Error()), false
+		return a.deny(execPath, a.classifyRunErr(err, "codesign verify")), false
 	}
 	if code == 0 {
 		return AssessResult{}, true
@@ -141,9 +181,9 @@ func (a darwinAssessor) runCodesignVerify(ctx context.Context, execPath string) 
 }
 
 func (a darwinAssessor) runCodesignDescribe(ctx context.Context, execPath string) (AssessResult, bool) {
-	_, stderr, code, err := a.run.Run(ctx, a.codesign, "-d", "-vv", execPath)
+	_, stderr, code, err := a.runBounded(ctx, a.codesign, "-d", "-vv", execPath)
 	if err != nil {
-		return a.deny(execPath, "codesign describe failed to run: "+err.Error()), false
+		return a.deny(execPath, a.classifyRunErr(err, "codesign describe")), false
 	}
 	if code != 0 {
 		// Describe should not normally fail when verify passed; if it
@@ -157,9 +197,9 @@ func (a darwinAssessor) runCodesignDescribe(ctx context.Context, execPath string
 }
 
 func (a darwinAssessor) runSpctlAssess(ctx context.Context, execPath string) (AssessResult, bool) {
-	_, stderr, code, err := a.run.Run(ctx, a.spctl, "--assess", "--type", "execute", "-vv", execPath)
+	_, stderr, code, err := a.runBounded(ctx, a.spctl, "--assess", "--type", "execute", "-vv", execPath)
 	if err != nil {
-		return a.deny(execPath, "spctl failed to run: "+err.Error()), false
+		return a.deny(execPath, a.classifyRunErr(err, "spctl")), false
 	}
 	if code == 0 {
 		return AssessResult{}, true
