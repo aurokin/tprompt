@@ -642,6 +642,15 @@ func runDaemonForeground(parent context.Context, deps Deps) error {
 			Outcome: daemon.OutcomeStarted,
 			Msg:     fmt.Sprintf("pid=%d socket=%s", os.Getpid(), cfg.SocketPath),
 		})
+		// Explicit `daemon run` is a recovery path: a healthy bind
+		// here means any cooldown left over from a prior implicit
+		// auto-start failure is no longer relevant. Clear it so a
+		// later TUI auto-start (after this daemon is stopped) is not
+		// gated by a stale window. Mirrors the launcher's
+		// OutcomeStarted / OutcomeAlreadyRunning cooldown clear.
+		if paths, err := dlife.PathsFor(cfg.SocketPath); err == nil {
+			_ = dlife.ClearCooldown(paths)
+		}
 	})
 
 	if runResult.Started && runErr == nil && runResult.ExitReason == daemon.RunExitContextCanceled {

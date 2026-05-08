@@ -15,6 +15,7 @@ import (
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
+	dlife "github.com/hsadler/tprompt/internal/daemon/lifecycle"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/testutil"
 	"github.com/hsadler/tprompt/internal/tmux"
@@ -524,6 +525,57 @@ func TestDaemonStartLogsStoppedOnCleanShutdown(t *testing.T) {
 	}
 	if !strings.Contains(logText, "outcome=stopped") {
 		t.Fatalf("expected stopped log entry, got %q", logText)
+	}
+}
+
+// TestDaemonRunClearsCooldownOnSuccessfulBind asserts that explicit
+// `tprompt daemon run`, used as a recovery path after a TUI implicit
+// auto-start failure recorded a cooldown, clears that cooldown marker
+// once the daemon successfully binds the socket. Without this, a
+// later implicit auto-start (after the user stops this daemon) would
+// be incorrectly gated by the stale TTL even though the user just
+// proved manually that the daemon can come up.
+func TestDaemonRunClearsCooldownOnSuccessfulBind(t *testing.T) {
+	deps := daemonDeps(t, &fakeDaemonClient{})
+	dir := testutil.ShortTempDir(t)
+	socketPath := filepath.Join(dir, "daemon.sock")
+	logPath := filepath.Join(dir, "daemon.log")
+	deps.LoadDaemonConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{
+			SocketPath:    socketPath,
+			LogPath:       logPath,
+			MaxPasteBytes: 1 << 20,
+		}, nil
+	}
+	deps.NewTmux = func() (tmux.Adapter, error) {
+		return stubTmuxAdapter{}, nil
+	}
+
+	paths, err := dlife.PathsFor(socketPath)
+	if err != nil {
+		t.Fatalf("PathsFor: %v", err)
+	}
+	if err := dlife.RecordCooldown(paths, dlife.Cooldown{
+		Until:   time.Now().Add(time.Hour),
+		Reason:  string(dlife.ReasonSpawnFailed),
+		LogPath: logPath,
+	}); err != nil {
+		t.Fatalf("seed cooldown: %v", err)
+	}
+
+	prevRunDaemon := runDaemon
+	runDaemon = func(_ context.Context, _ *daemon.Server, onReady func()) (daemon.RunResult, error) {
+		onReady()
+		return daemon.RunResult{Started: true, ExitReason: daemon.RunExitContextCanceled}, nil
+	}
+	t.Cleanup(func() { runDaemon = prevRunDaemon })
+
+	if err := runDaemonForeground(context.Background(), deps); err != nil {
+		t.Fatalf("runDaemonForeground: %v", err)
+	}
+
+	if _, active, _ := dlife.ReadCooldown(paths, time.Now); active {
+		t.Fatal("cooldown was not cleared after a successful daemon run bind")
 	}
 }
 
