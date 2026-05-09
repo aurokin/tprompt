@@ -21,10 +21,20 @@ type ProductionSpawner struct{}
 // returned SpawnHandle carries the child's PID so the launcher can
 // detect early child exit via kill(pid, 0) while polling Status.
 func (ProductionSpawner) Spawn(ctx context.Context, execPath string, args []string, logPath string) (SpawnHandle, error) {
+	if err := ctx.Err(); err != nil {
+		return SpawnHandle{}, err
+	}
 	if execPath == "" {
 		return SpawnHandle{}, fmt.Errorf("lifecycle spawner: empty executable path")
 	}
-	cmd := exec.CommandContext(ctx, execPath, args...)
+	// Deliberately exec.Command, NOT exec.CommandContext: the child
+	// daemon is detached via setsid and is meant to outlive this call.
+	// CommandContext installs a goroutine that SIGKILLs the child when
+	// ctx is done, so a caller-side cancellation (Ctrl-C during the
+	// readiness poll, a cobra command deadline, etc.) would tear down
+	// a healthy daemon we just spawned and Release()'d. ctx is still
+	// honored above for pre-fork cancellation.
+	cmd := exec.Command(execPath, args...)
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	if logPath != "" {
