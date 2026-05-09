@@ -5,31 +5,39 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/spf13/cobra"
 
+	applife "github.com/hsadler/tprompt/internal/app/lifecycle"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
+	dlife "github.com/hsadler/tprompt/internal/daemon/lifecycle"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
 	"github.com/hsadler/tprompt/internal/tui"
 )
 
-// tuiFlags captures the --target-pane / --client-tty / --session-id inputs.
+// tuiFlags captures the --target-pane / --client-tty / --session-id /
+// --daemon-auto-start / --no-daemon-auto-start inputs.
+//
+// daemonAutoStartSet records whether --daemon-auto-start was named on
+// the command line (cobra's Flag.Changed semantics). noDaemonAutoStart
+// is the readable opt-out alias; setting it forces the auto-start
+// branch off regardless of config.
 type tuiFlags struct {
 	targetPane         string
 	clientTTY          string
 	sessionID          string
 	daemonAutoStart    bool
 	daemonAutoStartSet bool
+	noDaemonAutoStart  bool
 }
 
-var (
-	daemonAutoStartReadyTimeout = 2 * time.Second
-	daemonAutoStartPollInterval = 50 * time.Millisecond
-	daemonAutoStartMu           sync.Mutex
-)
+// daemonAutoStartMu serializes the in-process auto-start window so two
+// concurrent runTUI calls in the same process do not both invoke the
+// launcher. Cross-process serialization is handled by the lifecycle
+// start lock inside the launcher itself.
+var daemonAutoStartMu sync.Mutex
 
 func newTUICmd(deps Deps) *cobra.Command {
 	var f tuiFlags
@@ -49,9 +57,11 @@ from a tmux popup binding that passes the originating context, e.g.:
   tprompt tui --target-pane '#{pane_id}' --client-tty '#{client_tty}' \
     --session-id '#{session_id}'
 
-Daemon auto-start is opt-in: pass --daemon-auto-start (or set
-'daemon_auto_start = true' in config) to start the daemon once if it is
-unreachable when the TUI runs.`,
+Daemon auto-start is on by default: when the TUI runs and the daemon
+is unreachable, tprompt spawns a background daemon and waits for
+readiness. To turn it off for one invocation, pass
+--no-daemon-auto-start (or --daemon-auto-start=false). To turn it off
+permanently, set 'daemon_auto_start = false' in config.`,
 		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			return runTUI(deps, f)
@@ -60,7 +70,8 @@ unreachable when the TUI runs.`,
 	cmd.Flags().StringVar(&f.targetPane, "target-pane", "", "tmux pane ID to deliver into (required)")
 	cmd.Flags().StringVar(&f.clientTTY, "client-tty", "", "originating tmux client TTY for failure banners")
 	cmd.Flags().StringVar(&f.sessionID, "session-id", "", "originating tmux session ID for delivery context")
-	cmd.Flags().BoolVar(&f.daemonAutoStart, "daemon-auto-start", false, "opt in to auto-starting the daemon for this TUI run if unreachable")
+	cmd.Flags().BoolVar(&f.daemonAutoStart, "daemon-auto-start", true, "auto-start the daemon for this TUI run if unreachable (default true)")
+	cmd.Flags().BoolVar(&f.noDaemonAutoStart, "no-daemon-auto-start", false, "skip auto-starting the daemon for this TUI run (alias for --daemon-auto-start=false)")
 	if err := cmd.MarkFlagRequired("target-pane"); err != nil {
 		panic(fmt.Sprintf("tui: mark --target-pane required: %v", err))
 	}
@@ -71,6 +82,9 @@ unreachable when the TUI runs.`,
 }
 
 func runTUI(deps Deps, f tuiFlags) error {
+	if f.daemonAutoStartSet && f.noDaemonAutoStart {
+		return errors.New("tui: --daemon-auto-start and --no-daemon-auto-start are mutually exclusive")
+	}
 	// Pre-flight chain: config → store → daemon → pane. Each step short-circuits
 	// on error so the user sees the most-fundamental broken layer first.
 	cfg, err := deps.LoadConfig(*deps.ConfigPath)
@@ -143,6 +157,9 @@ func runTUI(deps Deps, f tuiFlags) error {
 }
 
 func (f tuiFlags) daemonAutoStartEnabled(cfg config.Resolved) bool {
+	if f.noDaemonAutoStart {
+		return false
+	}
 	if f.daemonAutoStartSet {
 		return f.daemonAutoStart
 	}
@@ -175,30 +192,36 @@ func autoStartTUIDaemon(deps Deps, cfg config.Resolved, client daemon.Client) er
 	if err := validateDaemonStartConfig(cfg); err != nil {
 		return err
 	}
-	if err := deps.StartDaemon(cfg, explicitConfigPath(deps)); err != nil {
-		return &daemon.IPCError{Path: cfg.SocketPath, Op: "auto-start daemon", Reason: err.Error()}
+
+	launcher := deps.NewLauncher(cfg, explicitConfigPath(deps))
+	res := launcher.Start(context.Background(), applife.IntentImplicitTUI)
+	switch res.Outcome {
+	case dlife.OutcomeStarted, dlife.OutcomeAlreadyRunning:
+		return nil
+	default:
+		return &daemon.IPCError{
+			Path:   cfg.SocketPath,
+			Op:     "auto-start daemon",
+			Reason: launcherFailureMessage(res, cfg.LogPath),
+		}
 	}
-	return waitForTUIDaemonReady(deps, cfg)
 }
 
-func waitForTUIDaemonReady(deps Deps, cfg config.Resolved) error {
-	deadline := time.Now().Add(daemonAutoStartReadyTimeout)
-	var lastErr error
-	for time.Now().Before(deadline) {
-		remaining := time.Until(deadline)
-		client := deps.NewDaemonReadinessClient(cfg, remaining)
-		if _, err := client.Status(); err == nil {
-			return nil
-		} else {
-			lastErr = err
-		}
-		time.Sleep(daemonAutoStartPollInterval)
+// launcherFailureMessage formats a StartResult for surfacing as a daemon
+// IPC error. The TUI's recovery hint must only suggest options the TUI
+// command path accepts, so the message embeds the daemon log path (where
+// real diagnostics land) but does not invite the user to retry with a
+// different flag. Explicit recovery via `tprompt daemon start` /
+// `tprompt daemon run` is documented elsewhere.
+func launcherFailureMessage(res dlife.StartResult, logPath string) string {
+	detail := res.Detail
+	if detail == "" {
+		detail = string(res.Reason)
 	}
-	reason := "daemon did not become ready"
-	if lastErr != nil {
-		reason = lastErr.Error()
+	if logPath == "" {
+		return detail
 	}
-	return &daemon.IPCError{Path: cfg.SocketPath, Op: "auto-start readiness", Reason: reason}
+	return fmt.Sprintf("%s (see %s)", detail, logPath)
 }
 
 func explicitConfigPath(deps Deps) string {

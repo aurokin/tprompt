@@ -60,16 +60,20 @@ func TestSubcommandHelpText(t *testing.T) {
 		},
 		{
 			path:   []string{"tui"},
-			want:   []string{"daemon", "--target-pane", "--daemon-auto-start"},
+			want:   []string{"daemon", "--target-pane", "--daemon-auto-start", "--no-daemon-auto-start"},
 			banned: []string{"templat"},
 		},
 		{
 			path: []string{"daemon"},
-			want: []string{"start", "status", "stop"},
+			want: []string{"start", "run", "status", "stop"},
 		},
 		{
 			path: []string{"daemon", "start"},
-			want: []string{"foreground"},
+			want: []string{"background", "already running"},
+		},
+		{
+			path: []string{"daemon", "run"},
+			want: []string{"foreground", "run lock"},
 		},
 		{
 			path: []string{"daemon", "status"},

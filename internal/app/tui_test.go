@@ -5,11 +5,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
+	applife "github.com/hsadler/tprompt/internal/app/lifecycle"
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
+	dlife "github.com/hsadler/tprompt/internal/daemon/lifecycle"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/submitter"
 	"github.com/hsadler/tprompt/internal/tmux"
@@ -50,7 +51,8 @@ func tuiDeps(t *testing.T, fs *fakeStore, rend tui.Renderer, cfgOverride ...func
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
 		cfg := config.Resolved{
-			PromptsDir: "/prompts",
+			PromptsDir:      "/prompts",
+			DaemonAutoStart: true, // matches Default() after AUR-266
 			ReservedPrintable: map[rune]string{
 				'p': "clipboard",
 				'/': "search",
@@ -384,7 +386,12 @@ func TestTUI_StoreErrorShortCircuits(t *testing.T) {
 
 func TestTUI_DaemonUnreachableExitsDaemon(t *testing.T) {
 	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
-	deps := tuiDeps(t, &fakeStore{}, rend)
+	// Auto-start is on by default after AUR-266; this test exercises the
+	// "auto-start explicitly disabled, socket unreachable" path so we
+	// override the default off.
+	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
+		c.DaemonAutoStart = false
+	})
 	tmuxCalled := false
 	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
 		return &fakeDaemonClient{
@@ -397,8 +404,8 @@ func TestTUI_DaemonUnreachableExitsDaemon(t *testing.T) {
 		tmuxCalled = true
 		return nil, nil
 	}
-	deps.StartDaemon = func(config.Resolved, string) error {
-		t.Fatal("StartDaemon must not be called when auto-start is disabled")
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
+		t.Fatal("NewLauncher must not be called when auto-start is disabled")
 		return nil
 	}
 
@@ -427,47 +434,32 @@ func TestTUI_DaemonAutoStartFromConfigStartsAndRetries(t *testing.T) {
 		c.MaxPasteBytes = 1 << 20
 	})
 
-	statusCalls := 0
-	startCalls := 0
 	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
 		return &fakeDaemonClient{
 			statusFn: func() (daemon.StatusResponse, error) {
-				statusCalls++
-				if statusCalls < 3 {
-					return daemon.StatusResponse{}, &daemon.SocketUnavailableError{
-						Path:   "/tmp/tprompt-test.sock",
-						Reason: "connection refused",
-					}
+				return daemon.StatusResponse{}, &daemon.SocketUnavailableError{
+					Path:   "/tmp/tprompt-test.sock",
+					Reason: "connection refused",
 				}
-				return daemon.StatusResponse{Socket: "/tmp/tprompt-test.sock"}, nil
 			},
 		}, nil
 	}
-	deps.NewDaemonReadinessClient = func(config.Resolved, time.Duration) daemon.Client {
-		return &fakeDaemonClient{
-			statusFn: func() (daemon.StatusResponse, error) {
-				statusCalls++
-				if statusCalls < 3 {
-					return daemon.StatusResponse{}, &daemon.SocketUnavailableError{
-						Path:   "/tmp/tprompt-test.sock",
-						Reason: "connection refused",
-					}
-				}
-				return daemon.StatusResponse{Socket: "/tmp/tprompt-test.sock"}, nil
-			},
-		}
+	launcher := &fakeLauncher{
+		onStart: func() dlife.StartResult {
+			return dlife.StartResult{Outcome: dlife.OutcomeStarted}
+		},
 	}
-	deps.StartDaemon = func(config.Resolved, string) error {
-		startCalls++
-		return nil
-	}
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher { return launcher }
 
 	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
 	if err != nil {
 		t.Fatalf("want nil after auto-start readiness, got %v", err)
 	}
-	if startCalls != 1 {
-		t.Fatalf("StartDaemon calls = %d, want 1", startCalls)
+	if launcher.calls != 1 {
+		t.Fatalf("launcher.Start calls = %d, want 1", launcher.calls)
+	}
+	if got, want := launcher.intents[0], applife.IntentImplicitTUI; got != want {
+		t.Fatalf("intent = %v, want %v", got, want)
 	}
 	if !rend.called {
 		t.Fatal("renderer should run after daemon readiness")
@@ -482,33 +474,22 @@ func TestTUI_DaemonAutoStartFlagEnablesAndPassesConfigPath(t *testing.T) {
 		c.MaxPasteBytes = 1 << 20
 	})
 
-	statusCalls := 0
-	var gotConfigPath string
 	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
 		return &fakeDaemonClient{
 			statusFn: func() (daemon.StatusResponse, error) {
-				statusCalls++
-				if statusCalls < 3 {
-					return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Path: "/tmp/tprompt-test.sock"}
-				}
-				return daemon.StatusResponse{Socket: "/tmp/tprompt-test.sock"}, nil
+				return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Path: "/tmp/tprompt-test.sock"}
 			},
 		}, nil
 	}
-	deps.NewDaemonReadinessClient = func(config.Resolved, time.Duration) daemon.Client {
-		return &fakeDaemonClient{
-			statusFn: func() (daemon.StatusResponse, error) {
-				statusCalls++
-				if statusCalls < 3 {
-					return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Path: "/tmp/tprompt-test.sock"}
-				}
-				return daemon.StatusResponse{Socket: "/tmp/tprompt-test.sock"}, nil
-			},
-		}
+	var gotConfigPath string
+	launcher := &fakeLauncher{
+		onStart: func() dlife.StartResult {
+			return dlife.StartResult{Outcome: dlife.OutcomeStarted}
+		},
 	}
-	deps.StartDaemon = func(_ config.Resolved, explicitConfigPath string) error {
+	deps.NewLauncher = func(_ config.Resolved, explicitConfigPath string) DaemonLauncher {
 		gotConfigPath = explicitConfigPath
-		return nil
+		return launcher
 	}
 
 	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0", "--daemon-auto-start", "--config", "config.toml")
@@ -535,8 +516,8 @@ func TestTUI_DaemonAutoStartFlagFalseOverridesConfig(t *testing.T) {
 			},
 		}, nil
 	}
-	deps.StartDaemon = func(config.Resolved, string) error {
-		t.Fatal("StartDaemon must not be called when flag explicitly disables auto-start")
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
+		t.Fatal("NewLauncher must not be called when flag explicitly disables auto-start")
 		return nil
 	}
 
@@ -547,13 +528,102 @@ func TestTUI_DaemonAutoStartFlagFalseOverridesConfig(t *testing.T) {
 	}
 }
 
+// TestTUI_DaemonAutoStartDefaultOn verifies the AUR-266 contract: with
+// no flag and no explicit config opt-out, the launcher fires when the
+// socket is unreachable.
+func TestTUI_DaemonAutoStartDefaultOn(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	// Note: tuiDeps provides cfg with DaemonAutoStart untouched; the
+	// default after AUR-266 is true. We explicitly do not set it here
+	// so a future regression flips the assertion, not the seed.
+	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
+		c.SocketPath = "/tmp/tprompt-test.sock"
+		c.LogPath = "/tmp/tprompt-test.log"
+		c.MaxPasteBytes = 1 << 20
+	})
+	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+		return &fakeDaemonClient{
+			statusFn: func() (daemon.StatusResponse, error) {
+				return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Path: "/tmp/tprompt-test.sock"}
+			},
+		}, nil
+	}
+	launcher := &fakeLauncher{
+		onStart: func() dlife.StartResult {
+			return dlife.StartResult{Outcome: dlife.OutcomeStarted}
+		},
+	}
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher { return launcher }
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	if err != nil {
+		t.Fatalf("want nil with default-on auto-start, got %v", err)
+	}
+	if launcher.calls != 1 {
+		t.Fatalf("launcher.Start calls = %d, want 1", launcher.calls)
+	}
+}
+
+// TestTUI_NoDaemonAutoStartFlagOptsOut verifies the readable opt-out
+// alias bypasses the launcher even when config has it on.
+func TestTUI_NoDaemonAutoStartFlagOptsOut(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
+		c.DaemonAutoStart = true
+		c.SocketPath = "/tmp/tprompt-test.sock"
+		c.LogPath = "/tmp/tprompt-test.log"
+		c.MaxPasteBytes = 1 << 20
+	})
+	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+		return &fakeDaemonClient{
+			statusFn: func() (daemon.StatusResponse, error) {
+				return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Path: "/tmp/tprompt-test.sock"}
+			},
+		}, nil
+	}
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
+		t.Fatal("NewLauncher must not be called when --no-daemon-auto-start is set")
+		return nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0", "--no-daemon-auto-start")
+	var su *daemon.SocketUnavailableError
+	if !errors.As(err, &su) {
+		t.Fatalf("want SocketUnavailableError, got %T: %v", err, err)
+	}
+}
+
+// TestTUI_ConflictingAutoStartFlagsErrors verifies that setting both
+// --daemon-auto-start and --no-daemon-auto-start on the same
+// invocation is a user error rather than a silent precedence pick.
+func TestTUI_ConflictingAutoStartFlagsErrors(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
+		c.SocketPath = "/tmp/tprompt-test.sock"
+		c.LogPath = "/tmp/tprompt-test.log"
+		c.MaxPasteBytes = 1 << 20
+	})
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
+		t.Fatal("NewLauncher must not be called when flags conflict")
+		return nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0", "--daemon-auto-start", "--no-daemon-auto-start")
+	if err == nil {
+		t.Fatal("want error for conflicting flags, got nil")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("err = %v, want 'mutually exclusive' message", err)
+	}
+}
+
 func TestTUI_DaemonAutoStartAlreadyRunningDoesNotStart(t *testing.T) {
 	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
 	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
 		c.DaemonAutoStart = true
 	})
-	deps.StartDaemon = func(config.Resolved, string) error {
-		t.Fatal("StartDaemon must not be called when daemon is already reachable")
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
+		t.Fatal("NewLauncher must not be called when daemon is already reachable")
 		return nil
 	}
 
@@ -581,8 +651,10 @@ func TestTUI_DaemonAutoStartFailureMapsToDaemonError(t *testing.T) {
 			},
 		}, nil
 	}
-	deps.StartDaemon = func(config.Resolved, string) error {
-		return errors.New("spawn failed")
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
+		return &fakeLauncher{onStart: func() dlife.StartResult {
+			return dlife.StartResult{Outcome: dlife.OutcomeFailed, Reason: dlife.ReasonSpawnFailed, Detail: "spawn failed"}
+		}}
 	}
 
 	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
@@ -599,15 +671,6 @@ func TestTUI_DaemonAutoStartFailureMapsToDaemonError(t *testing.T) {
 }
 
 func TestTUI_DaemonAutoStartReadinessFailureMapsToDaemonError(t *testing.T) {
-	prevTimeout := daemonAutoStartReadyTimeout
-	prevPoll := daemonAutoStartPollInterval
-	daemonAutoStartReadyTimeout = 5 * time.Millisecond
-	daemonAutoStartPollInterval = time.Millisecond
-	t.Cleanup(func() {
-		daemonAutoStartReadyTimeout = prevTimeout
-		daemonAutoStartPollInterval = prevPoll
-	})
-
 	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
 	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
 		c.DaemonAutoStart = true
@@ -622,82 +685,37 @@ func TestTUI_DaemonAutoStartReadinessFailureMapsToDaemonError(t *testing.T) {
 			},
 		}, nil
 	}
-	deps.NewDaemonReadinessClient = func(config.Resolved, time.Duration) daemon.Client {
-		return &fakeDaemonClient{
-			statusFn: func() (daemon.StatusResponse, error) {
-				return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Path: "/tmp/tprompt-test.sock"}
-			},
-		}
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
+		return &fakeLauncher{onStart: func() dlife.StartResult {
+			return dlife.StartResult{
+				Outcome: dlife.OutcomeFailed,
+				Reason:  dlife.ReasonReadinessTimeout,
+				Detail:  "readiness wait 5ms exceeded",
+			}
+		}}
 	}
-	deps.StartDaemon = func(config.Resolved, string) error { return nil }
 
 	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
 	var ipc *daemon.IPCError
 	if !errors.As(err, &ipc) {
 		t.Fatalf("want IPCError, got %T: %v", err, err)
 	}
-	if !strings.Contains(ipc.Error(), "auto-start readiness") {
-		t.Fatalf("error = %q, want auto-start readiness", ipc.Error())
+	if !strings.Contains(ipc.Error(), "readiness wait") {
+		t.Fatalf("error = %q, want readiness wait detail", ipc.Error())
 	}
-}
-
-func TestTUI_DaemonAutoStartReadinessClientUsesRemainingDeadline(t *testing.T) {
-	prevTimeout := daemonAutoStartReadyTimeout
-	prevPoll := daemonAutoStartPollInterval
-	daemonAutoStartReadyTimeout = 20 * time.Millisecond
-	daemonAutoStartPollInterval = time.Millisecond
-	t.Cleanup(func() {
-		daemonAutoStartReadyTimeout = prevTimeout
-		daemonAutoStartPollInterval = prevPoll
-	})
-
-	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
-	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
-		c.DaemonAutoStart = true
-		c.SocketPath = "/tmp/tprompt-test.sock"
-		c.LogPath = "/tmp/tprompt-test.log"
-		c.MaxPasteBytes = 1 << 20
-	})
-	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
-		return &fakeDaemonClient{
-			statusFn: func() (daemon.StatusResponse, error) {
-				return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Path: "/tmp/tprompt-test.sock"}
-			},
-		}, nil
-	}
-	var gotTimeouts []time.Duration
-	deps.NewDaemonReadinessClient = func(_ config.Resolved, timeout time.Duration) daemon.Client {
-		gotTimeouts = append(gotTimeouts, timeout)
-		return &fakeDaemonClient{
-			statusFn: func() (daemon.StatusResponse, error) {
-				return daemon.StatusResponse{}, &daemon.IPCError{Path: "/tmp/tprompt-test.sock", Op: "read response", Reason: "timeout"}
-			},
-		}
-	}
-	deps.StartDaemon = func(config.Resolved, string) error { return nil }
-
-	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
-	var ipc *daemon.IPCError
-	if !errors.As(err, &ipc) {
-		t.Fatalf("want IPCError, got %T: %v", err, err)
-	}
-	if len(gotTimeouts) == 0 {
-		t.Fatal("readiness client was not created")
-	}
-	for _, timeout := range gotTimeouts {
-		if timeout <= 0 {
-			t.Fatalf("readiness timeout = %s, want positive", timeout)
-		}
-		if timeout > daemonAutoStartReadyTimeout {
-			t.Fatalf("readiness timeout = %s, exceeds ready timeout %s", timeout, daemonAutoStartReadyTimeout)
-		}
+	if !strings.Contains(ipc.Error(), "/tmp/tprompt-test.log") {
+		t.Fatalf("error = %q, want daemon log path embedded", ipc.Error())
 	}
 }
 
 func TestTUI_DaemonAutoStartConcurrentAttemptsStartOnce(t *testing.T) {
+	// Process-level serialization comes from the launcher's start lock
+	// (covered exhaustively in internal/app/lifecycle/launcher_test.go).
+	// The TUI's daemonAutoStartMu serializes the in-process auto-start
+	// section so the launcher is invoked once even when multiple
+	// goroutines call runTUI concurrently. Assert that here.
 	started := false
 	var mu sync.Mutex
-	startCalls := 0
 	deps := workingDeps(t, &fakeStore{})
 	deps.LoadConfig = func(string) (config.Resolved, error) {
 		return config.Resolved{
@@ -721,25 +739,15 @@ func TestTUI_DaemonAutoStartConcurrentAttemptsStartOnce(t *testing.T) {
 			},
 		}, nil
 	}
-	deps.NewDaemonReadinessClient = func(config.Resolved, time.Duration) daemon.Client {
-		return &fakeDaemonClient{
-			statusFn: func() (daemon.StatusResponse, error) {
-				mu.Lock()
-				defer mu.Unlock()
-				if !started {
-					return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Path: "/tmp/tprompt-test.sock"}
-				}
-				return daemon.StatusResponse{Socket: "/tmp/tprompt-test.sock"}, nil
-			},
-		}
+	launcher := &fakeLauncher{
+		onStart: func() dlife.StartResult {
+			mu.Lock()
+			defer mu.Unlock()
+			started = true
+			return dlife.StartResult{Outcome: dlife.OutcomeStarted}
+		},
 	}
-	deps.StartDaemon = func(config.Resolved, string) error {
-		mu.Lock()
-		defer mu.Unlock()
-		startCalls++
-		started = true
-		return nil
-	}
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher { return launcher }
 	deps.NewTmux = func() (tmux.Adapter, error) {
 		return &fakeAdapter{paneExists: true}, nil
 	}
@@ -760,8 +768,8 @@ func TestTUI_DaemonAutoStartConcurrentAttemptsStartOnce(t *testing.T) {
 			t.Fatalf("runTUI returned error: %v", err)
 		}
 	}
-	if startCalls != 1 {
-		t.Fatalf("StartDaemon calls = %d, want 1", startCalls)
+	if launcher.calls != 1 {
+		t.Fatalf("launcher.Start calls = %d, want 1", launcher.calls)
 	}
 }
 

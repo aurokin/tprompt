@@ -29,8 +29,8 @@ func TestDefaultMatchesDocumentedMVPValues(t *testing.T) {
 	if got.LogPath != "~/.local/state/tprompt/daemon.log" {
 		t.Fatalf("Default().LogPath = %q", got.LogPath)
 	}
-	if got.DaemonAutoStart {
-		t.Fatal("Default().DaemonAutoStart = true, want false")
+	if !got.DaemonAutoStart {
+		t.Fatal("Default().DaemonAutoStart = false, want true")
 	}
 	if got.PickerCommand != "fzf" {
 		t.Fatalf("Default().PickerCommand = %q, want %q", got.PickerCommand, "fzf")

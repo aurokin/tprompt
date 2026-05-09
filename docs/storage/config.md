@@ -20,7 +20,7 @@ default_mode = "paste"
 default_enter = false
 socket_path = "~/.local/state/tprompt/daemon.sock"
 log_path = "~/.local/state/tprompt/daemon.log"
-daemon_auto_start = false
+daemon_auto_start = true
 picker_command = "fzf"
 verification_timeout_ms = 5000
 verification_poll_interval_ms = 100
@@ -162,11 +162,18 @@ clipboard = ""     # disable clipboard keybind; still accessible via search
 
 ## Daemon Auto-Start
 
-`daemon_auto_start` defaults to `false`. When set to `true`, `tprompt tui`
-may start the daemon if the configured socket is unreachable, wait briefly for
-readiness, then retry the daemon preflight. This is limited to TUI-oriented
-flows; explicit lifecycle commands such as `tprompt daemon status` do not
-start the daemon implicitly.
+`daemon_auto_start` defaults to `true`. When `tprompt tui` (or bare
+`tprompt` dispatching to TUI inside tmux) finds the configured socket
+unreachable, it spawns a detached daemon, waits briefly for readiness,
+then retries the daemon preflight. To opt out for one invocation pass
+`--no-daemon-auto-start` (or `--daemon-auto-start=false`); to opt out
+permanently set `daemon_auto_start = false` in config. This is
+limited to TUI-oriented flows; explicit lifecycle commands such as
+`tprompt daemon status` do not start the daemon implicitly. On macOS,
+implicit auto-start is gated by an executable-trust check (see
+[lifecycle docs](../lifecycle/auto-start.md) once written, or
+`internal/app/lifecycle/trust_darwin.go`); explicit
+`tprompt daemon start` always bypasses that gate.
 
 ## `max_paste_bytes`
 

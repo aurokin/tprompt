@@ -42,7 +42,7 @@ func Default() Config {
 		DefaultEnter:               false,
 		SocketPath:                 "~/.local/state/tprompt/daemon.sock",
 		LogPath:                    "~/.local/state/tprompt/daemon.log",
-		DaemonAutoStart:            false,
+		DaemonAutoStart:            true,
 		PickerCommand:              "fzf",
 		VerificationTimeoutMS:      5000,
 		VerificationPollIntervalMS: 100,

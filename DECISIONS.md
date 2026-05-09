@@ -293,4 +293,40 @@ The implementation language and toolchain are locked for v1:
 - **Complexity:** `gocognit` + `funlen`, configured through `golangci-lint`.
 - **Testing:** stdlib `testing` + `github.com/google/go-cmp` for diffs + `github.com/rogpeppe/go-internal/testscript` for CLI black-box tests. Coverage via `go test -covermode=atomic`.
 
+### 33. Daemon lifecycle architecture
+
+The daemon lifecycle is owned by two layered packages and four
+file-system primitives:
+
+- **Run lock** (`<socket>.lock`, `flock(LOCK_EX|LOCK_NB)`, `O_CLOEXEC`) — held by the live daemon for its full lifetime. Cross-process exclusivity.
+- **Start lock** (`<socket>.start.lock`, blocking flock) — serializes concurrent cold starts.
+- **Identity sidecar** (`<socket>.identity.json`) — `(pid, start_time, version)`, written atomically (tmp+rename) and removed on graceful shutdown only when the live daemon still owns it. Defends against PID reuse via the start-time match.
+- **Cooldown marker** (`<socket>.start.cooldown`) — recorded after an implicit (TUI) start failure; gates subsequent implicit starts for `DefaultCooldownTTL` (10 s). Explicit starts always bypass and clear the marker on success.
+
+The launcher lives in `internal/app/lifecycle/`; the primitives live in `internal/daemon/lifecycle/`. The launcher is wired with three pluggable seams:
+
+- `StatusProber` returns `ProbeOK | ProbeUnreachable | ProbeReachableBroken`. The launcher refuses to spawn over a `ProbeReachableBroken` socket — operator recovery is required (`daemon stop` or kill).
+- `Spawner` returns a `SpawnHandle{PID}` so the readiness loop can detect child early-exit via `kill(pid, 0)` and report `ReasonChildExitedEarly` instead of timing out.
+- `TrustAssessor` runs only for `IntentImplicitTUI`. `noopAssessor` on non-darwin; `darwinAssessor` consults `/usr/bin/codesign` and `/usr/sbin/spctl` (always at absolute paths).
+
+Command semantics:
+
+- **`tprompt daemon start`** is non-blocking. It calls the launcher with `IntentExplicitStart`, which spawns `daemon run` detached, polls `Status` until ready, and prints either `tprompt daemon started on <socket>` or `tprompt daemon already running on <socket>`. Idempotent success when a compatible daemon is already running. The trust gate is bypassed for explicit intents.
+- **`tprompt daemon run`** is foreground. The same `Server.Listen → Serve → Close` lifecycle as the spawned child uses; `SIGINT`/`SIGTERM` and the `Stop` RPC both unwind through `Close`.
+- **TUI auto-start** is default-on. It calls the same launcher with `IntentImplicitTUI`. Failure records a cooldown that gates subsequent implicit starts; explicit `daemon start`/`daemon run` always bypass cooldown and trust gate.
+- **`tprompt daemon stop`** is mode-agnostic. It dials the configured socket, issues the `Stop` RPC, and waits (bounded) for the socket to disappear. Works for daemons spawned by any of the three modes because all converge on the same `Server.Close` cleanup.
+- **`tprompt daemon status`** is a read-only probe. Never auto-starts the daemon.
+- **`tprompt send`, `tprompt paste`, `tprompt doctor`** never contact or auto-start the daemon. Direct delivery and diagnostics are daemon-free.
+
+A "compatible daemon" is one reachable at the configured socket whose `Status` RPC succeeds. Reachable-but-broken is its own classification with a manual-recovery message.
+
+macOS trust gate (`internal/app/lifecycle/trust_darwin.go`):
+
+- Runs only for `IntentImplicitTUI`.
+- Honors `TPROMPT_UNSAFE_SKIP_TRUST_GATE` only when set to `1` / `true` / `yes` / `on` (case-insensitive). Other values keep the gate active.
+- Order: `codesign --verify --strict` → `codesign -d -vv` (ad-hoc detection via `Signature=adhoc` or `flags=...adhoc...` on `CodeDirectory`) → `spctl --assess --type execute` (CLI-bypass for "the code is valid but does not seem to be an app").
+- Tools missing fails closed with a recovery hint pointing at `tprompt daemon start`. The macOS base system always ships these binaries; absence is exotic.
+
+The full narrative — including signing/notarization expectations and rejection-class behavior — lives in [docs/lifecycle/auto-start.md](docs/lifecycle/auto-start.md).
+
 Rationale and library choices are detailed in `docs/implementation/tech-stack.md`.

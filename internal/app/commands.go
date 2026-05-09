@@ -12,9 +12,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	applife "github.com/hsadler/tprompt/internal/app/lifecycle"
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
+	dlife "github.com/hsadler/tprompt/internal/daemon/lifecycle"
 	"github.com/hsadler/tprompt/internal/sanitize"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
@@ -471,9 +473,11 @@ func newDaemonCmd(deps Deps) *cobra.Command {
 		Use:   "daemon",
 		Short: "Manage the deferred-delivery daemon",
 		Long: `Manage the local tprompt daemon, which performs deferred delivery of
-TUI-selected prompts after the TUI process exits. Lifecycle is explicit:
+TUI-selected prompts after the TUI process exits. Lifecycle subcommands:
 
-  start    Run the daemon in the foreground listening on the socket.
+  start    Start the daemon in the background (idempotent if already
+           running).
+  run      Run the daemon in the foreground listening on the socket.
   status   Read-only status check; does not start the daemon implicitly.
   stop     Request graceful shutdown over the local IPC socket.
 
@@ -481,16 +485,32 @@ TUI-selected prompts after the TUI process exits. Lifecycle is explicit:
 	}
 	cmd.AddCommand(
 		&cobra.Command{
-			Use:     "start",
-			Aliases: []string{"run"},
-			Short:   "Start the daemon in the foreground",
-			Long: `Start the daemon in the foreground. The daemon listens on the configured
-socket and processes deferred delivery jobs submitted by 'tprompt tui'.
-Send SIGINT or SIGTERM (or run 'tprompt daemon stop' from another shell)
-to request graceful shutdown.`,
+			Use:   "start",
+			Short: "Start the daemon in the background (idempotent if already running)",
+			Long: `Start the daemon in the background. Spawns a detached 'daemon run'
+process if no compatible daemon is already running, redirects child
+stderr to the configured daemon log, polls the daemon Status RPC until
+readiness, then returns. If a compatible daemon is already running,
+prints "already running" and exits successfully — making this command
+idempotent for shell scripts and tmux popup bindings. Failures map to
+daemon/IPC errors and mention the daemon log path where relevant.`,
 			Args: cobra.NoArgs,
 			RunE: func(c *cobra.Command, _ []string) error {
-				return runDaemonStart(c.Context(), deps)
+				return runDaemonStartBackground(c.Context(), deps)
+			},
+		},
+		&cobra.Command{
+			Use:   "run",
+			Short: "Run the daemon in the foreground",
+			Long: `Run the daemon in the foreground. The daemon listens on the configured
+socket and processes deferred delivery jobs submitted by 'tprompt tui'.
+'daemon run' acquires the lifecycle run lock before binding the socket
+and refuses to start when a compatible daemon already owns it. Send
+SIGINT or SIGTERM (or run 'tprompt daemon stop' from another shell) to
+request graceful shutdown.`,
+			Args: cobra.NoArgs,
+			RunE: func(c *cobra.Command, _ []string) error {
+				return runDaemonForeground(c.Context(), deps)
 			},
 		},
 		&cobra.Command{
@@ -520,7 +540,48 @@ down within a short bounded wait, exits with a daemon/IPC error.`,
 	return cmd
 }
 
-func runDaemonStart(parent context.Context, deps Deps) error {
+// runDaemonStartBackground is the explicit `daemon start` handler. It
+// dispatches to the lifecycle launcher with IntentExplicitStart so the
+// trust gate is bypassed (explicit recovery commands always proceed) and
+// any active cooldown is cleared on success. The launcher spawns
+// `daemon run` detached, polls Status until ready, then returns. If a
+// compatible daemon is already running this is an idempotent success.
+func runDaemonStartBackground(parent context.Context, deps Deps) error {
+	cfg, err := deps.LoadDaemonConfig(*deps.ConfigPath)
+	if err != nil {
+		return err
+	}
+	if err := validateDaemonStartConfig(cfg); err != nil {
+		return err
+	}
+	launcher := deps.NewLauncher(cfg, explicitConfigPath(deps))
+	res := launcher.Start(parent, applife.IntentExplicitStart)
+	switch res.Outcome {
+	case dlife.OutcomeAlreadyRunning:
+		_, _ = fmt.Fprintf(deps.Stdout, "tprompt daemon already running on %s\n", cfg.SocketPath)
+		return nil
+	case dlife.OutcomeStarted:
+		_, _ = fmt.Fprintf(deps.Stdout, "tprompt daemon started on %s\n", cfg.SocketPath)
+		return nil
+	default:
+		detail := res.Detail
+		if detail == "" {
+			detail = string(res.Reason)
+		}
+		return &daemon.IPCError{
+			Path:   cfg.SocketPath,
+			Op:     "daemon start",
+			Reason: detail,
+		}
+	}
+}
+
+// runDaemonForeground is the shared handler for `daemon run`. It runs the
+// daemon server loop in the calling process. The run-lock + identity
+// sidecar from AUR-263 enforce one daemon per socket; collisions surface
+// as daemon/IPC errors with the same exit-code mapping the launcher
+// uses.
+func runDaemonForeground(parent context.Context, deps Deps) error {
 	cfg, err := deps.LoadDaemonConfig(*deps.ConfigPath)
 	if err != nil {
 		return err
@@ -546,6 +607,8 @@ func runDaemonStart(parent context.Context, deps Deps) error {
 	ctx, stop := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	exec, _ := os.Executable()
+
 	server := daemon.NewServer(daemon.ServerConfig{
 		SocketPath: cfg.SocketPath,
 		Queue:      queue,
@@ -561,6 +624,16 @@ func runDaemonStart(parent context.Context, deps Deps) error {
 				Version:     appVersion,
 			}
 		},
+		IdentityFn: func() dlife.Identity {
+			return dlife.Identity{
+				PID:       os.Getpid(),
+				StartTime: started,
+				Exec:      exec,
+				Socket:    cfg.SocketPath,
+				Log:       cfg.LogPath,
+				Version:   appVersion,
+			}
+		},
 	})
 
 	runResult, runErr := runDaemon(ctx, server, func() {
@@ -569,6 +642,15 @@ func runDaemonStart(parent context.Context, deps Deps) error {
 			Outcome: daemon.OutcomeStarted,
 			Msg:     fmt.Sprintf("pid=%d socket=%s", os.Getpid(), cfg.SocketPath),
 		})
+		// Explicit `daemon run` is a recovery path: a healthy bind
+		// here means any cooldown left over from a prior implicit
+		// auto-start failure is no longer relevant. Clear it so a
+		// later TUI auto-start (after this daemon is stopped) is not
+		// gated by a stale window. Mirrors the launcher's
+		// OutcomeStarted / OutcomeAlreadyRunning cooldown clear.
+		if paths, err := dlife.PathsFor(cfg.SocketPath); err == nil {
+			_ = dlife.ClearCooldown(paths)
+		}
 	})
 
 	if runResult.Started && runErr == nil && runResult.ExitReason == daemon.RunExitContextCanceled {
@@ -599,6 +681,13 @@ func runDaemonStatus(deps Deps) error {
 	return nil
 }
 
+// runDaemonStop sends the Stop RPC over the daemon socket and waits
+// (bounded) for the socket to disappear. The handler is mode-agnostic
+// by construction: after AUR-264/265 the only daemon binary is
+// `daemon run`, and both implicit (TUI auto-start) and explicit
+// (`daemon start`) paths spawn `daemon run` detached. All three modes
+// converge on the same Server lifecycle once the daemon is bound,
+// so the same Stop RPC tears down whichever daemon owns the socket.
 func runDaemonStop(deps Deps, timeout time.Duration) error {
 	cfg, err := deps.LoadDaemonConfig(*deps.ConfigPath)
 	if err != nil {

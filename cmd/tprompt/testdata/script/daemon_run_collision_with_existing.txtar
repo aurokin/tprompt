@@ -1,0 +1,26 @@
+# Foreground `daemon run` against a socket that is already owned by
+# another daemon fails with daemon/IPC classification (exit 5).
+# Exercises the AUR-263 run-lock + stale-socket detection.
+
+env TPROMPT_UNSAFE_SKIP_TRUST_GATE=1
+
+mkdir prompts state
+
+# Start a daemon in the background via `daemon start` (so it owns the
+# run lock + socket).
+tprompt daemon start --config config.toml
+stdout 'tprompt daemon started on .*state/daemon.sock'
+
+# Now try to take the same socket with foreground `daemon run`. The
+# Listen step inside the child sees ProbeOK on the existing socket and
+# refuses with SocketUnavailableError.
+! tprompt daemon run --config config.toml
+stderr 'already running|run lock held'
+
+tprompt daemon stop --config config.toml
+stdout 'tprompt daemon stopped'
+
+-- config.toml --
+prompts_dir = "prompts"
+socket_path = "state/daemon.sock"
+log_path = "state/daemon.log"

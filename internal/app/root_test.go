@@ -50,14 +50,24 @@ func TestDaemonStopCommandExists(t *testing.T) {
 	}
 }
 
-func TestDaemonRunAliasExists(t *testing.T) {
+func TestDaemonRunIsItsOwnSubcommand(t *testing.T) {
 	root := NewRootCmd(fakeDeps(t))
 	cmd, _, err := root.Find([]string{"daemon", "run"})
 	if err != nil {
-		t.Fatalf("find daemon run alias: %v", err)
+		t.Fatalf("find daemon run: %v", err)
 	}
-	if cmd == nil || cmd.CommandPath() != "tprompt daemon start" {
-		t.Fatalf("want run to resolve to tprompt daemon start, got %v", cmd)
+	if cmd == nil || cmd.CommandPath() != "tprompt daemon run" {
+		t.Fatalf("want tprompt daemon run, got %v", cmd)
+	}
+	// Sanity: the start command must not list "run" as an alias.
+	startCmd, _, err := root.Find([]string{"daemon", "start"})
+	if err != nil {
+		t.Fatalf("find daemon start: %v", err)
+	}
+	for _, a := range startCmd.Aliases {
+		if a == "run" {
+			t.Fatalf("daemon start still aliases %q; expected separate subcommands", a)
+		}
 	}
 }
 

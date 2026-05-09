@@ -1,19 +1,22 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
+	applife "github.com/hsadler/tprompt/internal/app/lifecycle"
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
+	dlife "github.com/hsadler/tprompt/internal/daemon/lifecycle"
 	"github.com/hsadler/tprompt/internal/picker"
 	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/store"
@@ -21,6 +24,12 @@ import (
 	"github.com/hsadler/tprompt/internal/tmux"
 	"github.com/hsadler/tprompt/internal/tui"
 )
+
+// DaemonLauncher is the seam used by `daemon start` and TUI implicit
+// auto-start. Production wires applife.Launcher; tests inject fakes.
+type DaemonLauncher interface {
+	Start(ctx context.Context, intent applife.StartIntent) dlife.StartResult
+}
 
 // Deps provides the capabilities that CLI handlers need. Production code
 // supplies real implementations; tests inject fakes. Lazy factory functions
@@ -42,7 +51,7 @@ type Deps struct {
 	NewPicker                func(cfg config.Resolved) (picker.Picker, error)
 	NewDaemonClient          func(cfg config.Resolved) (daemon.Client, error)
 	NewDaemonReadinessClient func(cfg config.Resolved, timeout time.Duration) daemon.Client
-	StartDaemon              func(cfg config.Resolved, explicitConfigPath string) error
+	NewLauncher              func(cfg config.Resolved, explicitConfigPath string) DaemonLauncher
 	NewRenderer              func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error)
 	NewSubmitter             func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter
 }
@@ -83,7 +92,7 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 			return daemon.NewSocketClient(cfg.SocketPath), nil
 		},
 		NewDaemonReadinessClient: productionNewDaemonReadinessClient,
-		StartDaemon:              productionStartDaemon,
+		NewLauncher:              productionNewLauncher,
 		NewRenderer: func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error) {
 			// Stub renderers (TPROMPT_TEST_RENDERER) never touch the real
 			// clipboard, so build the Reader only for the production path.
@@ -123,30 +132,94 @@ func productionNewDaemonReadinessClient(cfg config.Resolved, timeout time.Durati
 	return daemon.NewSocketClientWithTimeouts(cfg.SocketPath, dialTimeout, timeout)
 }
 
-func productionStartDaemon(_ config.Resolved, explicitConfigPath string) error {
-	exe, err := os.Executable()
+// errLauncher is the DaemonLauncher returned when the production
+// launcher cannot be constructed at all — currently only when
+// os.Executable() fails. Start surfaces a structured StartResult with
+// ReasonConfig so callers see a clear "executable resolution failed"
+// message instead of every later spawn failing with the opaque
+// "empty executable path" error.
+type errLauncher struct {
+	detail string
+}
+
+func (e errLauncher) Start(context.Context, applife.StartIntent) dlife.StartResult {
+	return dlife.StartResult{Outcome: dlife.OutcomeFailed, Reason: dlife.ReasonConfig, Detail: e.detail}
+}
+
+// productionNewLauncher wires applife.Launcher with the production
+// status prober (a fresh socket client per probe with a tight readiness
+// timeout), the production spawner (setsid + stderr → daemon log), and a
+// pre-spawn diagnostic appender that writes a single logfmt line to the
+// daemon log so spawn-time failures still leave evidence.
+//
+// If os.Executable() fails (constrained /proc, permissions), we return
+// a fail-closed errLauncher so daemon start / TUI auto-start surface a
+// direct ReasonConfig error rather than failing later inside the
+// spawner with a generic "empty executable path" message.
+func productionNewLauncher(cfg config.Resolved, explicitConfigPath string) DaemonLauncher {
+	executable, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("resolve executable: %w", err)
+		return errLauncher{detail: "resolve executable path: " + err.Error()}
 	}
-	var args []string
-	if explicitConfigPath != "" {
-		args = append(args, "--config", explicitConfigPath)
+	return applife.New(applife.Options{
+		SocketPath: cfg.SocketPath,
+		LogPath:    cfg.LogPath,
+		ConfigPath: explicitConfigPath,
+		Executable: executable,
+		Status: productionStatusProber{
+			socketPath:  cfg.SocketPath,
+			dialTimeout: daemon.DefaultDialTimeout,
+			rpcTimeout:  500 * time.Millisecond,
+			constructor: daemon.NewSocketClientWithTimeouts,
+		},
+		Spawner:  applife.ProductionSpawner{},
+		Assessor: applife.ProductionAssessor(),
+		LogPreSpawn: func(line string) {
+			if cfg.LogPath == "" {
+				return
+			}
+			// First-run spawns: the daemon log's parent dir may not
+			// exist yet (daemon.NewLogger normally creates it). Match
+			// that behavior here so the diagnostic isn't silently lost
+			// on the user's very first start, which is exactly when
+			// they're most likely to need it.
+			if err := os.MkdirAll(filepath.Dir(cfg.LogPath), 0o700); err != nil {
+				return
+			}
+			f, err := os.OpenFile(cfg.LogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+			if err != nil {
+				return
+			}
+			defer func() { _ = f.Close() }()
+			_, _ = fmt.Fprintf(f, "time=%s %s\n", time.Now().UTC().Format(time.RFC3339Nano), line)
+		},
+	})
+}
+
+// productionStatusProber dials the daemon socket once per probe with
+// short timeouts and runs the Status RPC. ProbeOK on success;
+// ProbeUnreachable when the dial step itself failed (no socket, ENOENT,
+// ECONNREFUSED); ProbeReachableBroken when the dial succeeded but the
+// RPC could not complete — that is, some process is bound but cannot
+// answer Status, and the launcher must NOT respawn over it.
+type productionStatusProber struct {
+	socketPath  string
+	dialTimeout time.Duration
+	rpcTimeout  time.Duration
+	constructor func(path string, dial, rpc time.Duration) daemon.Client
+}
+
+func (p productionStatusProber) Probe(context.Context) (applife.ProbeResult, error) {
+	client := p.constructor(p.socketPath, p.dialTimeout, p.rpcTimeout)
+	_, err := client.Status()
+	if err == nil {
+		return applife.ProbeOK, nil
 	}
-	args = append(args, "daemon", "start")
-	// G204: exe is our own binary from os.Executable(); explicitConfigPath
-	// is the user-supplied --config flag we forward to the auto-started daemon.
-	cmd := exec.Command(exe, args...) //nolint:gosec
-	cmd.Stdin = nil
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		return err
+	var sue *daemon.SocketUnavailableError
+	if errors.As(err, &sue) {
+		return applife.ProbeUnreachable, err
 	}
-	if err := cmd.Process.Release(); err != nil {
-		return fmt.Errorf("release daemon process: %w", err)
-	}
-	return nil
+	return applife.ProbeReachableBroken, err
 }
 
 func productionLoadConfig(explicitPath string) (config.Resolved, error) {
