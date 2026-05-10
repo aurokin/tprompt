@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -12,6 +13,7 @@ import (
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
 	dlife "github.com/hsadler/tprompt/internal/daemon/lifecycle"
+	"github.com/hsadler/tprompt/internal/envutil"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
 	"github.com/hsadler/tprompt/internal/tui"
@@ -39,6 +41,14 @@ type tuiFlags struct {
 // start lock inside the launcher itself.
 var daemonAutoStartMu sync.Mutex
 
+// noAutoStartEnv is the "hard opt-out" environment variable users can
+// set to disable TUI implicit auto-start across every entry point
+// (tmux popups, scripts, mise hooks) without retrofitting flags. Only
+// the known-positive values accepted by envutil.Truthy disable auto-
+// start; unrecognized values leave it active so a typo cannot silently
+// disable it (AUR-328).
+const noAutoStartEnv = "TPROMPT_NO_AUTO_START"
+
 func newTUICmd(deps Deps) *cobra.Command {
 	var f tuiFlags
 	cmd := &cobra.Command{
@@ -62,7 +72,9 @@ default: when the TUI runs and the daemon is unreachable, tprompt
 spawns a background daemon and waits for readiness. To turn it off
 for one invocation, pass --no-daemon-auto-start (or
 --daemon-auto-start=false). To turn it off permanently, set
-'daemon_auto_start = false' in config.
+'daemon_auto_start = false' in config, or set the
+TPROMPT_NO_AUTO_START environment variable to a truthy value
+(1, true, yes, on; case-insensitive).
 
 On macOS, implicit TUI auto-start is hardcoded off (AUR-326). When
 the daemon is unreachable, the TUI refuses with a recovery hint
@@ -89,8 +101,9 @@ path.`,
 }
 
 func runTUI(deps Deps, f tuiFlags) error {
-	if f.daemonAutoStartSet && f.noDaemonAutoStart {
-		return errors.New("tui: --daemon-auto-start and --no-daemon-auto-start are mutually exclusive")
+	envOptOut, err := resolveTUIAutoStartIntent(deps, f)
+	if err != nil {
+		return err
 	}
 	// Pre-flight chain: config → store → daemon → pane. Each step short-circuits
 	// on error so the user sees the most-fundamental broken layer first.
@@ -113,7 +126,7 @@ func runTUI(deps Deps, f tuiFlags) error {
 		return err
 	}
 
-	if err := ensureTUIDaemonReady(deps, cfg, client, f.daemonAutoStartEnabled(cfg)); err != nil {
+	if err := ensureTUIDaemonReady(deps, cfg, client, daemonAutoStartEnabled(f, cfg, envOptOut)); err != nil {
 		return err
 	}
 
@@ -131,15 +144,22 @@ func runTUI(deps Deps, f tuiFlags) error {
 	}
 
 	state := buildTUIState(summaries, cfg)
+	return renderAndDispatchTUI(deps, cfg, s, client, target, state)
+}
 
-	// Build the Submitter up front so it can be injected into the Renderer.
-	// The real Model invokes Submit via a tea.Cmd for ActionPrompt and
-	// ActionClipboard alike; the stub clipboard Renderer (used by
-	// TPROMPT_TEST_RENDERER) also calls Submit itself, so runTUI never
-	// re-submits here regardless of which Renderer ran. Clipboard-reader
-	// construction is deferred to the production branch inside
-	// ProductionDeps.NewRenderer so stub-renderer testscripts don't regress
-	// on hosts without a clipboard tool.
+// renderAndDispatchTUI builds the Submitter+Renderer, runs the
+// Renderer, and translates its terminal action into a runTUI return
+// value.
+//
+// The Submitter is built up front so it can be injected into the
+// Renderer. The real Model invokes Submit via a tea.Cmd for
+// ActionPrompt and ActionClipboard alike; the stub clipboard Renderer
+// (used by TPROMPT_TEST_RENDERER) also calls Submit itself, so runTUI
+// never re-submits here regardless of which Renderer ran. Clipboard-
+// reader construction is deferred to the production branch inside
+// ProductionDeps.NewRenderer so stub-renderer testscripts don't
+// regress on hosts without a clipboard tool.
+func renderAndDispatchTUI(deps Deps, cfg config.Resolved, s store.Store, client daemon.Client, target tmux.TargetContext, state tui.State) error {
 	sub := deps.NewSubmitter(cfg, s, client, target)
 	renderer, err := deps.NewRenderer(cfg, s, sub)
 	if err != nil {
@@ -149,7 +169,6 @@ func runTUI(deps Deps, f tuiFlags) error {
 	if err != nil {
 		return err
 	}
-
 	switch result.Action {
 	case tui.ActionCancel:
 		return nil
@@ -163,8 +182,76 @@ func runTUI(deps Deps, f tuiFlags) error {
 	}
 }
 
-func (f tuiFlags) daemonAutoStartEnabled(cfg config.Resolved) bool {
+// resolveTUIAutoStartIntent validates the auto-start opt-out signals
+// before any I/O so a usage error surfaces before LoadConfig runs. It
+// returns the env-opt-out flag for the resolver to consume.
+//
+// Two checks run here:
+//  1. The flag-vs-flag mutual exclusion (`--daemon-auto-start` and
+//     `--no-daemon-auto-start` cannot coexist).
+//  2. AUR-328: `TPROMPT_NO_AUTO_START` (truthy) conflicts with an
+//     explicit `--daemon-auto-start=true`. "Explicit on" here means
+//     cobra parsed a --daemon-auto-start flag (Flag.Changed) AND its
+//     resolved boolean value is true; --daemon-auto-start=false is
+//     consistent with the env opt-out and not flagged. The aim is to
+//     never silently override the operator: a flag and an env var
+//     pointing in opposite directions is always a usage error.
+//
+// Running both checks before LoadConfig keeps the env var a hard
+// opt-out: a malformed config file cannot mask the user's intent.
+func resolveTUIAutoStartIntent(deps Deps, f tuiFlags) (bool, error) {
+	if f.daemonAutoStartSet && f.noDaemonAutoStart {
+		return false, errors.New("tui: --daemon-auto-start and --no-daemon-auto-start are mutually exclusive")
+	}
+	rawEnv := readEnv(deps.Env, noAutoStartEnv)
+	envOptOut := envutil.TruthyOf(rawEnv)
+	if envOptOut && f.daemonAutoStartSet && f.daemonAutoStart {
+		return false, fmt.Errorf("tui: --daemon-auto-start (explicit on) conflicts with %s=%s (set in environment); remove one", noAutoStartEnv, strings.TrimSpace(rawEnv))
+	}
+	return envOptOut, nil
+}
+
+// readEnv invokes the deps.Env seam once with a nil-safe default.
+// Callers that need both the raw value (for echoing in errors) and a
+// truthy decision should use this with envutil.TruthyOf so getenv is
+// not invoked twice for the same key.
+//
+// The nil guard exists because resolveTUIAutoStartIntent calls this
+// with the raw deps.Env, which production wires but tests sometimes
+// leave nil. Callsites that go through doctor's envOrEmpty wrapper
+// already see a non-nil function — for them the nil check is
+// redundant but harmless, and keeping it here lets readEnv stay the
+// single canonical seam regardless of caller.
+func readEnv(getenv func(string) string, key string) string {
+	if getenv == nil {
+		return ""
+	}
+	return getenv(key)
+}
+
+// daemonAutoStartEnabled resolves the auto-start decision from the
+// flag bag, the resolved config, and the TPROMPT_NO_AUTO_START env
+// opt-out. Callers must have first run resolveTUIAutoStartIntent so
+// the env+explicit-on conflict has already been rejected as a usage
+// error; this function therefore never has to disambiguate that case.
+//
+// Precedence (highest to lowest):
+//  1. --no-daemon-auto-start flag → off
+//  2. TPROMPT_NO_AUTO_START truthy → off
+//  3. --daemon-auto-start explicit (=true or =false) → flag value
+//  4. config.daemon_auto_start → config default
+//
+// Reachable combinations after the upstream conflict gate:
+//   - env=truthy + --daemon-auto-start=true   → rejected upstream; never reaches here.
+//   - env=truthy + --daemon-auto-start=false  → off (rule 1 if --no- alias was used, otherwise rule 2).
+//   - env=truthy alone                        → off (rule 2).
+//   - env=falsy/unset + explicit flag         → flag value (rule 3).
+//   - env=falsy/unset + no flag               → config default (rule 4).
+func daemonAutoStartEnabled(f tuiFlags, cfg config.Resolved, envOptOut bool) bool {
 	if f.noDaemonAutoStart {
+		return false
+	}
+	if envOptOut {
 		return false
 	}
 	if f.daemonAutoStartSet {

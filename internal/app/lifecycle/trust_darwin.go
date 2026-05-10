@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/hsadler/tprompt/internal/envutil"
 )
 
 // DefaultTrustGateCommandTimeout bounds each codesign/spctl invocation
@@ -130,20 +132,22 @@ func (a darwinAssessor) Assess(exec string) AssessResult {
 // the test binary is ad-hoc-signed) and by local developers running
 // `go build`-produced binaries. Known-negative values (`0`, `false`,
 // unknown strings) leave the gate active so a typo cannot silently
-// disable the preflight.
+// disable the preflight. Truthy parsing matches envutil.TruthyOf so
+// every TPROMPT_* boolean env var honors the same contract; the raw
+// value is captured up-front (rather than re-read after the truthy
+// check) so the seam is invoked once per call.
 func (a darwinAssessor) evaluateBypass() (AssessResult, bool) {
 	if a.getenv == nil {
 		return AssessResult{}, false
 	}
-	v := strings.TrimSpace(a.getenv(trustBypassEnv))
-	if v == "" {
+	rawEnv := a.getenv(trustBypassEnv)
+	if !envutil.TruthyOf(rawEnv) {
 		return AssessResult{}, false
 	}
-	switch strings.ToLower(v) {
-	case "1", "true", "yes", "on":
-		return AssessResult{Allow: true, Reason: trustBypassEnv + "=" + v + " (testing override)"}, true
-	}
-	return AssessResult{}, false
+	// The trimmed raw value names what the operator actually typed
+	// (e.g., "true" vs. "1") in the audit reason; TruthyOf has already
+	// affirmed it falls in the recognized set.
+	return AssessResult{Allow: true, Reason: trustBypassEnv + "=" + strings.TrimSpace(rawEnv) + " (testing override)"}, true
 }
 
 func (a darwinAssessor) checkToolsAvailable(execPath string) (AssessResult, bool) {

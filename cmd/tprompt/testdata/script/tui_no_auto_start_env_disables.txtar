@@ -1,0 +1,39 @@
+# AUR-328: TPROMPT_NO_AUTO_START disables TUI implicit auto-start
+# across every entry point. With the env var set and the daemon
+# unreachable, the TUI surfaces SocketUnavailableError without
+# attempting to spawn the daemon — same shape as
+# --no-daemon-auto-start. Linux/non-darwin path; on darwin
+# implicit auto-start is already hardcoded off (AUR-326) so the
+# refusal there comes from the platform policy regardless.
+
+[!exec:tmux] skip
+[darwin] skip
+
+env TMUX_TMPDIR=$SHORT_TMPDIR
+env TPROMPT_NO_AUTO_START=1
+env TPROMPT_TEST_RENDERER=cancel
+
+exec tmux new-session -d -s tuinoenv 'sleep 60'
+
+mkdir prompts state
+
+# No daemon running. With TPROMPT_NO_AUTO_START=1, the TUI must
+# surface the unreachable-socket error without auto-starting.
+# The stderr regex below intentionally couples to
+# daemon.SocketUnavailableError.Error() — a rename there must update
+# this script in lockstep with the other testscripts that match the
+# same wording.
+! tprompt tui --target-pane %0 --config config.toml
+stderr 'daemon socket .* unavailable'
+
+# Daemon was not spawned: no socket, no run lock.
+! exec test -e state/daemon.sock
+! exec test -e state/daemon.sock.lock
+
+exec tmux kill-server
+
+-- config.toml --
+prompts_dir = "prompts"
+socket_path = "state/daemon.sock"
+log_path = "state/daemon.log"
+daemon_auto_start = true
