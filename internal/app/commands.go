@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -785,6 +786,13 @@ func validateDaemonStartConfig(cfg config.Resolved) error {
 // `daemon start` (parent already preflighted, but the cost of
 // re-checking is small and the alternative — a cross-process trust
 // hand-off — is harder to reason about).
+//
+// On darwin, an os.Executable() failure must surface as a preflight
+// failure: we cannot inspect what we cannot find, and the gate is
+// load-bearing. On non-darwin the assessor is a no-op, so we tolerate
+// resolution failure and pass an empty exec — preserving the
+// pre-AUR-327 behavior for restricted /proc setups where `daemon run`
+// previously worked despite os.Executable() returning an error.
 func preflightDaemonRun(deps Deps, cfg config.Resolved) error {
 	newAssessor := deps.NewTrustAssessor
 	if newAssessor == nil {
@@ -796,11 +804,14 @@ func preflightDaemonRun(deps Deps, cfg config.Resolved) error {
 	}
 	exec, err := os.Executable()
 	if err != nil {
-		return &daemon.IPCError{
-			Path:   cfg.SocketPath,
-			Op:     "daemon run",
-			Reason: "resolve executable path: " + err.Error(),
+		if runtime.GOOS == "darwin" {
+			return &daemon.IPCError{
+				Path:   cfg.SocketPath,
+				Op:     "daemon run",
+				Reason: "resolve executable path: " + err.Error(),
+			}
 		}
+		exec = ""
 	}
 	res := assessor.Assess(exec)
 	if res.Allow {
