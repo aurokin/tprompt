@@ -7,7 +7,7 @@ GOIMPORTS_VERSION     := v0.26.0
 PKG_LIST := ./...
 
 .PHONY: all
-all: check build
+all: check test-scripts build
 
 .PHONY: build
 build:
@@ -34,6 +34,12 @@ lint:
 .PHONY: test
 test:
 	go test -race -covermode=atomic -coverprofile=coverage.txt $(PKG_LIST)
+
+# test-scripts runs the bash test harness for the macOS signing/notary
+# helpers under scripts/. Kept separate from the Go-only `check` gate.
+.PHONY: test-scripts
+test-scripts:
+	bash scripts/test/run.sh
 
 .PHONY: check
 check: fmt-check lint test

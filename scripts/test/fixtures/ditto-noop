@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Minimal ditto stub. The production script invokes:
+#   ditto -c -k --keepParent <src> <archive>
+# Parse argv explicitly (rather than relying on `${!#}` last-positional)
+# so a future reorder of ditto args doesn't silently write the empty
+# archive to a flag's value.
+set -euo pipefail
+
+src=""
+archive=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -c|-k|--keepParent)
+      shift
+      ;;
+    --*)
+      # Unknown long flag we haven't catalogued; assume it takes a
+      # value. Tighten if production starts using flags without args.
+      shift 2 || true
+      ;;
+    *)
+      if [[ -z "$src" ]]; then
+        src="$1"
+      else
+        archive="$1"
+      fi
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$archive" ]]; then
+  echo "stub: ditto missing archive path" >&2
+  exit 64
+fi
+: > "$archive"

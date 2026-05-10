@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# notarytool stub that emits a fixture-shaped Invalid submission and a
+# log document on `notarytool log`. Drives the failure-path branch of
+# notarize-macos-binary.sh (status != "Accepted" → fetch log + exit 1).
+#
+# Argv parsing is explicit so a future reorder of log_args (e.g. moving
+# --keychain to the tail) doesn't silently misroute the log payload.
+set -euo pipefail
+
+case "${1:-}" in
+  notarytool)
+    case "${2:-}" in
+      submit)
+        # Mirror xcrun-accepted's required-flag assertion so a
+        # regression that drops a flag along the failure path is
+        # caught loudly rather than silently producing a fake
+        # Invalid result.
+        argv="$*"
+        for required in --keychain-profile --team-id --wait --output-format; do
+          if [[ "$argv" != *"$required"* ]]; then
+            echo "stub: notarytool submit missing required flag $required: $argv" >&2
+            exit 64
+          fi
+        done
+        cat <<'JSON'
+{
+  "id": "bad-456-zed",
+  "status": "Invalid",
+  "message": "Submission rejected"
+}
+JSON
+        exit 0
+        ;;
+      log)
+        if [[ $# -lt 3 ]]; then
+          echo "stub: notarytool log requires <id> after subcommand: $*" >&2
+          exit 64
+        fi
+        out=""
+        shift 3 # drop "notarytool log <id>"
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --keychain-profile|--team-id|--keychain)
+              shift 2
+              ;;
+            --*)
+              shift
+              ;;
+            *)
+              out="$1"
+              shift
+              ;;
+          esac
+        done
+        if [[ -z "$out" ]]; then
+          echo "stub: notarytool log missing output path" >&2
+          exit 64
+        fi
+        cat >"$out" <<'JSON'
+{"logFormatVersion":1,"jobId":"bad-456-zed","status":"Invalid","statusSummary":"Archive contents not signed"}
+JSON
+        exit 0
+        ;;
+    esac
+    ;;
+esac
+
+exit 1
