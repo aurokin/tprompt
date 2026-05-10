@@ -126,6 +126,8 @@ For development builds (`go build`, `make build`) the user is expected to either
 - Run `tprompt daemon start` explicitly (gate bypassed).
 - Set `TPROMPT_UNSAFE_SKIP_TRUST_GATE=1` for the session.
 
+The local signing scripts and the GitHub Actions release pipeline that produces signed/notarized artifacts are documented in [macos-release-signing.md](macos-release-signing.md).
+
 ## See also
 
 - [DECISIONS.md §33](../../DECISIONS.md) — locked decision summary.
@@ -134,4 +136,5 @@ For development builds (`go build`, `make build`) the user is expected to either
 - [docs/commands/tui-flow.md](../commands/tui-flow.md) — TUI flow reference.
 - [internal/app/lifecycle/launcher.go](../../internal/app/lifecycle/launcher.go) — launcher implementation.
 - [internal/app/lifecycle/trust_darwin.go](../../internal/app/lifecycle/trust_darwin.go) — macOS trust gate.
+- [docs/lifecycle/macos-release-signing.md](macos-release-signing.md) — signing/notarization scripts and release pipeline.
 - [internal/daemon/lifecycle/](../../internal/daemon/lifecycle/) — primitives.

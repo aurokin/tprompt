@@ -87,6 +87,23 @@ material: behavior contracts, invariants, seams, failure semantics, and proof
 surfaces. Do not keep temporary PRDs or issue breakdowns in the repo after they
 are uploaded to Linear.
 
+## Install
+
+Tagged releases ship signed and notarized macOS Apple Silicon binaries
+plus Linux x86_64 / arm64 tarballs. Install via [mise](https://mise.jdx.dev/)
+(uses [ubi](https://github.com/houseabsolute/ubi)):
+
+```bash
+mise use -g ubi:aurokin/tprompt@latest
+```
+
+Or grab a tarball from the [GitHub Releases page](https://github.com/aurokin/tprompt/releases)
+and verify with `shasum -a 256 -c SHA256SUMS` (macOS) or `sha256sum --check SHA256SUMS` (Linux). The macOS binary is
+signed and notarized; see [docs/lifecycle/macos-release-signing.md](docs/lifecycle/macos-release-signing.md)
+for the details.
+
+For a from-source dev build, follow `Tool Bootstrap` and `make build` below.
+
 ## Tool Bootstrap
 
 This repo includes a project-local `mise.toml` for the pinned Go toolchain and
