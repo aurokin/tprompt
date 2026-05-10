@@ -37,21 +37,31 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Check tag matches VERSION
+        # The tag's base (everything before the first `-`) must equal
+        # the VERSION file. This accepts both final tags (`v0.1.0`)
+        # and prerelease tags (`v0.1.0-rc1`, `v0.1.0-beta.2`) that
+        # share the same base; bumping VERSION is what gates a real
+        # release. `${var%%-*}` strips at the first `-`, leaving
+        # everything before it (or the full string if no `-`).
         run: |
           tag_version="${GITHUB_REF_NAME#v}"
+          tag_base="${tag_version%%-*}"
           file_version=$(cat VERSION)
-          if [ "$tag_version" != "$file_version" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match VERSION $file_version"
+          if [ "$tag_base" != "$file_version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME (base $tag_base) does not match VERSION $file_version"
             exit 1
           fi
-          echo "Tag $GITHUB_REF_NAME matches VERSION $file_version"
+          echo "Tag $GITHUB_REF_NAME (base $tag_base) matches VERSION $file_version"
 
   build:
     name: Build (${{ matrix.os }}/${{ matrix.arch }})
     # On tag push verify must succeed; on dispatch verify is skipped.
     # Either case continues; verify failure (or cancellation) blocks.
+    # `!cancelled()` is required because GitHub injects an implicit
+    # `success()` into any custom `if:` on a job with `needs:`, which
+    # short-circuits to skipped when verify itself is skipped.
     needs: verify
-    if: needs.verify.result == 'success' || needs.verify.result == 'skipped'
+    if: ${{ !cancelled() && (needs.verify.result == 'success' || needs.verify.result == 'skipped') }}
     strategy:
       fail-fast: false
       matrix:
