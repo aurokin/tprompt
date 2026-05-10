@@ -3,6 +3,7 @@
 /dist/
 .tmp-review/
 .ws/
+scripts/test/.runtime/
 *.out
 coverage.txt
 .idea/
