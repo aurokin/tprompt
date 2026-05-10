@@ -1,6 +1,6 @@
 # Daemon lifecycle and TUI auto-start
 
-This document covers the daemon lifecycle implementation: the file-system primitives, the launcher's seams, the macOS implicit-disabled policy, and the operator escape hatches. For the locked decision summary see [DECISIONS.md §33](../../DECISIONS.md). For user-visible contracts see [EXPECTATIONS.md](../../EXPECTATIONS.md).
+This document covers the daemon lifecycle implementation: the file-system primitives, the launcher's seams, the macOS implicit-disabled policy, and the operator escape hatches. For the locked decision summary see [DECISIONS.md §33](../../DECISIONS.md). For user-visible contracts see [EXPECTATIONS.md](../../EXPECTATIONS.md). For the kernel-panic evidence and the rejected alternatives behind the macOS policy, see the [macOS daemon auto-start ADR](macos-autostart-adr.md).
 
 ## Modes
 
@@ -52,7 +52,7 @@ time=2026-05-07T02:18:34.012Z outcome=lifecycle_pre_spawn parent_pid=12345 inten
 When the macOS implicit-disabled policy refuses, the launcher emits a distinct logfmt line so the refusal is visible to operators reviewing the daemon log:
 
 ```
-outcome=lifecycle_implicit_disabled parent_pid=12345 intent=implicit_tui exec="/usr/local/bin/tprompt" socket="…" runlock="…" startlock="…" identity="…" cooldown="…" log="…" reason="implicit daemon auto-start is disabled on macOS; run 'tprompt daemon start' (background) or 'tprompt daemon run' (foreground) to start the daemon explicitly"
+outcome=lifecycle_implicit_disabled parent_pid=12345 intent=implicit_tui exec="/usr/local/bin/tprompt" socket="…" runlock="…" startlock="…" identity="…" cooldown="…" log="…" reason="daemon is not running; macOS does not implicitly auto-start the tprompt daemon. Start the daemon in a long-lived tmux pane with 'tprompt daemon run' (or 'tprompt daemon start' for a detached signed-release binary). The TUI requires a running daemon on macOS."
 ```
 
 ## Readiness wait
@@ -94,10 +94,21 @@ The assessor's algorithm is unchanged from AUR-314: `codesign --verify --strict`
 
 When the macOS implicit policy refuses, or when a non-darwin implicit auto-start is refused (cooldown, reachable-but-broken socket), the user has two escape hatches:
 
-1. **`tprompt daemon start`** — bypasses the macOS implicit-disabled policy and any cooldown. Same idempotent success behavior as if the daemon was already running.
-2. **`tprompt daemon run`** — also bypasses. Useful when the user wants to keep the daemon in the foreground for debugging.
+1. **`tprompt daemon start`** — bypasses the macOS implicit-disabled policy and any cooldown. Same idempotent success behavior as if the daemon was already running. On darwin this is supported only for signed-release binaries (the trust gate refuses ad-hoc / unsigned binaries before the spawn).
+2. **`tprompt daemon run`** — bypasses both. Useful when the user wants to keep the daemon in the foreground (long-lived tmux pane is the canonical macOS path) and is the recovery path for ad-hoc / locally built binaries.
 
-The TUI failure banner only suggests options the TUI command path accepts (i.e., it doesn't tell the user to retry `tprompt tui --some-flag` that doesn't exist). It mentions the daemon log path for post-mortem and points at the explicit-recovery commands by name.
+After AUR-329 the TUI failure banner mirrors agentscan's wording for the implicit-disabled refusal (single actionable line stating the daemon is not running, naming both recovery commands, intentionally omitting the env/flag opt-out because they do not bypass the platform refusal). The trust-gate refusal is intent-aware: a `daemon start` failure is rendered with a foreground `daemon run` recovery hint plus signed-release / `scripts/sign-macos-binary.sh` paths; a `daemon run` failure skips the foreground hint (the user is already there) and points at the signed-release / self-sign path. Both rendering variants name the binary path, the failure category, and the developer-only `TPROMPT_UNSAFE_TRUST_PREFLIGHT_BYPASS=1` escape hatch.
+
+## Opt-outs
+
+Two operator-facing opt-outs disable implicit auto-start on platforms where it is otherwise on:
+
+1. **`--no-daemon-auto-start`** flag (alias of `--daemon-auto-start=false`). Per-invocation. Mutually exclusive with `--daemon-auto-start`.
+2. **`TPROMPT_NO_AUTO_START`** env var (truthy values: `1`, `true`, `yes`, `on`; case-insensitive, whitespace-trimmed). Hard opt-out across every entry point — tmux popups, scripts, mise hooks. The check runs before `LoadConfig` so a malformed config cannot mask the operator's intent. Combining it with explicit `--daemon-auto-start=true` is rejected as a usage error; combining it with `--no-daemon-auto-start` is allowed because both express the same intent. Unrecognized values leave auto-start active so a typo does not silently disable the daemon.
+
+`tprompt doctor` flags the env var when it is set (truthy or unrecognized), so operators investigating "daemon not running" can spot the opt-out without reading lifecycle docs.
+
+On darwin the opt-outs short-circuit the implicit auto-start attempt before the platform policy fires; they do not re-enable the implicit path. The policy refusal message therefore intentionally does not mention them — suggesting them would mislead the operator about what they bypass.
 
 ## Signing/notarization expectation for releases
 
@@ -120,6 +131,6 @@ The local signing scripts and the GitHub Actions release pipeline that produces 
 - [docs/commands/tui-flow.md](../commands/tui-flow.md) — TUI flow reference.
 - [internal/app/lifecycle/launcher.go](../../internal/app/lifecycle/launcher.go) — launcher implementation.
 - [internal/app/lifecycle/policy_darwin.go](../../internal/app/lifecycle/policy_darwin.go) — macOS implicit-disabled policy.
-- [internal/app/lifecycle/trust_darwin.go](../../internal/app/lifecycle/trust_darwin.go) — trust assessor (currently dormant, AUR-327 will re-wire on explicit).
+- [internal/app/lifecycle/trust_darwin.go](../../internal/app/lifecycle/trust_darwin.go) — trust assessor (intent-aware deny rendering per AUR-329).
 - [docs/lifecycle/macos-release-signing.md](macos-release-signing.md) — signing/notarization scripts and release pipeline.
 - [internal/daemon/lifecycle/](../../internal/daemon/lifecycle/) — primitives.
