@@ -36,6 +36,11 @@ fixtures="$repo_root/scripts/test/fixtures"
 # their EXIT traps.
 runtime_root="$repo_root/scripts/test/.runtime"
 mkdir -p "$runtime_root"
+# Prune orphans from killed prior runs so disk doesn't creep. The
+# 2h cutoff is conservatively long: a healthy run finishes in seconds
+# and removes its own subdir, so a `run-*` older than that is dead.
+find "$runtime_root" -maxdepth 1 -type d -name 'run-*' -mmin +120 \
+  -exec rm -rf {} + 2>/dev/null || true
 runtime_dir="$(mktemp -d "$runtime_root/run-XXXXXX")"
 
 # Track temp dirs/files so an interrupt or mid-test failure doesn't
