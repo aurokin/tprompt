@@ -17,10 +17,17 @@ stdout $SHORT_TMPDIR
 mkdir prompts state
 
 # No daemon is running. The TUI must refuse rather than auto-spawn.
+# AUR-329: the refusal text mirrors agentscan's wording so the user
+# gets a single actionable line that names a concrete recovery
+# command. The opt-out env / flag are intentionally NOT mentioned —
+# on darwin the platform refuses regardless of those settings.
 ! tprompt tui --target-pane %0 --config config.toml
-stderr 'implicit daemon auto-start is disabled on macOS'
-stderr 'tprompt daemon start'
+stderr 'daemon is not running'
+stderr 'macOS does not implicitly auto-start the tprompt daemon'
 stderr 'tprompt daemon run'
+stderr 'TUI requires a running daemon on macOS'
+! stderr 'TPROMPT_NO_AUTO_START'
+! stderr '--no-daemon-auto-start'
 
 # Daemon was not spawned: no socket, no run lock.
 ! exec test -e state/daemon.sock

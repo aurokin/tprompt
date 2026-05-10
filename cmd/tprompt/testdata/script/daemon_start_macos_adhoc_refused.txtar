@@ -12,9 +12,16 @@ env TPROMPT_UNSAFE_TRUST_PREFLIGHT_BYPASS=
 
 mkdir prompts state
 
+# AUR-329: the refusal message names "detached daemon start" and
+# points at `tprompt daemon run` as a concrete foreground recovery,
+# plus the signed-release / self-sign script. The bypass env var is
+# also named so local development has a documented escape hatch.
 ! tprompt daemon start --config config.toml
-stderr 'failed macOS trust check'
-stderr 'ad-hoc'
+stderr 'macOS executable trust preflight rejected detached daemon start'
+stderr 'ad-hoc signature'
+stderr 'tprompt daemon run'
+stderr 'sign-macos-binary.sh'
+stderr 'TPROMPT_UNSAFE_TRUST_PREFLIGHT_BYPASS'
 
 # Daemon was not spawned: no socket, no run lock.
 ! exec test -e state/daemon.sock

@@ -813,7 +813,7 @@ func preflightDaemonRun(deps Deps, cfg config.Resolved) error {
 		}
 		exec = ""
 	}
-	res := assessor.Assess(exec)
+	res := assessor.Assess(exec, applife.IntentExplicitRun)
 	if res.Allow {
 		return nil
 	}

@@ -1024,9 +1024,11 @@ func TestTUI_DaemonAutoStartDarwinDisabled(t *testing.T) {
 		t.Fatalf("ExitCode = %d, want ExitDaemon", ExitCode(err))
 	}
 	for _, want := range []string{
-		"implicit daemon auto-start is disabled on macOS",
+		"daemon is not running",
+		"macOS does not implicitly auto-start the tprompt daemon",
 		"tprompt daemon start",
 		"tprompt daemon run",
+		"TUI requires a running daemon on macOS",
 		"/tmp/tprompt-test.log",
 	} {
 		if !strings.Contains(ipc.Error(), want) {
