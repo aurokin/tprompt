@@ -38,7 +38,7 @@ func TestDarwinAssessorIntegrationGitAllow(t *testing.T) {
 		spctl:    spctlPath,
 		run:      execRunner{},
 	}
-	res := a.Assess(IntentImplicitTUI, "/usr/bin/git")
+	res := a.Assess("/usr/bin/git")
 	if !res.Allow {
 		t.Fatalf("/usr/bin/git should be allowed (notarized, CLI-bypass branch); reason=%q", res.Reason)
 	}
@@ -74,7 +74,7 @@ func TestDarwinAssessorIntegrationAdHocReject(t *testing.T) {
 		spctl:    spctlPath,
 		run:      execRunner{},
 	}
-	res := a.Assess(IntentImplicitTUI, bin)
+	res := a.Assess(bin)
 	if res.Allow {
 		t.Fatalf("ad-hoc binary should be denied; reason=%q", res.Reason)
 	}

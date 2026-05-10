@@ -8,10 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	applife "github.com/hsadler/tprompt/internal/app/lifecycle"
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
@@ -73,6 +75,14 @@ func daemonDeps(t *testing.T, client daemon.Client) Deps {
 	}
 	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
 		return client, nil
+	}
+	// AUR-327: production wires applife.ProductionAssessor, which on
+	// darwin would invoke real codesign/spctl against the ad-hoc-signed
+	// test binary and refuse. Inject an allow-by-default fake so unit
+	// tests run deterministically across platforms. Individual tests
+	// override NewTrustAssessor when they need to model denial.
+	deps.NewTrustAssessor = func() applife.TrustAssessor {
+		return &recordingTrustAssessor{allow: true}
 	}
 	return deps
 }
@@ -640,4 +650,164 @@ func TestDaemonStop_ModeAgnosticAcrossSpawnPaths(t *testing.T) {
 	// (TestDaemonStopNoDaemonRunningPrintsClearMessage); we don't
 	// duplicate it here because the matrix is about spawn-path
 	// equivalence, not daemon presence.
+}
+
+// recordingTrustAssessor is a TrustAssessor test stub that counts
+// invocations and returns a canned verdict. Used to prove daemon
+// command paths that should NOT trigger the preflight don't, and to
+// pin the deterministic allow path on darwin unit-test runs (the
+// real ProductionAssessor would refuse the ad-hoc test binary).
+type recordingTrustAssessor struct {
+	mu    sync.Mutex
+	calls int
+	allow bool
+	deny  string
+}
+
+func (a *recordingTrustAssessor) Assess(string) applife.AssessResult {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.calls++
+	if a.allow {
+		return applife.AssessResult{Allow: true}
+	}
+	return applife.AssessResult{Allow: false, Reason: a.deny}
+}
+
+// callCount returns the number of Assess invocations.
+func (a *recordingTrustAssessor) callCount() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.calls
+}
+
+// TestDaemonRunPreflightRefusesOnTrustDenied verifies the AUR-327
+// foreground `daemon run` preflight: a denying assessor must short-
+// circuit before the daemon binds the socket, with a daemon IPC
+// error carrying the assessor's reason verbatim. Exit code maps to
+// ExitDaemon via the IPCError exit-code class.
+func TestDaemonRunPreflightRefusesOnTrustDenied(t *testing.T) {
+	dir := testutil.ShortTempDir(t)
+	socketPath := filepath.Join(dir, "daemon.sock")
+	logPath := filepath.Join(dir, "daemon.log")
+	deps := daemonDeps(t, &fakeDaemonClient{})
+	deps.LoadDaemonConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{
+			SocketPath:    socketPath,
+			LogPath:       logPath,
+			MaxPasteBytes: 1 << 20,
+		}, nil
+	}
+	deps.NewTmux = func() (tmux.Adapter, error) {
+		t.Fatal("NewTmux must not be called when preflight refuses")
+		return nil, nil
+	}
+	assessor := &recordingTrustAssessor{deny: "ad-hoc signature; install signed release"}
+	deps.NewTrustAssessor = func() applife.TrustAssessor { return assessor }
+
+	err := runDaemonForeground(context.Background(), deps)
+	var ipc *daemon.IPCError
+	if !errors.As(err, &ipc) {
+		t.Fatalf("want IPCError, got %T: %v", err, err)
+	}
+	if ExitCode(err) != ExitDaemon {
+		t.Fatalf("ExitCode = %d, want ExitDaemon", ExitCode(err))
+	}
+	if !strings.Contains(ipc.Error(), "ad-hoc signature") {
+		t.Fatalf("error = %q, want assessor reason embedded", ipc.Error())
+	}
+	if assessor.callCount() != 1 {
+		t.Fatalf("assessor.callCount() = %d, want 1", assessor.callCount())
+	}
+	// Daemon log file must NOT exist — the preflight refuses before
+	// daemon.NewLogger opens it.
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("daemon log %q was created before preflight refusal: %v", logPath, err)
+	}
+}
+
+// TestDaemonRunPreflightAcceptsOnTrustAllow verifies the happy path:
+// an allowing assessor lets `daemon run` proceed to bind. We cancel
+// the context immediately so the server unwinds without waiting on
+// real RPCs.
+func TestDaemonRunPreflightAcceptsOnTrustAllow(t *testing.T) {
+	dir := testutil.ShortTempDir(t)
+	socketPath := filepath.Join(dir, "daemon.sock")
+	logPath := filepath.Join(dir, "daemon.log")
+	deps := daemonDeps(t, &fakeDaemonClient{})
+	deps.LoadDaemonConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{
+			SocketPath:    socketPath,
+			LogPath:       logPath,
+			MaxPasteBytes: 1 << 20,
+		}, nil
+	}
+	deps.NewTmux = func() (tmux.Adapter, error) {
+		return stubTmuxAdapter{}, nil
+	}
+	assessor := &recordingTrustAssessor{allow: true}
+	deps.NewTrustAssessor = func() applife.TrustAssessor { return assessor }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := runDaemonForeground(ctx, deps); err != nil {
+		t.Fatalf("runDaemonForeground: %v", err)
+	}
+	if assessor.callCount() != 1 {
+		t.Fatalf("assessor.callCount() = %d, want 1", assessor.callCount())
+	}
+}
+
+// TestDaemonStatusDoesNotCallAssessor proves `daemon status` is
+// read-only — it never invokes the trust preflight regardless of
+// platform or daemon state.
+func TestDaemonStatusDoesNotCallAssessor(t *testing.T) {
+	t.Parallel()
+	client := &fakeDaemonClient{
+		statusFn: func() (daemon.StatusResponse, error) {
+			return daemon.StatusResponse{Socket: "/tmp/x.sock"}, nil
+		},
+	}
+	deps := daemonDeps(t, client)
+	assessor := &recordingTrustAssessor{allow: true}
+	deps.NewTrustAssessor = func() applife.TrustAssessor {
+		t.Fatal("daemon status must not invoke the trust assessor")
+		return assessor
+	}
+
+	if _, _, err := executeRootWith(t, deps, "daemon", "status"); err != nil {
+		t.Fatalf("daemon status: %v", err)
+	}
+}
+
+// TestDaemonStopDoesNotCallAssessor proves `daemon stop` never
+// invokes the trust preflight, regardless of the spawn path of the
+// daemon being stopped.
+func TestDaemonStopDoesNotCallAssessor(t *testing.T) {
+	t.Parallel()
+	statusCalls := 0
+	client := &fakeDaemonClient{
+		stopFn: func() (daemon.StopResponse, error) {
+			return daemon.StopResponse{Accepted: true}, nil
+		},
+		statusFn: func() (daemon.StatusResponse, error) {
+			statusCalls++
+			if statusCalls == 1 {
+				return daemon.StatusResponse{Socket: "/tmp/x.sock"}, nil
+			}
+			return daemon.StatusResponse{}, &daemon.SocketUnavailableError{
+				Path: "/tmp/x.sock", Reason: "connection refused",
+			}
+		},
+	}
+	deps := daemonDeps(t, client)
+	assessor := &recordingTrustAssessor{allow: true}
+	deps.NewTrustAssessor = func() applife.TrustAssessor {
+		t.Fatal("daemon stop must not invoke the trust assessor")
+		return assessor
+	}
+
+	if _, _, err := executeRootWith(t, deps, "daemon", "stop"); err != nil {
+		t.Fatalf("daemon stop: %v", err)
+	}
 }

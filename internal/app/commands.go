@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -591,6 +592,9 @@ func runDaemonForeground(parent context.Context, deps Deps) error {
 	if err := validateDaemonStartConfig(cfg); err != nil {
 		return err
 	}
+	if err := preflightDaemonRun(deps, cfg); err != nil {
+		return err
+	}
 	adapter, err := deps.NewTmux()
 	if err != nil {
 		return err
@@ -762,4 +766,60 @@ func validateDaemonStartConfig(cfg config.Resolved) error {
 		}
 	}
 	return nil
+}
+
+// preflightDaemonRun runs the macOS executable-trust preflight before
+// the foreground `daemon run` binds the socket (AUR-327). On non-darwin
+// the assessor is a no-op so the call is effectively free. The daemon
+// log is not yet open at this point; failures surface through stderr
+// via the returned error.
+//
+// We fail safe in the production direction: a nil constructor falls
+// back to applife.ProductionAssessor so a caller that forgets to wire
+// NewTrustAssessor cannot accidentally bypass the gate on darwin. On
+// non-darwin ProductionAssessor is a no-op via build-tagged
+// trust_other.go.
+//
+// We use os.Executable() rather than the launcher's resolved path
+// because `daemon run` is the entrypoint for two paths: invoked
+// directly by the user (no parent launcher), and spawned as a child by
+// `daemon start` (parent already preflighted, but the cost of
+// re-checking is small and the alternative — a cross-process trust
+// hand-off — is harder to reason about).
+//
+// On darwin, an os.Executable() failure must surface as a preflight
+// failure: we cannot inspect what we cannot find, and the gate is
+// load-bearing. On non-darwin the assessor is a no-op, so we tolerate
+// resolution failure and pass an empty exec — preserving the
+// pre-AUR-327 behavior for restricted /proc setups where `daemon run`
+// previously worked despite os.Executable() returning an error.
+func preflightDaemonRun(deps Deps, cfg config.Resolved) error {
+	newAssessor := deps.NewTrustAssessor
+	if newAssessor == nil {
+		newAssessor = applife.ProductionAssessor
+	}
+	assessor := newAssessor()
+	if assessor == nil {
+		assessor = applife.ProductionAssessor()
+	}
+	exec, err := os.Executable()
+	if err != nil {
+		if runtime.GOOS == "darwin" {
+			return &daemon.IPCError{
+				Path:   cfg.SocketPath,
+				Op:     "daemon run",
+				Reason: "resolve executable path: " + err.Error(),
+			}
+		}
+		exec = ""
+	}
+	res := assessor.Assess(exec)
+	if res.Allow {
+		return nil
+	}
+	return &daemon.IPCError{
+		Path:   cfg.SocketPath,
+		Op:     "daemon run",
+		Reason: res.Reason,
+	}
 }

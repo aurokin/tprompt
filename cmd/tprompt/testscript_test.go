@@ -32,6 +32,13 @@ func TestScript(t *testing.T) {
 				return err
 			}
 			env.Vars = append(env.Vars, "SHORT_TMPDIR="+d)
+			// The test binary built by `go test` is ad-hoc-signed on
+			// macOS, so the AUR-327 explicit-start / `daemon run` trust
+			// preflight would refuse it. Set the documented bypass so
+			// the suite runs end-to-end. The two `daemon_*_macos_adhoc_refused`
+			// testscripts explicitly clear this var to verify the gate
+			// fires on un-bypassed runs.
+			env.Vars = append(env.Vars, "TPROMPT_UNSAFE_TRUST_PREFLIGHT_BYPASS=1")
 			env.Defer(func() {
 				// Belt-and-suspenders cleanup: if a script aborts before its
 				// own `exec tmux kill-server`, kill any tmux server started on
