@@ -23,6 +23,40 @@ case "${1:-}" in
             exit 64
           fi
         done
+        # Apple grammar: `submit <archive> {auth options} [other options]`.
+        # Auth flags (--keychain-profile, --team-id, --keychain) must
+        # all appear before the first non-auth option (--wait,
+        # --output-format). Walk argv after `submit <archive>` to
+        # enforce the contract.
+        shift 2 # drop "notarytool submit"
+        if [[ $# -lt 1 ]]; then
+          echo "stub: notarytool submit missing archive positional" >&2
+          exit 64
+        fi
+        shift # drop archive
+        saw_other=0
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --keychain-profile|--team-id|--keychain)
+              if [[ "$saw_other" -eq 1 ]]; then
+                echo "stub: $1 (auth) appeared after a non-auth flag; notarytool requires auth flags first" >&2
+                exit 64
+              fi
+              shift 2
+              ;;
+            --wait)
+              saw_other=1
+              shift
+              ;;
+            --output-format)
+              saw_other=1
+              shift 2
+              ;;
+            *)
+              shift
+              ;;
+          esac
+        done
         cat <<'JSON'
 {
   "id": "abc-123-def",

@@ -120,16 +120,21 @@ archive="$workdir/$(/usr/bin/basename "$binary").zip"
 
 echo "submitting $archive"
 submission_json="$workdir/submission.json"
+# notarytool submit syntax: `submit <archive> {auth options} [other options]`.
+# Group auth flags first, then everything else, so a runtime grammar
+# tightening on Apple's side doesn't break the submit step.
 submit_args=(
   notarytool submit "$archive"
   --keychain-profile "$profile"
   --team-id "$team_id"
-  --wait
-  --output-format json
 )
 if [[ -n "$keychain" ]]; then
   submit_args+=(--keychain "$keychain")
 fi
+submit_args+=(
+  --wait
+  --output-format json
+)
 
 # Capture xcrun's exit explicitly so we can emit a real diagnostic
 # instead of a bare bash trace from `set -e -o pipefail`.
@@ -159,15 +164,19 @@ fi
 if [[ "$status" != "Accepted" ]]; then
   if [[ -n "$submission_id" ]]; then
     echo "notarization failed; fetching log for $submission_id" >&2
+    # notarytool log syntax is: `log <id> {auth options} [output-path]`.
+    # --keychain is an auth option, so it must precede the positional
+    # output path. Building log_args in two halves keeps the positional
+    # last regardless of whether --keychain is set.
     log_args=(
       notarytool log "$submission_id"
       --keychain-profile "$profile"
       --team-id "$team_id"
-      "$workdir/notary-log.json"
     )
     if [[ -n "$keychain" ]]; then
       log_args+=(--keychain "$keychain")
     fi
+    log_args+=("$workdir/notary-log.json")
     "$xcrun_bin" "${log_args[@]}" || true
     [[ -f "$workdir/notary-log.json" ]] && /bin/cat "$workdir/notary-log.json" >&2
   fi

@@ -11,16 +11,44 @@ case "${1:-}" in
   notarytool)
     case "${2:-}" in
       submit)
-        # Mirror xcrun-accepted's required-flag assertion so a
-        # regression that drops a flag along the failure path is
-        # caught loudly rather than silently producing a fake
-        # Invalid result.
+        # Mirror xcrun-accepted's required-flag and ordering
+        # assertions so a regression along the failure path is caught
+        # loudly rather than silently producing a fake Invalid result.
         argv="$*"
         for required in --keychain-profile --team-id --wait --output-format; do
           if [[ "$argv" != *"$required"* ]]; then
             echo "stub: notarytool submit missing required flag $required: $argv" >&2
             exit 64
           fi
+        done
+        shift 2 # drop "notarytool submit"
+        if [[ $# -lt 1 ]]; then
+          echo "stub: notarytool submit missing archive positional" >&2
+          exit 64
+        fi
+        shift # drop archive
+        saw_other=0
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --keychain-profile|--team-id|--keychain)
+              if [[ "$saw_other" -eq 1 ]]; then
+                echo "stub: $1 (auth) appeared after a non-auth flag; notarytool requires auth flags first" >&2
+                exit 64
+              fi
+              shift 2
+              ;;
+            --wait)
+              saw_other=1
+              shift
+              ;;
+            --output-format)
+              saw_other=1
+              shift 2
+              ;;
+            *)
+              shift
+              ;;
+          esac
         done
         cat <<'JSON'
 {
@@ -36,18 +64,37 @@ JSON
           echo "stub: notarytool log requires <id> after subcommand: $*" >&2
           exit 64
         fi
+        # Mirror Apple's documented `log <id> {auth options} [output-path]`
+        # ordering: every auth flag must precede the positional output
+        # path. If we see the positional first and then later see an
+        # auth flag, the production script reordered args wrong and we
+        # fail loudly so the test catches the regression.
         out=""
+        saw_positional=0
         shift 3 # drop "notarytool log <id>"
         while [[ $# -gt 0 ]]; do
           case "$1" in
             --keychain-profile|--team-id|--keychain)
+              if [[ "$saw_positional" -eq 1 ]]; then
+                echo "stub: $1 appeared after positional output path; notarytool requires auth flags first" >&2
+                exit 64
+              fi
               shift 2
               ;;
             --*)
+              if [[ "$saw_positional" -eq 1 ]]; then
+                echo "stub: $1 appeared after positional output path" >&2
+                exit 64
+              fi
               shift
               ;;
             *)
+              if [[ -n "$out" ]]; then
+                echo "stub: notarytool log received multiple positional args" >&2
+                exit 64
+              fi
               out="$1"
+              saw_positional=1
               shift
               ;;
           esac
