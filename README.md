@@ -98,7 +98,7 @@ mise use -g ubi:aurokin/tprompt@latest
 ```
 
 Or grab a tarball from the [GitHub Releases page](https://github.com/aurokin/tprompt/releases)
-and verify with `sha256sum --check SHA256SUMS`. The macOS binary is
+and verify with `shasum -a 256 -c SHA256SUMS` (macOS) or `sha256sum --check SHA256SUMS` (Linux). The macOS binary is
 signed and notarized; see [docs/lifecycle/macos-release-signing.md](docs/lifecycle/macos-release-signing.md)
 for the details.
 

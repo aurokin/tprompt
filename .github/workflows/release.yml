@@ -314,6 +314,9 @@ jobs:
             Or download a tarball below for your platform and verify against `SHA256SUMS`:
 
             ```sh
+            # macOS
+            shasum -a 256 -c SHA256SUMS
+            # Linux
             sha256sum --check SHA256SUMS
             ```
 

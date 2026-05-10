@@ -112,7 +112,11 @@ Verify the exported file contains a usable signing identity before
 adding it to GitHub:
 
 ```sh
-tmp_keychain="$(mktemp -u /tmp/tprompt-signing.XXXXXX.keychain-db)"
+# Atomic mkdir -p sidesteps the TOCTOU window that `mktemp -u`
+# (filename-only) would otherwise leave between path generation and
+# create-keychain.
+tmp_dir="$(mktemp -d)"
+tmp_keychain="$tmp_dir/tprompt-signing.keychain-db"
 security create-keychain -p test-password "$tmp_keychain"
 security unlock-keychain -p test-password "$tmp_keychain"
 security import DeveloperIDApplication.p12 \
@@ -123,6 +127,7 @@ security import DeveloperIDApplication.p12 \
   -k "$tmp_keychain"
 security find-identity -v -p codesigning "$tmp_keychain"
 security delete-keychain "$tmp_keychain"
+rm -rf "$tmp_dir"
 ```
 
 The output should include the same identity used in
@@ -200,6 +205,10 @@ Or download a tarball from the GitHub Releases page and verify the
 SHA256:
 
 ```sh
+# macOS (built-in via Perl)
+shasum -a 256 -c SHA256SUMS
+
+# Linux (GNU coreutils)
 sha256sum --check SHA256SUMS
 ```
 
