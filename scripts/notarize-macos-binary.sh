@@ -154,13 +154,18 @@ fi
 # this works whether notarytool emits pretty-printed or compact JSON,
 # and so a nested `"status"` inside `"message"` can't be mis-extracted.
 # `-extract <keypath> raw -o -` writes the scalar value to stdout.
-# Suppress stderr and fall back to empty so the empty-status diagnostic
-# below fires uniformly when plutil errors (missing key / invalid JSON).
-status="$("$plutil_bin" -extract status raw -o - "$submission_json" 2>/dev/null)" || status=""
-submission_id="$("$plutil_bin" -extract id raw -o - "$submission_json" 2>/dev/null)" || submission_id=""
+# Capture plutil's stderr to a side file so a missing-key / invalid-JSON
+# diagnostic survives the empty-status fallback path; surface it on the
+# diagnostic branch below alongside the raw submission JSON.
+plutil_status_err="$workdir/plutil-status.err"
+plutil_id_err="$workdir/plutil-id.err"
+status="$("$plutil_bin" -extract status raw -o - "$submission_json" 2>"$plutil_status_err")" || status=""
+submission_id="$("$plutil_bin" -extract id raw -o - "$submission_json" 2>"$plutil_id_err")" || submission_id=""
 
 if [[ -z "$status" ]]; then
   echo "error: could not parse notary status from $submission_json" >&2
+  [[ -s "$plutil_status_err" ]] && /bin/cat "$plutil_status_err" >&2
+  [[ -s "$plutil_id_err" ]] && /bin/cat "$plutil_id_err" >&2
   /bin/cat "$submission_json" >&2 || true
   exit 1
 fi

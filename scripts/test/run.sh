@@ -14,15 +14,32 @@
 # an actual build is the rest of the coverage surface.
 set -euo pipefail
 
+# The plutil stub delegates JSON parsing to python3, so the harness
+# needs python3 in PATH. Fail loudly with an actionable message rather
+# than letting the heredoc invocation produce a cryptic
+# `/usr/bin/env: 'python3': No such file or directory` halfway through.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "test harness requires python3 in PATH (used by scripts/test/fixtures/plutil-noop)" >&2
+  exit 2
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 sign_script="$repo_root/scripts/sign-macos-binary.sh"
 notarize_script="$repo_root/scripts/notarize-macos-binary.sh"
 fixtures="$repo_root/scripts/test/fixtures"
 
+# Tests mint inline stub scripts and chmod +x them. Hardened CI images
+# sometimes mount $TMPDIR with `noexec`; rooting executables under the
+# repo filesystem (which is guaranteed exec) avoids that landmine.
+# Other temp files (stdout/stderr capture, JSON fixtures) can live in
+# the OS $TMPDIR — they're never executed.
+runtime_dir="$repo_root/scripts/test/.runtime"
+mkdir -p "$runtime_dir"
+
 # Track temp dirs/files so an interrupt or mid-test failure doesn't
-# orphan them in $TMPDIR. Each helper that mints a temp registers it
-# here; the EXIT trap nukes whatever remains.
-tmp_paths=()
+# orphan them. Each helper that mints a temp registers it here; the
+# EXIT trap nukes whatever remains.
+tmp_paths=("$runtime_dir")
 cleanup() {
   local p
   for p in "${tmp_paths[@]+"${tmp_paths[@]}"}"; do
@@ -42,6 +59,14 @@ mktemp_tracked_file() {
   local f
   f="$(mktemp)"
   tmp_paths+=("$f")
+  printf '%s' "$f"
+}
+
+# For inline stub scripts that need to be executed. Lives on the repo
+# filesystem (see runtime_dir comment above).
+mktemp_exec_file() {
+  local f
+  f="$(mktemp "$runtime_dir/stub-XXXXXX")"
   printf '%s' "$f"
 }
 
@@ -93,6 +118,11 @@ run_case() {
     echo "${red}FAIL${reset} $name"
     fail_count=$((fail_count + 1))
   fi
+
+  # stdout/stderr capture files only matter for one assertion.
+  # Free them here so the cleanup array doesn't grow with the suite
+  # (handy if $TMPDIR is a small tmpfs).
+  rm -f "$stdout" "$stderr"
 }
 
 # ============================================================
@@ -234,7 +264,7 @@ run_case "notarize: team id from TPROMPT_APPLE_TEAM_ID env" 0 'notarization acce
 # and `"message"` contains a literal `"status": "junk"`. A naïve
 # substring grep would mis-extract; the production parser uses plutil's
 # JSON keypath extraction so it picks the top-level `id`/`status`.
-custom_xcrun="$(mktemp_tracked_file)"
+custom_xcrun="$(mktemp_exec_file)"
 cat >"$custom_xcrun" <<'STUB'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -276,7 +306,7 @@ run_case "notarize: status parser ignores substring keys" 0 'notarization accept
 # `--output-format json` only guarantees JSON, not pretty-printed
 # JSON, so a future Xcode emitting compact output must not break the
 # happy path. plutil parses both compact and pretty JSON the same way.
-single_line_xcrun="$(mktemp_tracked_file)"
+single_line_xcrun="$(mktemp_exec_file)"
 cat >"$single_line_xcrun" <<'STUB'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -305,7 +335,7 @@ run_case "notarize: compact single-line JSON parses successfully" 0 'notarizatio
 # Empty submission output (xcrun crashed pre-bind / format change):
 # parser must report a parseable error rather than silently fall into
 # the `status != "Accepted"` branch with an empty submission_id.
-empty_xcrun="$(mktemp_tracked_file)"
+empty_xcrun="$(mktemp_exec_file)"
 cat >"$empty_xcrun" <<'STUB'
 #!/usr/bin/env bash
 exit 0
@@ -324,7 +354,7 @@ run_case "notarize: empty submission JSON → diagnostic + exit 1" 1 '' 'could n
 # xcrun submit failure: production now captures PIPESTATUS and emits a
 # specific diagnostic instead of letting `set -e -o pipefail` abort
 # silently with a bare bash trace.
-failing_xcrun="$(mktemp_tracked_file)"
+failing_xcrun="$(mktemp_exec_file)"
 cat >"$failing_xcrun" <<'STUB'
 #!/usr/bin/env bash
 case "${1:-}" in

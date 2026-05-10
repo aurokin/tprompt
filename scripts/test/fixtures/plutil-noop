@@ -31,16 +31,20 @@ while [[ $# -gt 0 ]]; do
       out="${2:-}"
       shift 2
       ;;
-    --)
-      shift
-      ;;
     -*)
-      shift
+      # Real plutil rejects unknown flags. Mirror that strictness so a
+      # future production refactor can't silently rely on a flag the
+      # stub quietly swallows.
+      echo "stub: plutil unknown flag '$1'" >&2
+      exit 64
       ;;
     *)
-      if [[ -z "$input" ]]; then
-        input="$1"
+      # Real plutil errors on multiple input paths. Same reason.
+      if [[ -n "$input" ]]; then
+        echo "stub: plutil received multiple input paths: '$input' '$1'" >&2
+        exit 64
       fi
+      input="$1"
       shift
       ;;
   esac
@@ -59,20 +63,29 @@ fi
 /usr/bin/env python3 - "$key" "$input" "$out" <<'PY'
 import json, sys
 key, path, dest = sys.argv[1], sys.argv[2], sys.argv[3]
+# Pin UTF-8 explicitly so the stub doesn't depend on $LC_ALL / $LANG.
+# Real plutil is UTF-8 native; under LC_ALL=C python3 would otherwise
+# default to ASCII and reject any non-ASCII byte in the JSON.
 try:
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
-except (OSError, json.JSONDecodeError) as exc:
+except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
     sys.stderr.write(f"stub: plutil could not parse {path}: {exc}\n")
     sys.exit(1)
 if not isinstance(data, dict) or key not in data:
     sys.stderr.write(f"stub: plutil key '{key}' not found at top level of {path}\n")
     sys.exit(1)
 val = data[key]
+# `plutil -extract … raw` only emits scalars; non-scalar would be a
+# real plutil error. Fail loudly so the stub doesn't silently succeed
+# where production would error.
+if isinstance(val, (dict, list)):
+    sys.stderr.write(f"stub: plutil -extract raw cannot serialize non-scalar at '{key}'\n")
+    sys.exit(1)
 text = val if isinstance(val, str) else json.dumps(val)
 if dest == "" or dest == "-":
     sys.stdout.write(text + "\n")
 else:
-    with open(dest, "w") as f:
+    with open(dest, "w", encoding="utf-8") as f:
         f.write(text + "\n")
 PY
