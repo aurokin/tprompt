@@ -1,0 +1,27 @@
+name: actionlint
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+  # reviewdog/action-actionlint defaults to the github-pr-check
+  # reporter, which posts findings via the Checks API. Without
+  # checks: write the action runs but can't surface results.
+  checks: write
+  # Allows the action to post review comments on PRs when it falls
+  # back to the github-pr-review reporter.
+  pull-requests: write
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: reviewdog/action-actionlint@6fb7acc99f4a1008869fa8a0f09cfca740837d9d # v1.72.0

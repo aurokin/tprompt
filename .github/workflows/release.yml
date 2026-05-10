@@ -1,0 +1,326 @@
+name: Release
+
+# Tag push is the production publish trigger. workflow_dispatch is
+# the escape hatch for testing the build/sign/notarize path on a
+# feature branch before tagging — the release job is unconditionally
+# skipped on dispatch (gated on `github.event_name == 'push'`) so a
+# dispatch never publishes. No `dry_run` input is exposed because the
+# only sanctioned publish path is a tag push.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# Per-job permissions: build/verify only need read (artifact uploads
+# go through the actions: scope, granted by default). Only the
+# release job needs contents:write to publish. Tightening here limits
+# blast radius of any future build-step injection.
+
+# Force-pushed tags or rapid double-tags would otherwise race two
+# release publishes on the same ref. cancel-in-progress=false because
+# Apple notary submission is expensive — let the in-flight run finish.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify version
+    # Only meaningful on tag push; dispatch has no tag to compare.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Check tag matches VERSION
+        # The tag's base (everything before the first `-`) must equal
+        # the VERSION file. This accepts both final tags (`v0.1.0`)
+        # and prerelease tags (`v0.1.0-rc1`, `v0.1.0-beta.2`) that
+        # share the same base; bumping VERSION is what gates a real
+        # release. `${var%%-*}` strips at the first `-`, leaving
+        # everything before it (or the full string if no `-`).
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          tag_base="${tag_version%%-*}"
+          file_version=$(cat VERSION)
+          if [ "$tag_base" != "$file_version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME (base $tag_base) does not match VERSION $file_version"
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME (base $tag_base) matches VERSION $file_version"
+
+  build:
+    name: Build (${{ matrix.os }}/${{ matrix.arch }})
+    # On tag push verify must succeed; on dispatch verify is skipped.
+    # Either case continues; verify failure (or cancellation) blocks.
+    # `!cancelled()` is required because GitHub injects an implicit
+    # `success()` into any custom `if:` on a job with `needs:`, which
+    # short-circuits to skipped when verify itself is skipped.
+    needs: verify
+    if: ${{ !cancelled() && (needs.verify.result == 'success' || needs.verify.result == 'skipped') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: darwin
+            arch: arm64
+            runner: macos-14
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            cgo: '0'
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            cgo: '0'
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: ${{ matrix.cgo || '1' }}
+        run: |
+          mkdir -p "dist/tprompt-${{ matrix.os }}-${{ matrix.arch }}"
+          version=$(cat VERSION)
+          go build -trimpath \
+            -ldflags "-s -w -X github.com/hsadler/tprompt/internal/app.appVersion=$version" \
+            -o "dist/tprompt-${{ matrix.os }}-${{ matrix.arch }}/tprompt" \
+            ./cmd/tprompt
+
+      # The agentscan recipe is the audited shape that's known to work
+      # with hardened-runtime + secure-timestamp signing on macos-14.
+      # Notable: set-key-partition-list is required or codesign will
+      # prompt for the keychain password and CI will hang.
+      - name: Import Developer ID certificate
+        if: matrix.os == 'darwin'
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+        run: |
+          if [ -z "$APPLE_DEVELOPER_ID_CERTIFICATE_BASE64" ] || \
+             [ -z "$APPLE_KEYCHAIN_PASSWORD" ]; then
+            echo "::error::Missing Apple signing secrets"
+            exit 1
+          fi
+
+          certificate_path="$RUNNER_TEMP/developer-id.p12"
+          keychain_path="$RUNNER_TEMP/tprompt-signing.keychain-db"
+
+          echo "$APPLE_DEVELOPER_ID_CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" \
+            -P "$APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" "$HOME/Library/Keychains/login.keychain-db"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$APPLE_KEYCHAIN_PASSWORD" \
+            "$keychain_path"
+          security find-identity -v -p codesigning "$keychain_path"
+          echo "APPLE_SIGNING_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+
+      - name: Sign macOS binary
+        if: matrix.os == 'darwin'
+        env:
+          TPROMPT_CODESIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_IDENTITY }}
+        run: |
+          if [ -z "$TPROMPT_CODESIGN_IDENTITY" ]; then
+            echo "::error::Missing APPLE_DEVELOPER_IDENTITY secret"
+            exit 1
+          fi
+          scripts/sign-macos-binary.sh "dist/tprompt-${{ matrix.os }}-${{ matrix.arch }}/tprompt"
+
+      # The notary profile is keychain-scoped: the production script
+      # passes `--keychain $TPROMPT_NOTARY_KEYCHAIN` to notarytool, so
+      # the stored profile must live in that same keychain or
+      # `notarytool submit` will fail with "could not find profile".
+      - name: Store notarization credentials
+        if: matrix.os == 'darwin'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_SPECIFIC_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
+            echo "::error::Missing Apple notarization secrets"
+            exit 1
+          fi
+          xcrun notarytool store-credentials tprompt-notary \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --keychain "$APPLE_SIGNING_KEYCHAIN"
+
+      - name: Notarize macOS binary
+        if: matrix.os == 'darwin'
+        env:
+          TPROMPT_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        # APPLE_SIGNING_KEYCHAIN was exported via $GITHUB_ENV by the
+        # import step. Pass it through the shell rather than the
+        # `env:` block + ${{ env.* }} indirection so the value is
+        # whatever the runner's process environment sees, not an
+        # expression-language lookup that resolves at step-init time.
+        # Tee stdout+stderr to a durable log file. The script's EXIT
+        # trap nukes its temp workdir (where notary-log.json lives) on
+        # exit, so without this capture the upload-on-failure step
+        # below would have nothing to grab. Pipefail propagates the
+        # script's exit code through the pipe.
+        run: |
+          set -o pipefail
+          TPROMPT_NOTARY_KEYCHAIN="$APPLE_SIGNING_KEYCHAIN" \
+            scripts/notarize-macos-binary.sh \
+              "dist/tprompt-${{ matrix.os }}-${{ matrix.arch }}/tprompt" \
+            2>&1 | tee "$RUNNER_TEMP/notarize.log"
+
+      # Acceptance criterion: codesign --verify --strict --verbose=4
+      # accepts the binary; spctl either accepts or rejects ONLY with
+      # the documented CLI bypass message ("valid but does not seem
+      # to be an app"). Any other spctl denial (mis-signed, revoked,
+      # not notarized, etc.) is a real failure and must block the
+      # release. Note: `xcrun stapler` does NOT apply to bare CLI
+      # Mach-O — see the notarize script's docstring for the rationale.
+      - name: Verify macOS signature
+        if: matrix.os == 'darwin'
+        run: |
+          binary="dist/tprompt-${{ matrix.os }}-${{ matrix.arch }}/tprompt"
+          codesign --verify --strict --verbose=4 "$binary"
+
+          set +e
+          spctl --assess --type execute -vv "$binary" 2>&1 | tee spctl.out
+          spctl_rc=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$spctl_rc" -eq 0 ]; then
+            echo "spctl accepted the binary."
+          elif grep -q 'valid but does not seem to be an app' spctl.out; then
+            echo "spctl rejection is the documented CLI bypass; signature is valid."
+          else
+            echo "::error::spctl assessment denied for an unexpected reason (rc=$spctl_rc)"
+            exit 1
+          fi
+
+      # The notarize step tee'd full output (including the notary log
+      # the script cats on failure) to $RUNNER_TEMP/notarize.log.
+      # Upload it so a post-mortem doesn't require re-running.
+      - name: Upload notary log on failure
+        if: failure() && matrix.os == 'darwin'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: notary-log-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/notarize.log
+          if-no-files-found: ignore
+
+      # Ephemeral runner makes this defense-in-depth, not strictly
+      # necessary — but cheap, and protects against any future runner
+      # reuse policy change.
+      - name: Clean up keychain
+        if: always() && matrix.os == 'darwin'
+        run: |
+          if [ -n "${APPLE_SIGNING_KEYCHAIN:-}" ] && [ -f "$APPLE_SIGNING_KEYCHAIN" ]; then
+            security delete-keychain "$APPLE_SIGNING_KEYCHAIN" || true
+          fi
+
+      - name: Package
+        run: |
+          tar -C "dist/tprompt-${{ matrix.os }}-${{ matrix.arch }}" \
+              -czf "dist/tprompt-${{ matrix.os }}-${{ matrix.arch }}.tar.gz" \
+              tprompt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tprompt-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/tprompt-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
+
+  release:
+    name: Release
+    needs: build
+    # Skip on workflow_dispatch: artifacts are already uploaded above
+    # so a dispatch operator can download them from the workflow run
+    # for local validation. Tag-push is the only sanctioned publish
+    # path.
+    #
+    # Force-pushed tag note: with cancel-in-progress=false a force
+    # push enqueues a second run on the same concurrency group. Both
+    # runs eventually call action-gh-release with the same tag, and
+    # softprops/action-gh-release will overwrite the existing draft's
+    # assets — second run wins, which is the correct semantics for a
+    # force-pushed tag re-release.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          merge-multiple: true
+          # Only the binary tarballs; skip notary-log artifacts that
+          # may exist from prior failed runs (download-artifact pulls
+          # everything from this run by default, but a `pattern`
+          # restricts to release assets).
+          pattern: tprompt-*
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum -- *.tar.gz > SHA256SUMS
+
+      - name: Publish release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          # draft:true is required by AUR-324 acceptance. Operator
+          # publishes manually after verifying the tarballs locally
+          # (see docs/lifecycle/macos-release-signing.md).
+          draft: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          body: |
+            ## Install
+
+            With [mise](https://mise.jdx.dev/) (uses [ubi](https://github.com/houseabsolute/ubi) under the hood):
+
+            ```sh
+            mise use -g ubi:aurokin/tprompt@${{ github.ref_name }}
+            ```
+
+            Or download a tarball below for your platform and verify against `SHA256SUMS`:
+
+            ```sh
+            sha256sum --check SHA256SUMS
+            ```
+
+            ### Targets
+
+            - `tprompt-darwin-arm64.tar.gz` — macOS Apple Silicon (signed + notarized)
+            - `tprompt-linux-amd64.tar.gz` — Linux x86_64
+            - `tprompt-linux-arm64.tar.gz` — Linux ARM64
+
+            macOS Intel users: build from source until a future release adds an `amd64` target.

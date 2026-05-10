@@ -9,9 +9,12 @@ PKG_LIST := ./...
 .PHONY: all
 all: check test-scripts build
 
+VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
+LDFLAGS := -X github.com/hsadler/tprompt/internal/app.appVersion=$(VERSION)
+
 .PHONY: build
 build:
-	go build -o bin/tprompt ./cmd/tprompt
+	go build -trimpath -ldflags '$(LDFLAGS)' -o bin/tprompt ./cmd/tprompt
 
 .PHONY: tools
 tools:

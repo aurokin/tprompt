@@ -22,9 +22,11 @@ import (
 	"github.com/hsadler/tprompt/internal/tmux"
 )
 
-// appVersion is reported by `tprompt daemon status`. Bumped here for MVP;
-// later phases may wire it to a build-time variable.
-const appVersion = "0.1.0"
+// appVersion is reported by `tprompt daemon status`. The release workflow
+// overrides this via `-ldflags -X github.com/hsadler/tprompt/internal/app.appVersion=$(cat VERSION)`.
+// Keep the default in sync with VERSION so dev builds and tests assert the
+// same string the next tagged release will report.
+var appVersion = "0.1.0"
 
 var runDaemon = daemon.Run
 
