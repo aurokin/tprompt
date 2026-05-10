@@ -102,6 +102,74 @@ func TestDoctorNoTmux(t *testing.T) {
 	assertContains(t, stdout, "warn not inside tmux")
 }
 
+// TestDoctorNoAutoStartEnvSurfaced locks in AUR-328's observability
+// breadcrumb: when TPROMPT_NO_AUTO_START is set to a truthy value,
+// `tprompt doctor` flags the hard opt-out so operators investigating a
+// "daemon not running" warning can immediately see that the env var
+// suppressed implicit auto-start.
+func TestDoctorNoAutoStartEnvSurfaced(t *testing.T) {
+	dir := t.TempDir()
+	fs := &fakeStore{summaries: []store.Summary{}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
+	}
+	deps.Env = func(key string) string {
+		if key == noAutoStartEnv {
+			return "1"
+		}
+		return ""
+	}
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertContains(t, stdout, "warn TPROMPT_NO_AUTO_START=1 set: TUI implicit auto-start disabled")
+}
+
+// TestDoctorNoAutoStartEnvUnknownValueFlagged covers the
+// known-positive-only contract: a typo or unrecognized value (e.g.
+// "yep") leaves auto-start active, but doctor still surfaces the env
+// var so the operator notices their value did not take effect.
+func TestDoctorNoAutoStartEnvUnknownValueFlagged(t *testing.T) {
+	dir := t.TempDir()
+	fs := &fakeStore{summaries: []store.Summary{}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
+	}
+	deps.Env = func(key string) string {
+		if key == noAutoStartEnv {
+			return "yep"
+		}
+		return ""
+	}
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertContains(t, stdout, "warn TPROMPT_NO_AUTO_START=yep set but not a recognized truthy value")
+}
+
+// TestDoctorNoAutoStartEnvUnsetSilent confirms the check is silent
+// when the env var is empty or unset, so healthy operators do not see
+// an extraneous warning line.
+func TestDoctorNoAutoStartEnvUnsetSilent(t *testing.T) {
+	dir := t.TempDir()
+	fs := &fakeStore{summaries: []store.Summary{}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
+	}
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(stdout, noAutoStartEnv) {
+		t.Fatalf("doctor mentioned %s when env was unset:\n%s", noAutoStartEnv, stdout)
+	}
+}
+
 func TestDoctorDaemonReachable(t *testing.T) {
 	dir := t.TempDir()
 	fs := &fakeStore{summaries: []store.Summary{}}

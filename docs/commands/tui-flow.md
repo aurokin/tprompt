@@ -28,9 +28,20 @@ socket unreachable, it goes through the lifecycle launcher: spawns a
 detached daemon, waits briefly for readiness, then retries the daemon
 preflight before rendering. Pass `--no-daemon-auto-start` (or
 `--daemon-auto-start=false`) to skip auto-start for one invocation, or
-set `daemon_auto_start = false` in config to opt out permanently. On
-macOS, implicit auto-start is gated by an executable-trust assessment;
-explicit `tprompt daemon start` always bypasses that gate.
+set `daemon_auto_start = false` in config to opt out permanently. Set
+`TPROMPT_NO_AUTO_START` to a truthy value (`1`, `true`, `yes`, `on`;
+case-insensitive, whitespace-trimmed) to opt out across every entry
+point — including tmux popups, scripts, and mise hooks — without
+retrofitting flags. The env var is treated as a hard opt-out: it short-
+circuits before config loading, so a malformed config still cannot
+re-enable auto-start. Setting it together with `--daemon-auto-start`
+(explicit on) is rejected with a conflict error; setting it together
+with `--no-daemon-auto-start` is allowed because both express the same
+intent. Unrecognized values leave auto-start active so a typo cannot
+silently disable it; `tprompt doctor` flags both truthy and unrecognized
+values for visibility. On macOS, implicit auto-start is hardcoded off
+regardless of flag, config, or env var; explicit `tprompt daemon start`
+remains the supported launch path.
 
 ## Cancellation
 

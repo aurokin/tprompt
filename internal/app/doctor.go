@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
+	"github.com/hsadler/tprompt/internal/envutil"
 	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/store"
 )
@@ -29,6 +31,7 @@ func runDoctor(deps Deps) error {
 	}
 
 	checkTmux(w, env)
+	checkAutoStartEnv(w, env)
 	if cfgErr == nil {
 		// Clipboard check needs a loaded cfg; earlier prompt/discovery failures
 		// don't affect it.
@@ -167,6 +170,23 @@ func checkTmux(w io.Writer, env func(string) string) {
 	} else {
 		printWarn(w, "not inside tmux")
 	}
+}
+
+// checkAutoStartEnv surfaces the TPROMPT_NO_AUTO_START hard opt-out so
+// operators investigating "why didn't the daemon spawn?" can see the
+// env-var state at a glance instead of working it out from the
+// SocketUnavailableError shape (AUR-328).
+func checkAutoStartEnv(w io.Writer, env func(string) string) {
+	rawEnv := readEnv(env, noAutoStartEnv)
+	raw := strings.TrimSpace(rawEnv)
+	if raw == "" {
+		return
+	}
+	if envutil.TruthyOf(rawEnv) {
+		printWarn(w, fmt.Sprintf("%s=%s set: TUI implicit auto-start disabled (hard opt-out)", noAutoStartEnv, raw))
+		return
+	}
+	printWarn(w, fmt.Sprintf("%s=%s set but not a recognized truthy value (1/true/yes/on); auto-start unaffected", noAutoStartEnv, raw))
 }
 
 func checkClipboard(w io.Writer, env func(string) string, lookPath func(string) (string, error), cfg config.Resolved) {

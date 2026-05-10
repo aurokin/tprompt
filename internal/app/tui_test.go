@@ -633,6 +633,199 @@ func TestTUI_ConflictingAutoStartFlagsErrors(t *testing.T) {
 	}
 }
 
+// TestTUI_NoAutoStartEnvDisables verifies the AUR-328 hard opt-out:
+// TPROMPT_NO_AUTO_START set to a known-positive value short-circuits
+// auto-start before any launcher work, mirroring --no-daemon-auto-start.
+// Tests every documented truthy form to lock the case-insensitive
+// contract.
+func TestTUI_NoAutoStartEnvDisables(t *testing.T) {
+	for _, v := range []string{"1", "true", "True", "YES", "on", "  1  "} {
+		v := v
+		t.Run("v="+v, func(t *testing.T) {
+			rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+			deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
+				c.DaemonAutoStart = true
+				c.SocketPath = "/tmp/tprompt-test.sock"
+				c.LogPath = "/tmp/tprompt-test.log"
+				c.MaxPasteBytes = 1 << 20
+			})
+			deps.Env = func(k string) string {
+				if k == "TPROMPT_NO_AUTO_START" {
+					return v
+				}
+				return ""
+			}
+			deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+				return &fakeDaemonClient{
+					statusFn: func() (daemon.StatusResponse, error) {
+						return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Path: "/tmp/tprompt-test.sock"}
+					},
+				}, nil
+			}
+			deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
+				t.Fatal("NewLauncher must not be called when TPROMPT_NO_AUTO_START is truthy")
+				return nil
+			}
+
+			_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+			var su *daemon.SocketUnavailableError
+			if !errors.As(err, &su) {
+				t.Fatalf("want SocketUnavailableError (auto-start skipped), got %T: %v", err, err)
+			}
+		})
+	}
+}
+
+// TestTUI_NoAutoStartEnvKnownNegativeKeepsAutoStart verifies that
+// known-negative or unrecognized values do NOT disable auto-start.
+// This guards against the historical footgun where unrecognized
+// values silently disabled the gate.
+func TestTUI_NoAutoStartEnvKnownNegativeKeepsAutoStart(t *testing.T) {
+	skipIfDarwinTUIAutoStartDisabled(t)
+	for _, v := range []string{"0", "false", "no", "off", "bogus", ""} {
+		v := v
+		t.Run("v="+v, func(t *testing.T) {
+			rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+			deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
+				c.DaemonAutoStart = true
+				c.SocketPath = "/tmp/tprompt-test.sock"
+				c.LogPath = "/tmp/tprompt-test.log"
+				c.MaxPasteBytes = 1 << 20
+			})
+			deps.Env = func(k string) string {
+				if k == "TPROMPT_NO_AUTO_START" {
+					return v
+				}
+				return ""
+			}
+			deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+				return &fakeDaemonClient{
+					statusFn: func() (daemon.StatusResponse, error) {
+						return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Path: "/tmp/tprompt-test.sock"}
+					},
+				}, nil
+			}
+			launcher := &fakeLauncher{
+				onStart: func() dlife.StartResult {
+					return dlife.StartResult{Outcome: dlife.OutcomeStarted}
+				},
+			}
+			deps.NewLauncher = func(config.Resolved, string) DaemonLauncher { return launcher }
+
+			_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+			if err != nil {
+				t.Fatalf("want nil after auto-start, got %v", err)
+			}
+			if launcher.calls != 1 {
+				t.Fatalf("launcher.Start calls = %d, want 1 (env value %q must NOT disable auto-start)", launcher.calls, v)
+			}
+		})
+	}
+}
+
+// TestTUI_NoAutoStartEnvConflictsWithExplicitOnFlag verifies the
+// conflict semantics: --daemon-auto-start (explicit on) combined
+// with TPROMPT_NO_AUTO_START=1 is a user error, never a silent
+// precedence pick.
+func TestTUI_NoAutoStartEnvConflictsWithExplicitOnFlag(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
+		c.SocketPath = "/tmp/tprompt-test.sock"
+		c.LogPath = "/tmp/tprompt-test.log"
+		c.MaxPasteBytes = 1 << 20
+	})
+	deps.Env = func(k string) string {
+		if k == "TPROMPT_NO_AUTO_START" {
+			return "1"
+		}
+		return ""
+	}
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
+		t.Fatal("NewLauncher must not be called when env conflicts with explicit-on flag")
+		return nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0", "--daemon-auto-start")
+	if err == nil {
+		t.Fatal("want error for env-vs-explicit-on conflict, got nil")
+	}
+	if !strings.Contains(err.Error(), "TPROMPT_NO_AUTO_START") {
+		t.Fatalf("err = %v, want it to mention TPROMPT_NO_AUTO_START", err)
+	}
+	if !strings.Contains(err.Error(), "--daemon-auto-start") {
+		t.Fatalf("err = %v, want it to mention --daemon-auto-start", err)
+	}
+}
+
+// TestTUI_NoAutoStartEnvConflictEchoesActualValue verifies the
+// conflict error names the value the user actually set so an operator
+// who wrote `TPROMPT_NO_AUTO_START=true` is not told they typed
+// `=1`. This locks the raw-value-capture branch in
+// resolveTUIAutoStartIntent against a regression to the hard-coded
+// `=1` form.
+func TestTUI_NoAutoStartEnvConflictEchoesActualValue(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
+		c.SocketPath = "/tmp/tprompt-test.sock"
+		c.LogPath = "/tmp/tprompt-test.log"
+		c.MaxPasteBytes = 1 << 20
+	})
+	deps.Env = func(k string) string {
+		if k == "TPROMPT_NO_AUTO_START" {
+			return "  TRUE  "
+		}
+		return ""
+	}
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
+		t.Fatal("NewLauncher must not be called when env conflicts with explicit-on flag")
+		return nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0", "--daemon-auto-start")
+	if err == nil {
+		t.Fatal("want error for env-vs-explicit-on conflict, got nil")
+	}
+	if !strings.Contains(err.Error(), "TPROMPT_NO_AUTO_START=TRUE") {
+		t.Fatalf("err = %v, want it to echo the trimmed env value (TRUE)", err)
+	}
+}
+
+// TestTUI_NoAutoStartEnvWithExplicitOffIsAllowed verifies that the
+// redundant case (env truthy AND --daemon-auto-start=false or
+// --no-daemon-auto-start) is NOT an error. The user has set the
+// same intent twice; consistent intent must not error.
+func TestTUI_NoAutoStartEnvWithExplicitOffIsAllowed(t *testing.T) {
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
+		c.SocketPath = "/tmp/tprompt-test.sock"
+		c.LogPath = "/tmp/tprompt-test.log"
+		c.MaxPasteBytes = 1 << 20
+	})
+	deps.Env = func(k string) string {
+		if k == "TPROMPT_NO_AUTO_START" {
+			return "1"
+		}
+		return ""
+	}
+	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+		return &fakeDaemonClient{
+			statusFn: func() (daemon.StatusResponse, error) {
+				return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Path: "/tmp/tprompt-test.sock"}
+			},
+		}, nil
+	}
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
+		t.Fatal("NewLauncher must not be called when both env and flag opt out")
+		return nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0", "--no-daemon-auto-start")
+	var su *daemon.SocketUnavailableError
+	if !errors.As(err, &su) {
+		t.Fatalf("want SocketUnavailableError (auto-start skipped), got %T: %v", err, err)
+	}
+}
+
 func TestTUI_DaemonAutoStartAlreadyRunningDoesNotStart(t *testing.T) {
 	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
 	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
