@@ -43,6 +43,7 @@ const (
 	ReasonStaleSocketRefused StartFailureReason = "stale_socket_refused"
 	ReasonCooldown           StartFailureReason = "cooldown"
 	ReasonConfig             StartFailureReason = "config"
+	ReasonPolicyDisabled     StartFailureReason = "policy_disabled"
 	ReasonOther              StartFailureReason = "other"
 )
 

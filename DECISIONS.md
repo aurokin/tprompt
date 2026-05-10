@@ -307,25 +307,26 @@ The launcher lives in `internal/app/lifecycle/`; the primitives live in `interna
 
 - `StatusProber` returns `ProbeOK | ProbeUnreachable | ProbeReachableBroken`. The launcher refuses to spawn over a `ProbeReachableBroken` socket — operator recovery is required (`daemon stop` or kill).
 - `Spawner` returns a `SpawnHandle{PID}` so the readiness loop can detect child early-exit via `kill(pid, 0)` and report `ReasonChildExitedEarly` instead of timing out.
-- `TrustAssessor` runs only for `IntentImplicitTUI`. `noopAssessor` on non-darwin; `darwinAssessor` consults `/usr/bin/codesign` and `/usr/sbin/spctl` (always at absolute paths).
+- `TrustAssessor` is reserved for future explicit-start preflight (AUR-327). After AUR-326 it is not invoked on the implicit path; the macOS implicit path is refused before the launcher reaches the assessor. The non-darwin assessor remains a no-op.
 
 Command semantics:
 
-- **`tprompt daemon start`** is non-blocking. It calls the launcher with `IntentExplicitStart`, which spawns `daemon run` detached, polls `Status` until ready, and prints either `tprompt daemon started on <socket>` or `tprompt daemon already running on <socket>`. Idempotent success when a compatible daemon is already running. The trust gate is bypassed for explicit intents.
+- **`tprompt daemon start`** is non-blocking. It calls the launcher with `IntentExplicitStart`, which spawns `daemon run` detached, polls `Status` until ready, and prints either `tprompt daemon started on <socket>` or `tprompt daemon already running on <socket>`. Idempotent success when a compatible daemon is already running. Explicit intents bypass the macOS implicit-disabled policy.
 - **`tprompt daemon run`** is foreground. The same `Server.Listen → Serve → Close` lifecycle as the spawned child uses; `SIGINT`/`SIGTERM` and the `Stop` RPC both unwind through `Close`.
-- **TUI auto-start** is default-on. It calls the same launcher with `IntentImplicitTUI`. Failure records a cooldown that gates subsequent implicit starts; explicit `daemon start`/`daemon run` always bypass cooldown and trust gate.
+- **TUI auto-start** is default-on on Linux and other non-macOS platforms. It calls the same launcher with `IntentImplicitTUI`. Failure records a cooldown that gates subsequent implicit starts; explicit `daemon start`/`daemon run` always bypass the cooldown.
 - **`tprompt daemon stop`** is mode-agnostic. It dials the configured socket, issues the `Stop` RPC, and waits (bounded) for the socket to disappear. Works for daemons spawned by any of the three modes because all converge on the same `Server.Close` cleanup.
 - **`tprompt daemon status`** is a read-only probe. Never auto-starts the daemon.
 - **`tprompt send`, `tprompt paste`, `tprompt doctor`** never contact or auto-start the daemon. Direct delivery and diagnostics are daemon-free.
 
 A "compatible daemon" is one reachable at the configured socket whose `Status` RPC succeeds. Reachable-but-broken is its own classification with a manual-recovery message.
 
-macOS trust gate (`internal/app/lifecycle/trust_darwin.go`):
+macOS implicit-disabled policy (`internal/app/lifecycle/policy_darwin.go`, AUR-326):
 
-- Runs only for `IntentImplicitTUI`.
-- Honors `TPROMPT_UNSAFE_SKIP_TRUST_GATE` only when set to `1` / `true` / `yes` / `on` (case-insensitive). Other values keep the gate active.
-- Order: `codesign --verify --strict` → `codesign -d -vv` (ad-hoc detection via `Signature=adhoc` or `flags=...adhoc...` on `CodeDirectory`) → `spctl --assess --type execute` (CLI-bypass for "the code is valid but does not seem to be an app").
-- Tools missing fails closed with a recovery hint pointing at `tprompt daemon start`. The macOS base system always ships these binaries; absence is exotic.
+- `IntentImplicitTUI` is refused on darwin before the launcher reaches the cooldown, start lock, trust assessor, or spawn path. The launcher returns `OutcomeFailed` with `ReasonPolicyDisabled` and emits a `lifecycle_implicit_disabled` diagnostic.
+- The TUI command path mirrors the refusal before constructing the launcher: `autoStartTUIDaemon` consults the same policy seam and surfaces the result through the standard daemon IPC error wrapper (`ExitDaemon` exit code).
+- The refusal message names both recovery commands (`tprompt daemon start` and `tprompt daemon run`) so the user can act on the failure without consulting docs.
+- `IntentExplicitStart` and `IntentExplicitRun` bypass the policy. There is no environment override that re-enables the implicit path; the policy is hardcoded.
+- Rationale: macOS launch evaluation triggered repeated kernel panics in `AppleSystemPolicy` / `AMFI` / `syspolicyd` during implicit auto-start on real release binaries. The platform owns the cost of restoring implicit auto-start; until then, explicit intent is the contract.
 
 The full narrative — including signing/notarization expectations and rejection-class behavior — lives in [docs/lifecycle/auto-start.md](docs/lifecycle/auto-start.md).
 

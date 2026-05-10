@@ -1,14 +1,6 @@
 # `tprompt daemon start` spawns a detached daemon, `daemon status` reports
 # it running, `daemon stop` cleans it up. End-to-end roundtrip across the
 # AUR-265 background launcher and the AUR-263 lifecycle primitives.
-#
-# We set TPROMPT_UNSAFE_SKIP_TRUST_GATE=1 because the test binary is
-# ad-hoc-signed by `go test` on macOS, which the AUR-314 trust gate would
-# reject for implicit auto-start. The override is unused for explicit
-# `daemon start`/`daemon stop` (those bypass the gate via StartIntent),
-# but exporting it keeps the script identical across CI hosts and
-# preserves the gate's logging semantics for inspection.
-env TPROMPT_UNSAFE_SKIP_TRUST_GATE=1
 
 mkdir prompts state
 

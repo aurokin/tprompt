@@ -72,7 +72,7 @@ func TestDarwinAssessorAdHocSignatureViaSignatureLine(t *testing.T) {
 		cs + "/-d":       {exit: 0, stderr: "Executable=/x\nFormat=Mach-O\nSignature=adhoc\n"},
 		sp + "/--assess": {exit: 0},
 	}}
-	a := darwinAssessor{codesign: cs, spctl: sp, getenv: func(string) string { return "" }, run: r}
+	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
 	res := a.Assess(IntentImplicitTUI, "/usr/local/bin/tprompt")
 	if res.Allow {
 		t.Fatal("ad-hoc signature should be denied")
@@ -85,9 +85,6 @@ func TestDarwinAssessorAdHocSignatureViaSignatureLine(t *testing.T) {
 	}
 	if !strings.Contains(res.Reason, "tprompt daemon start") {
 		t.Errorf("reason = %q, want recovery hint", res.Reason)
-	}
-	if !strings.Contains(res.Reason, "TPROMPT_UNSAFE_SKIP_TRUST_GATE") {
-		t.Errorf("reason = %q, want override hint", res.Reason)
 	}
 }
 
@@ -102,7 +99,7 @@ func TestDarwinAssessorAdHocSignatureViaCodeDirectoryFlags(t *testing.T) {
 		cs + "/-d":       {exit: 0, stderr: stderr},
 		sp + "/--assess": {exit: 0},
 	}}
-	a := darwinAssessor{codesign: cs, spctl: sp, getenv: func(string) string { return "" }, run: r}
+	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
 	res := a.Assess(IntentImplicitTUI, "/x")
 	if res.Allow {
 		t.Fatal("flags=adhoc should be denied")
@@ -118,7 +115,7 @@ func TestDarwinAssessorInvalidSignature(t *testing.T) {
 	r := &fakeRunner{canned: map[string]runResult{
 		cs + "/--verify": {exit: 1, stderr: "/x: code object is not signed at all\nIn architecture: arm64\n"},
 	}}
-	a := darwinAssessor{codesign: cs, spctl: sp, getenv: func(string) string { return "" }, run: r}
+	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
 	res := a.Assess(IntentImplicitTUI, "/x")
 	if res.Allow {
 		t.Fatal("invalid signature should be denied")
@@ -148,7 +145,7 @@ func TestDarwinAssessorGatekeeperRejected(t *testing.T) {
 		cs + "/-d":       {exit: 0, stderr: "Authority=Apple\nSignature size=4523\n"},
 		sp + "/--assess": {exit: 3, stderr: "/x: rejected\nsource=Unverified\n"},
 	}}
-	a := darwinAssessor{codesign: cs, spctl: sp, getenv: func(string) string { return "" }, run: r}
+	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
 	res := a.Assess(IntentImplicitTUI, "/x")
 	if res.Allow {
 		t.Fatal("Gatekeeper rejection should be denied")
@@ -168,7 +165,7 @@ func TestDarwinAssessorValidCLIBypass(t *testing.T) {
 		cs + "/-d":       {exit: 0, stderr: "Authority=Apple\n"},
 		sp + "/--assess": {exit: 3, stderr: stderr},
 	}}
-	a := darwinAssessor{codesign: cs, spctl: sp, getenv: func(string) string { return "" }, run: r}
+	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
 	res := a.Assess(IntentImplicitTUI, "/x")
 	if !res.Allow {
 		t.Fatalf("CLI bypass should be allowed; reason=%q", res.Reason)
@@ -183,7 +180,7 @@ func TestDarwinAssessorFullyAllowed(t *testing.T) {
 		cs + "/-d":       {exit: 0, stderr: "Authority=Apple\n"},
 		sp + "/--assess": {exit: 0},
 	}}
-	a := darwinAssessor{codesign: cs, spctl: sp, getenv: func(string) string { return "" }, run: r}
+	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
 	res := a.Assess(IntentImplicitTUI, "/x")
 	if !res.Allow {
 		t.Fatalf("fully signed + Gatekeeper-accepted should allow; reason=%q", res.Reason)
@@ -196,7 +193,6 @@ func TestDarwinAssessorToolsMissing(t *testing.T) {
 	a := darwinAssessor{
 		codesign: "/nope/codesign",
 		spctl:    "/usr/bin/true",
-		getenv:   func(string) string { return "" },
 		run:      r,
 	}
 	res := a.Assess(IntentImplicitTUI, "/x")
@@ -208,82 +204,6 @@ func TestDarwinAssessorToolsMissing(t *testing.T) {
 	}
 	if len(r.calls) != 0 {
 		t.Errorf("runner invoked despite missing tool: %v", r.calls)
-	}
-}
-
-func TestDarwinAssessorOverrideShortCircuits(t *testing.T) {
-	t.Parallel()
-	for _, v := range []string{"1", "true", "True", "YES", "on"} {
-		v := v
-		t.Run("v="+v, func(t *testing.T) {
-			t.Parallel()
-			cs, sp := availablePaths()
-			r := &fakeRunner{}
-			a := darwinAssessor{
-				codesign: cs,
-				spctl:    sp,
-				getenv: func(k string) string {
-					if k == trustOverrideEnv {
-						return v
-					}
-					return ""
-				},
-				run: r,
-			}
-			res := a.Assess(IntentImplicitTUI, "/x")
-			if !res.Allow {
-				t.Fatalf("override %q should allow; reason=%q", v, res.Reason)
-			}
-			if !strings.Contains(res.Reason, "debug override") {
-				t.Errorf("reason = %q, want 'debug override'", res.Reason)
-			}
-			if !strings.Contains(res.Reason, v) {
-				t.Errorf("reason = %q, want literal %q", res.Reason, v)
-			}
-			if len(r.calls) != 0 {
-				t.Errorf("runner invoked despite debug override: %v", r.calls)
-			}
-		})
-	}
-}
-
-func TestDarwinAssessorOverrideKnownNegativeKeepsGate(t *testing.T) {
-	t.Parallel()
-	for _, v := range []string{"0", "false", "no", "off", "bogus"} {
-		v := v
-		t.Run("v="+v, func(t *testing.T) {
-			t.Parallel()
-			cs, sp := availablePaths()
-			// Wire a fully-allowed flow so we can confirm the gate ran
-			// (rather than short-circuiting to allow due to mistaken
-			// override interpretation).
-			r := &fakeRunner{canned: map[string]runResult{
-				cs + "/--verify": {exit: 0},
-				cs + "/-d":       {exit: 0, stderr: "Authority=Apple\n"},
-				sp:               {exit: 0},
-			}}
-			a := darwinAssessor{
-				codesign: cs,
-				spctl:    sp,
-				getenv: func(k string) string {
-					if k == trustOverrideEnv {
-						return v
-					}
-					return ""
-				},
-				run: r,
-			}
-			res := a.Assess(IntentImplicitTUI, "/x")
-			if !res.Allow {
-				t.Fatalf("known-negative override %q should leave gate active and reach allow path; reason=%q", v, res.Reason)
-			}
-			if strings.Contains(res.Reason, "debug override") {
-				t.Errorf("reason = %q, must NOT mention debug override", res.Reason)
-			}
-			if len(r.calls) == 0 {
-				t.Errorf("runner not invoked despite known-negative value %q", v)
-			}
-		})
 	}
 }
 
@@ -304,7 +224,6 @@ func TestDarwinAssessorBoundsHangingToolWithTimeout(t *testing.T) {
 	a := darwinAssessor{
 		codesign: cs,
 		spctl:    sp,
-		getenv:   func(string) string { return "" },
 		run:      hangingRunner{},
 		timeout:  25 * time.Millisecond,
 	}

@@ -198,6 +198,15 @@ func (l *Launcher) Start(ctx context.Context, intent StartIntent) dlife.StartRes
 		return res
 	}
 
+	// Platform policy: macOS hardcodes implicit auto-start off (AUR-326).
+	// The check sits AFTER the probe so a daemon that another process
+	// already started is reported as OutcomeAlreadyRunning rather than
+	// being refused. It sits BEFORE the cooldown / start lock / spawn
+	// path so disabled intents never touch the cooldown marker.
+	if res, gated := l.applyImplicitPolicy(intent, paths); gated {
+		return res
+	}
+
 	if res, gated := l.checkCooldown(paths, intent); gated {
 		return res
 	}
@@ -281,6 +290,22 @@ func (l *Launcher) checkCooldown(paths dlife.Paths, intent StartIntent) (dlife.S
 			cd.Until.Format(time.RFC3339), cd.Reason, cd.LogPath)), true
 }
 
+// applyImplicitPolicy short-circuits the launcher when the platform
+// policy disables this StartIntent. On darwin, IntentImplicitTUI is
+// always disabled (AUR-326). The policy fires before the cooldown
+// check and the start lock so a disabled intent never records a
+// cooldown, never runs the trust assessor, and never spawns. A
+// dedicated diagnostic line is still emitted so operators can see
+// the refusal in the daemon log.
+func (l *Launcher) applyImplicitPolicy(intent StartIntent, paths dlife.Paths) (dlife.StartResult, bool) {
+	disabled, reason := MacOSImplicitAutoStartDisabled(intent)
+	if !disabled {
+		return dlife.StartResult{}, false
+	}
+	l.logImplicitDisabled(intent, paths, reason)
+	return failed(dlife.ReasonPolicyDisabled, reason), true
+}
+
 // runTrustGate applies the macOS executable trust assessment for
 // implicit starts. Explicit intents always bypass.
 func (l *Launcher) runTrustGate(intent StartIntent) (AssessResult, dlife.StartResult, bool) {
@@ -357,17 +382,38 @@ func (l *Launcher) recordImplicitFailure(paths dlife.Paths, intent StartIntent, 
 	_ = dlife.RecordCooldown(paths, cd)
 }
 
+// writeLifecyclePrelude emits the shared `outcome=... parent_pid=...
+// intent=... exec=... socket=... runlock=... startlock=... identity=...
+// cooldown=... log=... [config=...]` head used by every lifecycle
+// diagnostic. Per-outcome suffixes are appended by the caller.
+func (l *Launcher) writeLifecyclePrelude(b *strings.Builder, outcome string, intent StartIntent, paths dlife.Paths) {
+	fmt.Fprintf(b, "outcome=%s parent_pid=%d intent=%s exec=%q socket=%q runlock=%q startlock=%q identity=%q cooldown=%q log=%q",
+		outcome, os.Getpid(), intent, l.opts.Executable, l.opts.SocketPath,
+		paths.RunLock, paths.StartLock, paths.Identity, paths.CooldownMark, l.opts.LogPath)
+	if l.opts.ConfigPath != "" {
+		fmt.Fprintf(b, " config=%q", l.opts.ConfigPath)
+	}
+}
+
+// logImplicitDisabled emits the diagnostic line for a policy refusal.
+// Shares the prelude with logPreSpawn; the outcome key is distinct so
+// log readers can filter by event type.
+func (l *Launcher) logImplicitDisabled(intent StartIntent, paths dlife.Paths, reason string) {
+	if l.opts.LogPreSpawn == nil {
+		return
+	}
+	var b strings.Builder
+	l.writeLifecyclePrelude(&b, "lifecycle_implicit_disabled", intent, paths)
+	fmt.Fprintf(&b, " reason=%q", reason)
+	l.opts.LogPreSpawn(b.String())
+}
+
 func (l *Launcher) logPreSpawn(intent StartIntent, paths dlife.Paths, assess AssessResult) {
 	if l.opts.LogPreSpawn == nil {
 		return
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "outcome=lifecycle_pre_spawn parent_pid=%d intent=%s exec=%q socket=%q runlock=%q startlock=%q identity=%q cooldown=%q log=%q",
-		os.Getpid(), intent, l.opts.Executable, l.opts.SocketPath,
-		paths.RunLock, paths.StartLock, paths.Identity, paths.CooldownMark, l.opts.LogPath)
-	if l.opts.ConfigPath != "" {
-		fmt.Fprintf(&b, " config=%q", l.opts.ConfigPath)
-	}
+	l.writeLifecyclePrelude(&b, "lifecycle_pre_spawn", intent, paths)
 	switch {
 	case !assess.Allow:
 		fmt.Fprintf(&b, " trust=denied reason=%q", assess.Reason)

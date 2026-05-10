@@ -56,7 +56,7 @@ set. Outside tmux, it prints help.
 - Duplicate prompt IDs within a source tier are invalid; global/project collisions resolve through the documented priority policy.
 - Frontmatter is metadata only; only the markdown body is delivered.
 - Direct `send` and `paste` deliver synchronously through tmux. They never start, contact, or depend on the daemon.
-- TUI selections are submitted to a local daemon for verified deferred delivery. The daemon auto-starts on demand by default; see [`docs/lifecycle/auto-start.md`](docs/lifecycle/auto-start.md) for the modes, the macOS trust gate, and the `TPROMPT_UNSAFE_SKIP_TRUST_GATE` debug override.
+- TUI selections are submitted to a local daemon for verified deferred delivery. On Linux the daemon auto-starts on demand by default; on macOS implicit auto-start is hardcoded off, and the user runs `tprompt daemon start` (or `daemon run`) explicitly. See [`docs/lifecycle/auto-start.md`](docs/lifecycle/auto-start.md) for the modes and the macOS policy.
 - Default delivery mode is bracketed paste via `tmux load-buffer` and `paste-buffer -p`.
 - `type` mode is available as a fallback using `send-keys -l`.
 - `--enter` is opt-in and sends Enter outside the paste wrapper.

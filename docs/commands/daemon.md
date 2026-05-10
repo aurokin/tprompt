@@ -36,17 +36,24 @@ local socket. If no daemon is reachable, it reports `daemon not running`. If
 shutdown is acknowledged but the socket remains reachable past the bounded
 graceful wait, the command exits with a daemon/IPC error.
 
-`tprompt tui` (and bare `tprompt` dispatching into TUI inside tmux) auto-starts
-the daemon by default when the socket is unreachable: it goes through the same
-lifecycle launcher used by explicit `tprompt daemon start`, waits briefly for
-readiness, and retries the daemon status check. Pass `--no-daemon-auto-start`
-(or `--daemon-auto-start=false`) for a single invocation, or set
-`daemon_auto_start = false` in config to opt out permanently. Duplicate
-daemon processes are prevented by the launcher's start-lock plus run-lock
-ownership behavior. `tprompt daemon status` remains a read-only lifecycle
-check and never starts the daemon implicitly. On macOS, implicit auto-start
-is gated by an executable-trust check; explicit `tprompt daemon start` always
-bypasses that gate.
+On Linux and other non-macOS platforms, `tprompt tui` (and bare `tprompt`
+dispatching into TUI inside tmux) auto-starts the daemon by default when the
+socket is unreachable: it goes through the same lifecycle launcher used by
+explicit `tprompt daemon start`, waits briefly for readiness, and retries the
+daemon status check. Pass `--no-daemon-auto-start` (or
+`--daemon-auto-start=false`) for a single invocation, or set
+`daemon_auto_start = false` in config to opt out permanently.
+
+On macOS, implicit TUI auto-start is hardcoded off (AUR-326): a TUI invocation
+that finds the daemon unreachable refuses with a recovery hint pointing at
+`tprompt daemon start` (background) and `tprompt daemon run` (foreground).
+Neither config nor flag re-enables the implicit path. See
+[`docs/lifecycle/auto-start.md`](../lifecycle/auto-start.md) for the
+rationale.
+
+Duplicate daemon processes are prevented by the launcher's start-lock plus
+run-lock ownership behavior. `tprompt daemon status` remains a read-only
+lifecycle check and never starts the daemon implicitly.
 
 ## Job handling
 

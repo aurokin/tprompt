@@ -36,7 +36,6 @@ func TestDarwinAssessorIntegrationGitAllow(t *testing.T) {
 	a := darwinAssessor{
 		codesign: codesignPath,
 		spctl:    spctlPath,
-		getenv:   func(string) string { return "" },
 		run:      execRunner{},
 	}
 	res := a.Assess(IntentImplicitTUI, "/usr/bin/git")
@@ -73,7 +72,6 @@ func TestDarwinAssessorIntegrationAdHocReject(t *testing.T) {
 	a := darwinAssessor{
 		codesign: codesignPath,
 		spctl:    spctlPath,
-		getenv:   func(string) string { return "" },
 		run:      execRunner{},
 	}
 	res := a.Assess(IntentImplicitTUI, bin)

@@ -57,11 +57,18 @@ from a tmux popup binding that passes the originating context, e.g.:
   tprompt tui --target-pane '#{pane_id}' --client-tty '#{client_tty}' \
     --session-id '#{session_id}'
 
-Daemon auto-start is on by default: when the TUI runs and the daemon
-is unreachable, tprompt spawns a background daemon and waits for
-readiness. To turn it off for one invocation, pass
---no-daemon-auto-start (or --daemon-auto-start=false). To turn it off
-permanently, set 'daemon_auto_start = false' in config.`,
+On Linux and other non-macOS platforms, daemon auto-start is on by
+default: when the TUI runs and the daemon is unreachable, tprompt
+spawns a background daemon and waits for readiness. To turn it off
+for one invocation, pass --no-daemon-auto-start (or
+--daemon-auto-start=false). To turn it off permanently, set
+'daemon_auto_start = false' in config.
+
+On macOS, implicit TUI auto-start is hardcoded off (AUR-326). When
+the daemon is unreachable, the TUI refuses with a recovery hint
+pointing at 'tprompt daemon start' (background) or 'tprompt daemon
+run' (foreground). Neither config nor flag re-enables the implicit
+path.`,
 		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			return runTUI(deps, f)
@@ -189,6 +196,24 @@ func autoStartTUIDaemon(deps Deps, cfg config.Resolved, client daemon.Client) er
 			return err
 		}
 	}
+
+	// Platform policy: macOS hardcodes TUI implicit auto-start off
+	// (AUR-326). Refuse here, before constructing a Launcher we know
+	// would just refuse with the same reason. Keeps the cold-start
+	// failure surface localized to the TUI flow and lets test seams
+	// assert NewLauncher was never invoked on darwin.
+	if disabled, reason := applife.MacOSImplicitAutoStartDisabled(applife.IntentImplicitTUI); disabled {
+		return &daemon.IPCError{
+			Path: cfg.SocketPath,
+			Op:   "auto-start daemon",
+			Reason: launcherFailureMessage(dlife.StartResult{
+				Outcome: dlife.OutcomeFailed,
+				Reason:  dlife.ReasonPolicyDisabled,
+				Detail:  reason,
+			}, cfg.LogPath),
+		}
+	}
+
 	if err := validateDaemonStartConfig(cfg); err != nil {
 		return err
 	}
