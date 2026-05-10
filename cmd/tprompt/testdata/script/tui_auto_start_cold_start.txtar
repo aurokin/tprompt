@@ -1,14 +1,13 @@
 # Cold-start TUI auto-spawns the daemon via the AUR-265/AUR-266
 # launcher path. Verifies the AUR-266 default-on contract end-to-end.
-# Sets TPROMPT_UNSAFE_SKIP_TRUST_GATE=1 because the test binary built
-# by `go test` is ad-hoc-signed; the AUR-314 trust gate would
-# otherwise reject implicit auto-start. The override exercises the
-# documented developer-recovery path.
+# AUR-326 hardcoded implicit auto-start off on macOS, so this script
+# is gated [!darwin]; the darwin contract (refusal with explicit
+# recovery hint) is asserted by tui_macos_implicit_disabled.txtar.
 
 [!exec:tmux] skip
+[darwin] skip
 
 env TMUX_TMPDIR=$SHORT_TMPDIR
-env TPROMPT_UNSAFE_SKIP_TRUST_GATE=1
 env TPROMPT_TEST_RENDERER=cancel
 
 exec tmux new-session -d -s tuiauto 'sleep 60'

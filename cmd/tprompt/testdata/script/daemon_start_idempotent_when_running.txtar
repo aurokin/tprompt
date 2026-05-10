@@ -2,8 +2,6 @@
 # "already running" and does not spawn a duplicate. Exercises the
 # AUR-265 launcher's pre-lock probe short-circuit.
 
-env TPROMPT_UNSAFE_SKIP_TRUST_GATE=1
-
 mkdir prompts state
 
 # First start spawns the daemon.

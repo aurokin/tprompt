@@ -30,11 +30,6 @@ const (
 	spctlPath    = "/usr/sbin/spctl"
 )
 
-// trustOverrideEnv, when set to a known-positive value, short-circuits
-// the assessor with a "debug override" reason. Documented in
-// MILESTONE_PLAN.md §3 and (will be) DECISIONS.md after AUR-270.
-const trustOverrideEnv = "TPROMPT_UNSAFE_SKIP_TRUST_GATE"
-
 // runner is the seam used by darwinAssessor to invoke codesign/spctl.
 // Production wires execRunner; tests inject a fake.
 type runner interface {
@@ -69,13 +64,11 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 type darwinAssessor struct {
 	codesign string
 	spctl    string
-	getenv   func(string) string
 	run      runner
 	// timeout bounds each codesign/spctl invocation. A zero value
 	// disables the bound (used by unit tests with synchronous fake
 	// runners). Production wires DefaultTrustGateCommandTimeout so a
-	// stuck OS security tool cannot pin the launcher's start lock
-	// indefinitely while implicit auto-start callers queue behind it.
+	// stuck OS security tool cannot pin the launcher indefinitely.
 	timeout time.Duration
 }
 
@@ -84,23 +77,21 @@ type darwinAssessor struct {
 // no-op via trust_other.go. The launcher (not the assessor) appends
 // the daemon log path to the failure message, so this constructor
 // takes no arguments.
+//
+// As of AUR-326, the launcher does not invoke this assessor on the
+// implicit-TUI path (implicit auto-start is hardcoded off on macOS).
+// AUR-327 will reintroduce the assessor on the explicit-start path.
 func ProductionAssessor() TrustAssessor {
 	return darwinAssessor{
 		codesign: codesignPath,
 		spctl:    spctlPath,
-		getenv:   os.Getenv,
 		run:      execRunner{},
 		timeout:  DefaultTrustGateCommandTimeout,
 	}
 }
 
-// Assess implements TrustAssessor. The launcher only calls this for
-// IntentImplicitTUI; other intents are bypassed in
-// Launcher.runTrustGate.
+// Assess implements TrustAssessor.
 func (a darwinAssessor) Assess(intent StartIntent, exec string) AssessResult {
-	if r, ok := a.evaluateOverride(); ok {
-		return r
-	}
 	if r, ok := a.checkToolsAvailable(exec); !ok {
 		return r
 	}
@@ -115,25 +106,6 @@ func (a darwinAssessor) Assess(intent StartIntent, exec string) AssessResult {
 		return r
 	}
 	return AssessResult{Allow: true}
-}
-
-// evaluateOverride short-circuits the gate when the env var is set to
-// a known-positive value. Known-negative values (`0`, `false`, ...)
-// leave the gate active. The decision is logged into the AssessResult
-// reason field on the bypass path so operators can see what they set.
-func (a darwinAssessor) evaluateOverride() (AssessResult, bool) {
-	v := strings.TrimSpace(a.getenv(trustOverrideEnv))
-	if v == "" {
-		return AssessResult{}, false
-	}
-	switch strings.ToLower(v) {
-	case "1", "true", "yes", "on":
-		return AssessResult{Allow: true, Reason: trustOverrideEnv + "=" + v + " (debug override)"}, true
-	}
-	// Unknown value: gate stays active. We surface the literal value
-	// later if the gate denies, so an operator sees they typed `0`
-	// instead of unsetting the var.
-	return AssessResult{}, false
 }
 
 func (a darwinAssessor) checkToolsAvailable(execPath string) (AssessResult, bool) {
@@ -245,8 +217,8 @@ func (a darwinAssessor) deny(execPath, reason string) AssessResult {
 	// internal/app/tui.go so we don't end up with two copies of it
 	// when the failure surfaces in the TUI banner.
 	msg := fmt.Sprintf(
-		"daemon executable %q failed macOS trust check (%s). Run 'tprompt daemon start' to start the daemon explicitly, or set %s=1 for local builds.",
-		execPath, reason, trustOverrideEnv,
+		"daemon executable %q failed macOS trust check (%s). Run 'tprompt daemon start' to start the daemon explicitly.",
+		execPath, reason,
 	)
 	return AssessResult{Allow: false, Reason: msg}
 }

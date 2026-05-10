@@ -2,8 +2,6 @@
 # another daemon fails with daemon/IPC classification (exit 5).
 # Exercises the AUR-263 run-lock + stale-socket detection.
 
-env TPROMPT_UNSAFE_SKIP_TRUST_GATE=1
-
 mkdir prompts state
 
 # Start a daemon in the background via `daemon start` (so it owns the

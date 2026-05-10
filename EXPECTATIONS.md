@@ -55,11 +55,11 @@ tracker; planned work lives in Linear.
 - `tprompt daemon run` is foreground: the daemon runs in the invoking terminal and is stopped by SIGINT/SIGTERM or `tprompt daemon stop` from another shell.
 - `tprompt daemon stop` works the same way regardless of how the daemon was started: it dials the configured socket, issues the Stop RPC, and reports success when the socket disappears. With no daemon running it prints "daemon not running" and exits successfully.
 - `tprompt daemon status` is read-only and never starts the daemon implicitly.
-- TUI flows (`tprompt tui` and bare `tprompt` dispatching into TUI inside tmux+tty) auto-start the daemon by default when the configured socket is unreachable. Pass `--no-daemon-auto-start` (or `--daemon-auto-start=false`) to opt out for one invocation; set `daemon_auto_start = false` in config to opt out permanently.
+- On Linux and other non-macOS platforms, TUI flows (`tprompt tui` and bare `tprompt` dispatching into TUI inside tmux+tty) auto-start the daemon by default when the configured socket is unreachable. Pass `--no-daemon-auto-start` (or `--daemon-auto-start=false`) to opt out for one invocation; set `daemon_auto_start = false` in config to opt out permanently.
+- On macOS, implicit TUI auto-start is hardcoded off. A TUI invocation that finds the daemon unreachable refuses with a recovery hint pointing at `tprompt daemon start` (background) and `tprompt daemon run` (foreground); neither config nor flag re-enables the implicit path. This is locked because the macOS launch evaluation path triggered kernel panics in `AppleSystemPolicy`/`AMFI`/`syspolicyd` during implicit auto-start; the platform owns the cost of restoring it.
 - `tprompt send`, `tprompt paste`, and `tprompt doctor` are direct-path commands. They never start, contact, or depend on the daemon.
 - Concurrent cold starts are serialized: only one daemon process owns the configured socket at a time.
 - A "compatible daemon" is one reachable at the configured socket whose `Status` RPC succeeds. A reachable-but-broken socket is reported with a manual-recovery message rather than respawned.
-- On macOS, implicit TUI auto-start runs an executable-trust assessment before spawning. Ad-hoc-signed, unsigned, tampered, or Gatekeeper-rejected binaries are refused with a recovery hint pointing at explicit `tprompt daemon start`. Validly signed CLI binaries that Gatekeeper labels "the code is valid but does not seem to be an app" are allowed. `TPROMPT_UNSAFE_SKIP_TRUST_GATE=1` bypasses the gate before any `codesign`/`spctl` invocation; use it for local development and recovery, not normal release operation. Explicit `tprompt daemon start` and `tprompt daemon run` always bypass the gate.
 
 ## Delivery Behavior
 

@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +17,18 @@ import (
 	"github.com/hsadler/tprompt/internal/tmux"
 	"github.com/hsadler/tprompt/internal/tui"
 )
+
+// skipIfDarwinTUIAutoStartDisabled gates TUI tests that exercise the
+// launcher's IntentImplicitTUI path. AUR-326 hardcodes implicit
+// auto-start off on darwin so the launcher is never invoked there;
+// the disabled-on-darwin behavior is covered separately by
+// TestTUI_DaemonAutoStartDarwinDisabled.
+func skipIfDarwinTUIAutoStartDisabled(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "darwin" {
+		t.Skip("AUR-326: TUI implicit auto-start hardcoded off on darwin")
+	}
+}
 
 type recordingRenderer struct {
 	state  tui.State
@@ -426,6 +439,7 @@ func TestTUI_DaemonUnreachableExitsDaemon(t *testing.T) {
 }
 
 func TestTUI_DaemonAutoStartFromConfigStartsAndRetries(t *testing.T) {
+	skipIfDarwinTUIAutoStartDisabled(t)
 	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
 	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
 		c.DaemonAutoStart = true
@@ -467,6 +481,7 @@ func TestTUI_DaemonAutoStartFromConfigStartsAndRetries(t *testing.T) {
 }
 
 func TestTUI_DaemonAutoStartFlagEnablesAndPassesConfigPath(t *testing.T) {
+	skipIfDarwinTUIAutoStartDisabled(t)
 	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
 	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
 		c.SocketPath = "/tmp/tprompt-test.sock"
@@ -532,6 +547,7 @@ func TestTUI_DaemonAutoStartFlagFalseOverridesConfig(t *testing.T) {
 // no flag and no explicit config opt-out, the launcher fires when the
 // socket is unreachable.
 func TestTUI_DaemonAutoStartDefaultOn(t *testing.T) {
+	skipIfDarwinTUIAutoStartDisabled(t)
 	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
 	// Note: tuiDeps provides cfg with DaemonAutoStart untouched; the
 	// default after AUR-266 is true. We explicitly do not set it here
@@ -637,6 +653,7 @@ func TestTUI_DaemonAutoStartAlreadyRunningDoesNotStart(t *testing.T) {
 }
 
 func TestTUI_DaemonAutoStartFailureMapsToDaemonError(t *testing.T) {
+	skipIfDarwinTUIAutoStartDisabled(t)
 	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
 	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
 		c.DaemonAutoStart = true
@@ -671,6 +688,7 @@ func TestTUI_DaemonAutoStartFailureMapsToDaemonError(t *testing.T) {
 }
 
 func TestTUI_DaemonAutoStartReadinessFailureMapsToDaemonError(t *testing.T) {
+	skipIfDarwinTUIAutoStartDisabled(t)
 	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
 	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
 		c.DaemonAutoStart = true
@@ -709,6 +727,7 @@ func TestTUI_DaemonAutoStartReadinessFailureMapsToDaemonError(t *testing.T) {
 }
 
 func TestTUI_DaemonAutoStartConcurrentAttemptsStartOnce(t *testing.T) {
+	skipIfDarwinTUIAutoStartDisabled(t)
 	// Process-level serialization comes from the launcher's start lock
 	// (covered exhaustively in internal/app/lifecycle/launcher_test.go).
 	// The TUI's daemonAutoStartMu serializes the in-process auto-start
@@ -770,6 +789,59 @@ func TestTUI_DaemonAutoStartConcurrentAttemptsStartOnce(t *testing.T) {
 	}
 	if launcher.calls != 1 {
 		t.Fatalf("launcher.Start calls = %d, want 1", launcher.calls)
+	}
+}
+
+// TestTUI_DaemonAutoStartDarwinDisabled verifies the AUR-326 contract:
+// on darwin, a TUI invocation that would normally trigger implicit
+// auto-start refuses without constructing a launcher and surfaces
+// the "disabled on macOS" guidance through the daemon IPC error
+// wrapper. The recovery hint must name both explicit-start commands
+// so the user can act on the failure. Non-darwin builds skip; the
+// permissive default-on path is covered by the existing tests above.
+func TestTUI_DaemonAutoStartDarwinDisabled(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("AUR-326 policy is darwin-only")
+	}
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, &fakeStore{}, rend, func(c *config.Resolved) {
+		c.DaemonAutoStart = true
+		c.SocketPath = "/tmp/tprompt-test.sock"
+		c.LogPath = "/tmp/tprompt-test.log"
+		c.MaxPasteBytes = 1 << 20
+	})
+	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
+		return &fakeDaemonClient{
+			statusFn: func() (daemon.StatusResponse, error) {
+				return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Path: "/tmp/tprompt-test.sock"}
+			},
+		}, nil
+	}
+	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
+		t.Fatal("NewLauncher must not be called on darwin: implicit auto-start is hardcoded off")
+		return nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	var ipc *daemon.IPCError
+	if !errors.As(err, &ipc) {
+		t.Fatalf("want IPCError, got %T: %v", err, err)
+	}
+	if ExitCode(err) != ExitDaemon {
+		t.Fatalf("ExitCode = %d, want ExitDaemon", ExitCode(err))
+	}
+	for _, want := range []string{
+		"implicit daemon auto-start is disabled on macOS",
+		"tprompt daemon start",
+		"tprompt daemon run",
+		"/tmp/tprompt-test.log",
+	} {
+		if !strings.Contains(ipc.Error(), want) {
+			t.Errorf("error = %q, missing %q", ipc.Error(), want)
+		}
+	}
+	if rend.called {
+		t.Fatal("renderer must not run after policy refusal")
 	}
 }
 

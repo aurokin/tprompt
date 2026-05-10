@@ -1,0 +1,34 @@
+# On macOS, implicit TUI auto-start is hardcoded off (AUR-326).
+# A TUI invocation that finds the daemon unreachable must refuse
+# without spawning, naming the explicit-recovery commands so the
+# user can act. Non-darwin platforms keep the permissive default-on
+# behavior; this script is darwin-only.
+
+[!exec:tmux] skip
+[!darwin] skip
+
+env TMUX_TMPDIR=$SHORT_TMPDIR
+env TPROMPT_TEST_RENDERER=cancel
+
+exec tmux new-session -d -s tuimac 'sleep 60'
+exec tmux display-message -p '#{socket_path}'
+stdout $SHORT_TMPDIR
+
+mkdir prompts state
+
+# No daemon is running. The TUI must refuse rather than auto-spawn.
+! tprompt tui --target-pane %0 --config config.toml
+stderr 'implicit daemon auto-start is disabled on macOS'
+stderr 'tprompt daemon start'
+stderr 'tprompt daemon run'
+
+# Daemon was not spawned: no socket, no run lock.
+! exec test -e state/daemon.sock
+! exec test -e state/daemon.sock.lock
+
+exec tmux kill-server
+
+-- config.toml --
+prompts_dir = "prompts"
+socket_path = "state/daemon.sock"
+log_path = "state/daemon.log"

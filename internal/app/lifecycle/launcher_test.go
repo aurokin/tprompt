@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +14,18 @@ import (
 
 	dlife "github.com/hsadler/tprompt/internal/daemon/lifecycle"
 )
+
+// skipIfDarwinImplicitDisabled gates tests that exercise launcher
+// behavior reachable only via IntentImplicitTUI. On darwin AUR-326
+// hardcodes that intent off, so the launcher short-circuits before
+// the cooldown / trust-gate / spawn paths these tests assert. The
+// behavior under explicit intents is exercised by sibling tests.
+func skipIfDarwinImplicitDisabled(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "darwin" {
+		t.Skip("AUR-326: implicit auto-start hardcoded off on darwin; behavior unreachable")
+	}
+}
 
 type probeOutcome struct {
 	res ProbeResult
@@ -183,6 +196,7 @@ func TestLauncherReadinessTimeoutMapsToFailed(t *testing.T) {
 }
 
 func TestLauncherImplicitFailureRecordsCooldown(t *testing.T) {
+	skipIfDarwinImplicitDisabled(t)
 	t.Parallel()
 	p, socket := newPaths(t)
 	prober := &stubProber{fallback: unreachable()}
@@ -213,6 +227,7 @@ func TestLauncherImplicitFailureRecordsCooldown(t *testing.T) {
 }
 
 func TestLauncherImplicitCooldownGatesNextStart(t *testing.T) {
+	skipIfDarwinImplicitDisabled(t)
 	t.Parallel()
 	p, socket := newPaths(t)
 	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
@@ -267,6 +282,7 @@ func TestLauncherImplicitCooldownGatesNextStart(t *testing.T) {
 // before any further work. The launcher's pre-lock cooldown check
 // would miss this if it weren't repeated post-lock.
 func TestLauncherPostLockCooldownReCheck(t *testing.T) {
+	skipIfDarwinImplicitDisabled(t)
 	t.Parallel()
 	p, socket := newPaths(t)
 	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
@@ -354,6 +370,7 @@ func (s *recordCooldownSpawner) Spawn(_ context.Context, _ string, _ []string, _
 }
 
 func TestLauncherTrustGateRejectionImplicitOnly(t *testing.T) {
+	skipIfDarwinImplicitDisabled(t)
 	t.Parallel()
 	p, socket := newPaths(t)
 	prober := &stubProber{fallback: unreachable()}
@@ -486,12 +503,12 @@ func TestLauncherPreSpawnDiagnosticsLogged(t *testing.T) {
 		PollInterval: time.Millisecond,
 		LogPreSpawn:  func(line string) { captured = line },
 	})
-	res := l.Start(context.Background(), IntentImplicitTUI)
+	res := l.Start(context.Background(), IntentExplicitStart)
 	if res.Outcome != dlife.OutcomeStarted {
 		t.Fatalf("Outcome = %v, want Started", res.Outcome)
 	}
 	for _, want := range []string{
-		"intent=implicit_tui",
+		"intent=explicit_start",
 		"parent_pid=",
 		`exec="/usr/local/bin/tprompt"`,
 		`config="/etc/tprompt/config.toml"`,
@@ -506,45 +523,6 @@ func TestLauncherPreSpawnDiagnosticsLogged(t *testing.T) {
 		if !strings.Contains(captured, want) {
 			t.Errorf("pre-spawn diagnostic missing %q\nfull: %s", want, captured)
 		}
-	}
-}
-
-// allowOverrideAssessor returns an Allow result with a non-empty
-// reason, modeling the macOS trust gate's debug-override path.
-type allowOverrideAssessor struct{ reason string }
-
-func (a allowOverrideAssessor) Assess(StartIntent, string) AssessResult {
-	return AssessResult{Allow: true, Reason: a.reason}
-}
-
-// TestLauncherPreSpawnDiagnosticsAllowOverride verifies the override
-// path is logged with `trust=allow_override` so an operator who set
-// TPROMPT_UNSAFE_SKIP_TRUST_GATE=1 can see the gate was bypassed.
-func TestLauncherPreSpawnDiagnosticsAllowOverride(t *testing.T) {
-	t.Parallel()
-	_, socket := newPaths(t)
-	prober := &stubProber{results: unreachableN(2), fallback: okFallback()}
-	spawner := &stubSpawner{}
-	var captured string
-	l := New(Options{
-		SocketPath:   socket,
-		Executable:   "/usr/local/bin/tprompt",
-		LogPath:      "/tmp/d.log",
-		Status:       prober,
-		Spawner:      spawner,
-		Assessor:     allowOverrideAssessor{reason: "TPROMPT_UNSAFE_SKIP_TRUST_GATE=1 (debug override)"},
-		PollInterval: time.Millisecond,
-		LogPreSpawn:  func(line string) { captured = line },
-	})
-	res := l.Start(context.Background(), IntentImplicitTUI)
-	if res.Outcome != dlife.OutcomeStarted {
-		t.Fatalf("Outcome = %v, want Started", res.Outcome)
-	}
-	if !strings.Contains(captured, "trust=allow_override") {
-		t.Errorf("captured = %q, want trust=allow_override", captured)
-	}
-	if !strings.Contains(captured, "TPROMPT_UNSAFE_SKIP_TRUST_GATE=1") {
-		t.Errorf("captured = %q, want override env literal in reason", captured)
 	}
 }
 
@@ -648,6 +626,108 @@ func TestLauncherEarlyAlreadyRunningClearsCooldown(t *testing.T) {
 	if _, active, _ := dlife.ReadCooldown(p, func() time.Time { return now }); active {
 		t.Fatal("cooldown not cleared after early ProbeOK return")
 	}
+}
+
+// TestLauncherDarwinImplicitPolicyDisabled verifies the AUR-326
+// short-circuit: on darwin, IntentImplicitTUI is refused before the
+// cooldown / start lock / spawn path. The launcher must report
+// OutcomeFailed with ReasonPolicyDisabled, never record a cooldown,
+// never invoke the spawner, never invoke the trust assessor, and
+// emit a dedicated diagnostic line (so operators can see the refusal
+// without grepping for missing log output). Non-darwin builds skip:
+// implicit auto-start is permitted there.
+func TestLauncherDarwinImplicitPolicyDisabled(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "darwin" {
+		t.Skip("AUR-326 policy is darwin-only")
+	}
+	p, socket := newPaths(t)
+	prober := &stubProber{fallback: unreachable()}
+	spawner := &stubSpawner{}
+	assessor := &recordingAssessor{}
+	var captured string
+	l := New(Options{
+		SocketPath:   socket,
+		Executable:   "/usr/local/bin/tprompt",
+		LogPath:      "/tmp/d.log",
+		Status:       prober,
+		Spawner:      spawner,
+		Assessor:     assessor,
+		PollInterval: time.Millisecond,
+		LogPreSpawn:  func(line string) { captured = line },
+	})
+	res := l.Start(context.Background(), IntentImplicitTUI)
+	if res.Outcome != dlife.OutcomeFailed {
+		t.Fatalf("Outcome = %v, want Failed", res.Outcome)
+	}
+	if res.Reason != dlife.ReasonPolicyDisabled {
+		t.Fatalf("Reason = %v, want %v", res.Reason, dlife.ReasonPolicyDisabled)
+	}
+	for _, want := range []string{
+		"implicit daemon auto-start is disabled on macOS",
+		"tprompt daemon start",
+		"tprompt daemon run",
+	} {
+		if !strings.Contains(res.Detail, want) {
+			t.Errorf("detail %q missing %q", res.Detail, want)
+		}
+	}
+	if spawner.called != 0 {
+		t.Fatalf("Spawner.Spawn called %d times despite policy refusal", spawner.called)
+	}
+	if assessor.calls != 0 {
+		t.Fatalf("Trust assessor invoked %d times despite policy refusal (must short-circuit first)", assessor.calls)
+	}
+	if _, active, _ := dlife.ReadCooldown(p, time.Now); active {
+		t.Fatal("policy refusal recorded a cooldown (it must not)")
+	}
+	if !strings.Contains(captured, "outcome=lifecycle_implicit_disabled") {
+		t.Fatalf("diagnostic missing lifecycle_implicit_disabled outcome\nfull: %s", captured)
+	}
+	for _, want := range []string{
+		"intent=implicit_tui",
+		`exec="/usr/local/bin/tprompt"`,
+		`log="/tmp/d.log"`,
+		`socket="` + socket + `"`,
+		"reason=",
+	} {
+		if !strings.Contains(captured, want) {
+			t.Errorf("diagnostic missing %q\nfull: %s", want, captured)
+		}
+	}
+
+	// Explicit intents bypass the policy and reach the spawn path.
+	prober2 := &stubProber{results: unreachableN(2), fallback: okFallback()}
+	spawner2 := &stubSpawner{}
+	l2 := New(Options{
+		SocketPath:       socket,
+		Executable:       "/usr/local/bin/tprompt",
+		LogPath:          "/tmp/d.log",
+		Status:           prober2,
+		Spawner:          spawner2,
+		ReadinessTimeout: 5 * time.Millisecond,
+		PollInterval:     time.Millisecond,
+	})
+	if res2 := l2.Start(context.Background(), IntentExplicitStart); res2.Outcome != dlife.OutcomeStarted {
+		t.Fatalf("explicit start under darwin policy = %v, want Started", res2.Outcome)
+	}
+	if spawner2.called != 1 {
+		t.Fatalf("explicit start spawner.called = %d, want 1", spawner2.called)
+	}
+}
+
+// recordingAssessor counts Assess calls so policy-refusal tests can
+// prove the trust gate never fires when the launcher short-circuits.
+type recordingAssessor struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (a *recordingAssessor) Assess(StartIntent, string) AssessResult {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.calls++
+	return AssessResult{Allow: true}
 }
 
 // Helper types for the concurrent and trust-gate tests.

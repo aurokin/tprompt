@@ -6,7 +6,6 @@
 [!exec:tmux] skip
 
 env TMUX_TMPDIR=$SHORT_TMPDIR
-env TPROMPT_UNSAFE_SKIP_TRUST_GATE=1
 env TPROMPT_TEST_RENDERER=cancel
 
 exec tmux new-session -d -s tuiwarm 'sleep 60'
