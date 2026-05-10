@@ -31,10 +31,12 @@ fixtures="$repo_root/scripts/test/fixtures"
 # Tests mint inline stub scripts and chmod +x them. Hardened CI images
 # sometimes mount $TMPDIR with `noexec`; rooting executables under the
 # repo filesystem (which is guaranteed exec) avoids that landmine.
-# Other temp files (stdout/stderr capture, JSON fixtures) can live in
-# the OS $TMPDIR — they're never executed.
-runtime_dir="$repo_root/scripts/test/.runtime"
-mkdir -p "$runtime_dir"
+# Per-run subdir under .runtime/ so two overlapping invocations (e.g.,
+# CI matrix sharing a workspace) don't yank each other's stubs out via
+# their EXIT traps.
+runtime_root="$repo_root/scripts/test/.runtime"
+mkdir -p "$runtime_root"
+runtime_dir="$(mktemp -d "$runtime_root/run-XXXXXX")"
 
 # Track temp dirs/files so an interrupt or mid-test failure doesn't
 # orphan them. Each helper that mints a temp registers it here; the
@@ -63,10 +65,14 @@ mktemp_tracked_file() {
 }
 
 # For inline stub scripts that need to be executed. Lives on the repo
-# filesystem (see runtime_dir comment above).
+# filesystem (see runtime_dir comment above). Tracked for consistency
+# with the other helpers, even though runtime_dir's recursive cleanup
+# already covers it — a future refactor that drops the parent-dir push
+# shouldn't silently leak files.
 mktemp_exec_file() {
   local f
   f="$(mktemp "$runtime_dir/stub-XXXXXX")"
+  tmp_paths+=("$f")
   printf '%s' "$f"
 }
 
