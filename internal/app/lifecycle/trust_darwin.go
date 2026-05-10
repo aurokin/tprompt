@@ -106,22 +106,27 @@ func ProductionAssessor() TrustAssessor {
 	}
 }
 
-// Assess implements TrustAssessor.
-func (a darwinAssessor) Assess(exec string) AssessResult {
+// Assess implements TrustAssessor. The intent is threaded through to
+// deny so refusal messages name the right recovery command (AUR-329):
+// IntentExplicitStart points at `tprompt daemon run` as the foreground
+// fallback; IntentExplicitRun points at the signed-release / self-sign
+// recovery. IntentImplicitTUI never reaches the assessor on darwin
+// (AUR-326's policy short-circuits before this).
+func (a darwinAssessor) Assess(exec string, intent StartIntent) AssessResult {
 	if r, ok := a.evaluateBypass(); ok {
 		return r
 	}
-	if r, ok := a.checkToolsAvailable(exec); !ok {
+	if r, ok := a.checkToolsAvailable(exec, intent); !ok {
 		return r
 	}
 	ctx := context.Background()
-	if r, ok := a.runCodesignVerify(ctx, exec); !ok {
+	if r, ok := a.runCodesignVerify(ctx, exec, intent); !ok {
 		return r
 	}
-	if r, ok := a.runCodesignDescribe(ctx, exec); !ok {
+	if r, ok := a.runCodesignDescribe(ctx, exec, intent); !ok {
 		return r
 	}
-	if r, ok := a.runSpctlAssess(ctx, exec); !ok {
+	if r, ok := a.runSpctlAssess(ctx, exec, intent); !ok {
 		return r
 	}
 	return AssessResult{Allow: true}
@@ -150,10 +155,10 @@ func (a darwinAssessor) evaluateBypass() (AssessResult, bool) {
 	return AssessResult{Allow: true, Reason: trustBypassEnv + "=" + strings.TrimSpace(rawEnv) + " (testing override)"}, true
 }
 
-func (a darwinAssessor) checkToolsAvailable(execPath string) (AssessResult, bool) {
+func (a darwinAssessor) checkToolsAvailable(execPath string, intent StartIntent) (AssessResult, bool) {
 	for _, p := range []string{a.codesign, a.spctl} {
 		if _, err := os.Stat(p); err != nil {
-			return a.deny(execPath, "trust tools unavailable: "+p), false
+			return a.deny(execPath, intent, "trust tools unavailable: "+p), false
 		}
 	}
 	return AssessResult{}, true
@@ -183,37 +188,37 @@ func (a darwinAssessor) classifyRunErr(err error, label string) string {
 	return label + " failed to run: " + err.Error()
 }
 
-func (a darwinAssessor) runCodesignVerify(ctx context.Context, execPath string) (AssessResult, bool) {
+func (a darwinAssessor) runCodesignVerify(ctx context.Context, execPath string, intent StartIntent) (AssessResult, bool) {
 	_, stderr, code, err := a.runBounded(ctx, a.codesign, "--verify", "--strict", execPath)
 	if err != nil {
-		return a.deny(execPath, a.classifyRunErr(err, "codesign verify")), false
+		return a.deny(execPath, intent, a.classifyRunErr(err, "codesign verify")), false
 	}
 	if code == 0 {
 		return AssessResult{}, true
 	}
-	return a.deny(execPath, "invalid signature: "+firstLine(stderr)), false
+	return a.deny(execPath, intent, "invalid signature: "+firstLine(stderr)), false
 }
 
-func (a darwinAssessor) runCodesignDescribe(ctx context.Context, execPath string) (AssessResult, bool) {
+func (a darwinAssessor) runCodesignDescribe(ctx context.Context, execPath string, intent StartIntent) (AssessResult, bool) {
 	_, stderr, code, err := a.runBounded(ctx, a.codesign, "-d", "-vv", execPath)
 	if err != nil {
-		return a.deny(execPath, a.classifyRunErr(err, "codesign describe")), false
+		return a.deny(execPath, intent, a.classifyRunErr(err, "codesign describe")), false
 	}
 	if code != 0 {
 		// Describe should not normally fail when verify passed; if it
 		// does we treat it like an invalid signature for safety.
-		return a.deny(execPath, "codesign describe rejected: "+firstLine(stderr)), false
+		return a.deny(execPath, intent, "codesign describe rejected: "+firstLine(stderr)), false
 	}
 	if isAdHoc(stderr) {
-		return a.deny(execPath, "ad-hoc signature"), false
+		return a.deny(execPath, intent, "ad-hoc signature"), false
 	}
 	return AssessResult{}, true
 }
 
-func (a darwinAssessor) runSpctlAssess(ctx context.Context, execPath string) (AssessResult, bool) {
+func (a darwinAssessor) runSpctlAssess(ctx context.Context, execPath string, intent StartIntent) (AssessResult, bool) {
 	_, stderr, code, err := a.runBounded(ctx, a.spctl, "--assess", "--type", "execute", "-vv", execPath)
 	if err != nil {
-		return a.deny(execPath, a.classifyRunErr(err, "spctl")), false
+		return a.deny(execPath, intent, a.classifyRunErr(err, "spctl")), false
 	}
 	if code == 0 {
 		return AssessResult{}, true
@@ -221,7 +226,7 @@ func (a darwinAssessor) runSpctlAssess(ctx context.Context, execPath string) (As
 	if isCLIBypass(stderr) {
 		return AssessResult{}, true
 	}
-	return a.deny(execPath, "Gatekeeper rejected: "+firstLine(stderr)), false
+	return a.deny(execPath, intent, "Gatekeeper rejected: "+firstLine(stderr)), false
 }
 
 // isAdHoc returns true when codesign -d -vv stderr indicates an
@@ -254,11 +259,45 @@ func isCLIBypass(stderr []byte) bool {
 	return bytes.Contains(stderr, []byte("the code is valid but does not seem to be an app"))
 }
 
-func (a darwinAssessor) deny(execPath, reason string) AssessResult {
-	msg := fmt.Sprintf(
-		"daemon executable %q failed macOS trust check (%s). Install a signed release, or run 'scripts/sign-macos-binary.sh' for a local dev build. Use of %s=1 is permitted for local development only.",
-		execPath, reason, trustBypassEnv,
-	)
+// deny formats the user-visible refusal for a failed preflight. The
+// rendered message is intent-aware (AUR-329) so the operator sees a
+// recovery hint matching the command they actually ran:
+//
+//   - IntentExplicitStart names the failed action as "detached daemon
+//     start" and points at `tprompt daemon run` (foreground) as the
+//     primary recovery, with signed-release / self-sign as the longer-
+//     term path.
+//   - IntentExplicitRun names the failed action as `tprompt daemon
+//     run` and skips the foreground recovery (already what the user
+//     was attempting); the recovery list is signed release / self-sign
+//     script.
+//   - Any other intent (defensive default) falls back to the generic
+//     pre-AUR-329 wording so a future caller cannot accidentally
+//     surface an empty hint.
+//
+// The trust-bypass env var is mentioned in every variant because it
+// is the only escape hatch for local development (and the testscript
+// suite); `daemon stop` and `daemon status` never preflight, so they
+// remain available for recovery without bypass.
+func (a darwinAssessor) deny(execPath string, intent StartIntent, reason string) AssessResult {
+	var msg string
+	switch intent {
+	case IntentExplicitStart:
+		msg = fmt.Sprintf(
+			"macOS executable trust preflight rejected detached daemon start for %q: %s. Run 'tprompt daemon run' in the foreground (a long-lived tmux pane), install a signed release binary for detached daemon operation, or run scripts/sign-macos-binary.sh to self-sign a local dev build. (%s=1 is permitted for local development only.)",
+			execPath, reason, trustBypassEnv,
+		)
+	case IntentExplicitRun:
+		msg = fmt.Sprintf(
+			"macOS executable trust preflight rejected 'tprompt daemon run' for %q: %s. Install a signed release binary, or run scripts/sign-macos-binary.sh to self-sign a local dev build. (%s=1 is permitted for local development only.)",
+			execPath, reason, trustBypassEnv,
+		)
+	default:
+		msg = fmt.Sprintf(
+			"daemon executable %q failed macOS trust check (%s). Install a signed release, or run 'scripts/sign-macos-binary.sh' for a local dev build. Use of %s=1 is permitted for local development only.",
+			execPath, reason, trustBypassEnv,
+		)
+	}
 	return AssessResult{Allow: false, Reason: msg}
 }
 

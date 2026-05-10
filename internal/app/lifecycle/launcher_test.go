@@ -92,7 +92,7 @@ type stubAssessor struct {
 	reason string
 }
 
-func (s stubAssessor) Assess(string) AssessResult {
+func (s stubAssessor) Assess(string, StartIntent) AssessResult {
 	return AssessResult{Allow: s.allow, Reason: s.reason}
 }
 
@@ -709,9 +709,10 @@ func TestLauncherDarwinImplicitPolicyDisabled(t *testing.T) {
 		t.Fatalf("Reason = %v, want %v", res.Reason, dlife.ReasonPolicyDisabled)
 	}
 	for _, want := range []string{
-		"implicit daemon auto-start is disabled on macOS",
+		"macOS does not implicitly auto-start the tprompt daemon",
 		"tprompt daemon start",
 		"tprompt daemon run",
+		"daemon is not running",
 	} {
 		if !strings.Contains(res.Detail, want) {
 			t.Errorf("detail %q missing %q", res.Detail, want)
@@ -768,7 +769,7 @@ type recordingAssessor struct {
 	calls int
 }
 
-func (a *recordingAssessor) Assess(string) AssessResult {
+func (a *recordingAssessor) Assess(string, StartIntent) AssessResult {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.calls++

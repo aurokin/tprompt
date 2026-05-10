@@ -122,18 +122,22 @@ type Spawner interface {
 }
 
 // TrustAssessor implements the macOS executable-trust preflight. It is
-// invoked on the explicit-start path on darwin (AUR-327); other paths
-// bypass via the launcher's intent gate or the platform policy. On
-// non-darwin builds the production assessor is a no-op.
+// invoked on the explicit-start path via runTrustGate (under
+// IntentExplicitStart) and on the foreground `daemon run` path via
+// commands.preflightDaemonRun (under IntentExplicitRun). The intent is
+// threaded into Assess so the assessor's denial reason can be rendered
+// with the right callsite-specific recovery wording (AUR-329); the
+// implicit-TUI path on darwin never reaches the assessor (AUR-326).
+// On non-darwin builds the production assessor is a no-op.
 type TrustAssessor interface {
-	Assess(exec string) AssessResult
+	Assess(exec string, intent StartIntent) AssessResult
 }
 
 // noopAssessor allows everything. Used when no TrustAssessor is
 // supplied (Linux production, unit tests that don't model trust).
 type noopAssessor struct{}
 
-func (noopAssessor) Assess(string) AssessResult {
+func (noopAssessor) Assess(string, StartIntent) AssessResult {
 	return AssessResult{Allow: true}
 }
 
@@ -317,7 +321,7 @@ func (l *Launcher) runTrustGate(intent StartIntent) (AssessResult, dlife.StartRe
 	if intent != IntentExplicitStart {
 		return AssessResult{Allow: true}, dlife.StartResult{}, false
 	}
-	res := l.opts.Assessor.Assess(l.opts.Executable)
+	res := l.opts.Assessor.Assess(l.opts.Executable, intent)
 	if res.Allow {
 		return res, dlife.StartResult{}, false
 	}

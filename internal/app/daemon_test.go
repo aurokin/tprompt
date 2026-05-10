@@ -664,7 +664,7 @@ type recordingTrustAssessor struct {
 	deny  string
 }
 
-func (a *recordingTrustAssessor) Assess(string) applife.AssessResult {
+func (a *recordingTrustAssessor) Assess(string, applife.StartIntent) applife.AssessResult {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.calls++

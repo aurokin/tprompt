@@ -73,7 +73,7 @@ func TestDarwinAssessorAdHocSignatureViaSignatureLine(t *testing.T) {
 		sp + "/--assess": {exit: 0},
 	}}
 	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
-	res := a.Assess("/usr/local/bin/tprompt")
+	res := a.Assess("/usr/local/bin/tprompt", IntentExplicitStart)
 	if res.Allow {
 		t.Fatal("ad-hoc signature should be denied")
 	}
@@ -103,7 +103,7 @@ func TestDarwinAssessorAdHocSignatureViaCodeDirectoryFlags(t *testing.T) {
 		sp + "/--assess": {exit: 0},
 	}}
 	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
-	res := a.Assess("/x")
+	res := a.Assess("/x", IntentExplicitStart)
 	if res.Allow {
 		t.Fatal("flags=adhoc should be denied")
 	}
@@ -119,7 +119,7 @@ func TestDarwinAssessorInvalidSignature(t *testing.T) {
 		cs + "/--verify": {exit: 1, stderr: "/x: code object is not signed at all\nIn architecture: arm64\n"},
 	}}
 	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
-	res := a.Assess("/x")
+	res := a.Assess("/x", IntentExplicitStart)
 	if res.Allow {
 		t.Fatal("invalid signature should be denied")
 	}
@@ -149,7 +149,7 @@ func TestDarwinAssessorGatekeeperRejected(t *testing.T) {
 		sp + "/--assess": {exit: 3, stderr: "/x: rejected\nsource=Unverified\n"},
 	}}
 	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
-	res := a.Assess("/x")
+	res := a.Assess("/x", IntentExplicitStart)
 	if res.Allow {
 		t.Fatal("Gatekeeper rejection should be denied")
 	}
@@ -169,7 +169,7 @@ func TestDarwinAssessorValidCLIBypass(t *testing.T) {
 		sp + "/--assess": {exit: 3, stderr: stderr},
 	}}
 	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
-	res := a.Assess("/x")
+	res := a.Assess("/x", IntentExplicitStart)
 	if !res.Allow {
 		t.Fatalf("CLI bypass should be allowed; reason=%q", res.Reason)
 	}
@@ -184,7 +184,7 @@ func TestDarwinAssessorFullyAllowed(t *testing.T) {
 		sp + "/--assess": {exit: 0},
 	}}
 	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
-	res := a.Assess("/x")
+	res := a.Assess("/x", IntentExplicitStart)
 	if !res.Allow {
 		t.Fatalf("fully signed + Gatekeeper-accepted should allow; reason=%q", res.Reason)
 	}
@@ -198,7 +198,7 @@ func TestDarwinAssessorToolsMissing(t *testing.T) {
 		spctl:    "/usr/bin/true",
 		run:      r,
 	}
-	res := a.Assess("/x")
+	res := a.Assess("/x", IntentExplicitStart)
 	if res.Allow {
 		t.Fatal("missing codesign should be denied (degrade-loudly path)")
 	}
@@ -245,7 +245,7 @@ func TestDarwinAssessorBypassEnvAllowsPositiveValues(t *testing.T) {
 					return ""
 				},
 			}
-			res := a.Assess("/x")
+			res := a.Assess("/x", IntentExplicitStart)
 			if !res.Allow {
 				t.Fatalf("bypass %q should allow; reason=%q", v, res.Reason)
 			}
@@ -289,7 +289,7 @@ func TestDarwinAssessorBypassEnvKnownNegativeKeepsGate(t *testing.T) {
 					return ""
 				},
 			}
-			res := a.Assess("/x")
+			res := a.Assess("/x", IntentExplicitStart)
 			if !res.Allow {
 				t.Fatalf("known-negative bypass %q should leave gate active and reach allow path; reason=%q", v, res.Reason)
 			}
@@ -313,7 +313,7 @@ func TestDarwinAssessorBoundsHangingToolWithTimeout(t *testing.T) {
 		timeout:  25 * time.Millisecond,
 	}
 	start := time.Now()
-	res := a.Assess("/usr/local/bin/tprompt")
+	res := a.Assess("/usr/local/bin/tprompt", IntentExplicitStart)
 	elapsed := time.Since(start)
 	if res.Allow {
 		t.Fatal("hanging trust tool should be denied")
@@ -373,4 +373,72 @@ func TestDarwinAssessorFirstLine(t *testing.T) {
 	if got := firstLine(nil); got != "" {
 		t.Errorf("firstLine(nil) = %q, want empty", got)
 	}
+}
+
+// TestDarwinAssessorIntentAwareDenyMessage locks AUR-329's contract
+// that deny renders the recovery hint matching the operator's actual
+// command. IntentExplicitStart names "detached daemon start" and
+// points at `tprompt daemon run` as a foreground fallback;
+// IntentExplicitRun skips the foreground hint (the user is already
+// there) and points at the signed-release / self-sign path.
+func TestDarwinAssessorIntentAwareDenyMessage(t *testing.T) {
+	t.Parallel()
+	cs, sp := availablePaths()
+	mkAssessor := func() darwinAssessor {
+		return darwinAssessor{codesign: cs, spctl: sp, run: &fakeRunner{canned: map[string]runResult{
+			cs + "/--verify": {exit: 0},
+			cs + "/-d":       {exit: 0, stderr: "Signature=adhoc\n"},
+		}}}
+	}
+
+	t.Run("explicit_start", func(t *testing.T) {
+		t.Parallel()
+		a := mkAssessor()
+		res := a.Assess("/usr/local/bin/tprompt", IntentExplicitStart)
+		if res.Allow {
+			t.Fatal("ad-hoc binary must be denied")
+		}
+		for _, want := range []string{
+			"detached daemon start",
+			"/usr/local/bin/tprompt",
+			"ad-hoc signature",
+			"tprompt daemon run",
+			"signed release",
+			"sign-macos-binary.sh",
+			trustBypassEnv,
+		} {
+			if !strings.Contains(res.Reason, want) {
+				t.Errorf("explicit_start reason = %q, missing %q", res.Reason, want)
+			}
+		}
+	})
+
+	t.Run("explicit_run", func(t *testing.T) {
+		t.Parallel()
+		a := mkAssessor()
+		res := a.Assess("/usr/local/bin/tprompt", IntentExplicitRun)
+		if res.Allow {
+			t.Fatal("ad-hoc binary must be denied")
+		}
+		for _, want := range []string{
+			"'tprompt daemon run'",
+			"/usr/local/bin/tprompt",
+			"ad-hoc signature",
+			"signed release",
+			"sign-macos-binary.sh",
+			trustBypassEnv,
+		} {
+			if !strings.Contains(res.Reason, want) {
+				t.Errorf("explicit_run reason = %q, missing %q", res.Reason, want)
+			}
+		}
+		// IntentExplicitRun must NOT advise running daemon run again —
+		// the user is already there. The deny string contains
+		// "'tprompt daemon run'" as the LABEL, but it should not contain
+		// the phrasing "Run 'tprompt daemon run'" that the explicit_start
+		// branch uses as a recovery hint.
+		if strings.Contains(res.Reason, "Run 'tprompt daemon run' in the foreground") {
+			t.Errorf("explicit_run reason = %q, must not advise the user to run daemon run again", res.Reason)
+		}
+	})
 }
