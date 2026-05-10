@@ -196,18 +196,30 @@ jobs:
             2>&1 | tee "$RUNNER_TEMP/notarize.log"
 
       # Acceptance criterion: codesign --verify --strict --verbose=4
-      # accepts the binary; spctl rejects only with the documented CLI
-      # bypass message ("valid but does not seem to be an app"). Note:
-      # `xcrun stapler` does NOT apply to bare CLI Mach-O — see the
-      # notarize script's docstring for the rationale.
+      # accepts the binary; spctl either accepts or rejects ONLY with
+      # the documented CLI bypass message ("valid but does not seem
+      # to be an app"). Any other spctl denial (mis-signed, revoked,
+      # not notarized, etc.) is a real failure and must block the
+      # release. Note: `xcrun stapler` does NOT apply to bare CLI
+      # Mach-O — see the notarize script's docstring for the rationale.
       - name: Verify macOS signature
         if: matrix.os == 'darwin'
         run: |
           binary="dist/tprompt-${{ matrix.os }}-${{ matrix.arch }}/tprompt"
           codesign --verify --strict --verbose=4 "$binary"
-          spctl --assess --type execute -vv "$binary" 2>&1 | tee spctl.out || true
-          if grep -q 'valid but does not seem to be an app' spctl.out; then
+
+          set +e
+          spctl --assess --type execute -vv "$binary" 2>&1 | tee spctl.out
+          spctl_rc=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$spctl_rc" -eq 0 ]; then
+            echo "spctl accepted the binary."
+          elif grep -q 'valid but does not seem to be an app' spctl.out; then
             echo "spctl rejection is the documented CLI bypass; signature is valid."
+          else
+            echo "::error::spctl assessment denied for an unexpected reason (rc=$spctl_rc)"
+            exit 1
           fi
 
       # The notarize step tee'd full output (including the notary log
