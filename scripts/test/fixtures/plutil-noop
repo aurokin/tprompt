@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# plutil stub. Production calls
+#   plutil -extract <key> raw -o - <file>
+# to extract a top-level scalar from notarytool's submission JSON.
+#
+# Real plutil ships only with macOS, so the test harness needs a
+# portable substitute that keeps `make test-scripts` (and `make all`)
+# working on Linux dev/CI hosts. Delegate the actual JSON parsing to
+# python3 so the stub matches plutil's structure-aware semantics
+# (nested keys inside string values are not mis-extracted) instead of
+# the line-anchored regex behavior the production script just left
+# behind.
+#
+# Argv parsing is explicit so a future reorder of plutil flags in the
+# production script doesn't silently misroute `<file>` into a flag.
+set -euo pipefail
+
+key=""
+out=""
+input=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -extract)
+      key="${2:-}"
+      shift 2
+      ;;
+    raw)
+      shift
+      ;;
+    -o)
+      out="${2:-}"
+      shift 2
+      ;;
+    --)
+      shift
+      ;;
+    -*)
+      shift
+      ;;
+    *)
+      if [[ -z "$input" ]]; then
+        input="$1"
+      fi
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$key" || -z "$input" ]]; then
+  echo "stub: plutil missing -extract <key> or input file: key='$key' input='$input'" >&2
+  exit 64
+fi
+
+if [[ ! -f "$input" ]]; then
+  echo "stub: plutil input file does not exist: $input" >&2
+  exit 1
+fi
+
+/usr/bin/env python3 - "$key" "$input" "$out" <<'PY'
+import json, sys
+key, path, dest = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    with open(path) as f:
+        data = json.load(f)
+except (OSError, json.JSONDecodeError) as exc:
+    sys.stderr.write(f"stub: plutil could not parse {path}: {exc}\n")
+    sys.exit(1)
+if not isinstance(data, dict) or key not in data:
+    sys.stderr.write(f"stub: plutil key '{key}' not found at top level of {path}\n")
+    sys.exit(1)
+val = data[key]
+text = val if isinstance(val, str) else json.dumps(val)
+if dest == "" or dest == "-":
+    sys.stdout.write(text + "\n")
+else:
+    with open(dest, "w") as f:
+        f.write(text + "\n")
+PY

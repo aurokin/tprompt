@@ -7,7 +7,10 @@ builds and by the release workflow.
 - `notarize-macos-binary.sh` — wraps the binary in a temp zip and submits to
   Apple's notary service via `xcrun notarytool`.
 
-Both scripts are macOS-only at runtime. Operator documentation (Apple
+Both scripts are macOS-only at runtime. The test harness (`make
+test-scripts`) is portable: every external it touches — `codesign`,
+`xcrun`, `ditto`, `plutil` — is stubbed via the env-var seam below, so
+it runs unchanged on Linux dev/CI hosts. Operator documentation (Apple
 credentials, GitHub secrets contract, release behavior) lives at
 `docs/lifecycle/macos-release-signing.md` (added in AUR-325).
 

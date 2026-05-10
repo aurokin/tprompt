@@ -188,6 +188,7 @@ accepted_target="$accepted_workdir/tprompt"
 run_case "notarize: stub xcrun returns Accepted → exit 0" 0 'notarization accepted: abc-123-def' '' \
   -- env CODESIGN="$fixtures/codesign-noop" \
        DITTO="$fixtures/ditto-noop" \
+       PLUTIL="$fixtures/plutil-noop" \
        XCRUN="$fixtures/xcrun-accepted" \
   "$notarize_script" --team-id 'TEST' "$accepted_target"
 
@@ -198,6 +199,7 @@ invalid_target="$invalid_workdir/tprompt"
 run_case "notarize: stub xcrun returns Invalid → exit 1, log printed" 1 '' 'Archive contents not signed' \
   -- env CODESIGN="$fixtures/codesign-noop" \
        DITTO="$fixtures/ditto-noop" \
+       PLUTIL="$fixtures/plutil-noop" \
        XCRUN="$fixtures/xcrun-invalid" \
   "$notarize_script" --team-id 'TEST' "$invalid_target"
 
@@ -211,6 +213,7 @@ keychain_invalid_target="$keychain_invalid_workdir/tprompt"
 run_case "notarize: --keychain + Invalid stub still surfaces log content" 1 '' 'Archive contents not signed' \
   -- env CODESIGN="$fixtures/codesign-noop" \
        DITTO="$fixtures/ditto-noop" \
+       PLUTIL="$fixtures/plutil-noop" \
        XCRUN="$fixtures/xcrun-invalid" \
   "$notarize_script" --team-id 'TEST' --keychain '/tmp/fake.keychain-db' "$keychain_invalid_target"
 
@@ -221,6 +224,7 @@ env_team_target="$env_team_workdir/tprompt"
 run_case "notarize: team id from TPROMPT_APPLE_TEAM_ID env" 0 'notarization accepted' '' \
   -- env CODESIGN="$fixtures/codesign-noop" \
        DITTO="$fixtures/ditto-noop" \
+       PLUTIL="$fixtures/plutil-noop" \
        XCRUN="$fixtures/xcrun-accepted" \
        TPROMPT_APPLE_TEAM_ID='TEST' \
   "$notarize_script" "$env_team_target"
@@ -264,6 +268,7 @@ status_parse_target="$status_parse_workdir/tprompt"
 run_case "notarize: status parser ignores substring keys" 0 'notarization accepted: real-id' '' \
   -- env CODESIGN="$fixtures/codesign-noop" \
        DITTO="$fixtures/ditto-noop" \
+       PLUTIL="$fixtures/plutil-noop" \
        XCRUN="$custom_xcrun" \
   "$notarize_script" --team-id 'TEST' "$status_parse_target"
 
@@ -293,6 +298,7 @@ single_line_target="$single_line_workdir/tprompt"
 run_case "notarize: compact single-line JSON parses successfully" 0 'notarization accepted: single-line-id' '' \
   -- env CODESIGN="$fixtures/codesign-noop" \
        DITTO="$fixtures/ditto-noop" \
+       PLUTIL="$fixtures/plutil-noop" \
        XCRUN="$single_line_xcrun" \
   "$notarize_script" --team-id 'TEST' "$single_line_target"
 
@@ -311,6 +317,7 @@ empty_status_target="$empty_status_workdir/tprompt"
 run_case "notarize: empty submission JSON → diagnostic + exit 1" 1 '' 'could not parse notary status' \
   -- env CODESIGN="$fixtures/codesign-noop" \
        DITTO="$fixtures/ditto-noop" \
+       PLUTIL="$fixtures/plutil-noop" \
        XCRUN="$empty_xcrun" \
   "$notarize_script" --team-id 'TEST' "$empty_status_target"
 
@@ -339,6 +346,7 @@ failing_xcrun_target="$failing_xcrun_workdir/tprompt"
 run_case "notarize: xcrun submit non-zero → diagnostic + exit 1" 1 '' 'xcrun notarytool submit failed' \
   -- env CODESIGN="$fixtures/codesign-noop" \
        DITTO="$fixtures/ditto-noop" \
+       PLUTIL="$fixtures/plutil-noop" \
        XCRUN="$failing_xcrun" \
   "$notarize_script" --team-id 'TEST' "$failing_xcrun_target"
 
