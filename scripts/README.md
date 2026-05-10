@@ -11,15 +11,18 @@ Both scripts are macOS-only at runtime. Operator documentation (Apple
 credentials, GitHub secrets contract, release behavior) lives at
 `docs/lifecycle/macos-release-signing.md` (added in AUR-325).
 
-Three signing-toolchain entry points — `codesign`, `xcrun`, and `ditto` — can
-be overridden via the `CODESIGN`, `XCRUN`, and `DITTO` env vars. Production
-callers leave them unset and pick up `/usr/bin/codesign`, `/usr/bin/xcrun`,
-and `/usr/bin/ditto`. The override seam exists for the test harness in
+Four signing-toolchain entry points — `codesign`, `xcrun`, `ditto`, and
+`plutil` — can be overridden via the `CODESIGN`, `XCRUN`, `DITTO`, and
+`PLUTIL` env vars. Production callers leave them unset and pick up
+`/usr/bin/codesign`, `/usr/bin/xcrun`, `/usr/bin/ditto`, and
+`/usr/bin/plutil`. The override seam exists for the test harness in
 `scripts/test/` to stub the tools so the argv and JSON-status parsing logic
-can be exercised on Linux CI runners. Other tools the scripts invoke
-(`mktemp`, `basename`, `sed`, `head`, `tee`, `cat`, `grep`) use absolute
-paths and are not overridable; they are present at `/usr/bin/*` (and
-`/bin/cat`) on every supported macOS and Linux host.
+can be exercised under controlled fixtures. Other tools the scripts invoke
+(`mktemp`, `basename`, `tee`, `cat`, `grep`) use absolute paths and are not
+overridable; they are present at `/usr/bin/*` (and `/bin/cat`) on every
+supported macOS host. JSON parsing is delegated to `plutil` so callers
+don't have to assume any particular formatting from
+`xcrun notarytool --output-format json`.
 
 ## Tests
 

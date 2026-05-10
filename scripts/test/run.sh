@@ -225,12 +225,11 @@ run_case "notarize: team id from TPROMPT_APPLE_TEAM_ID env" 0 'notarization acce
        TPROMPT_APPLE_TEAM_ID='TEST' \
   "$notarize_script" "$env_team_target"
 
-# Status-parser: Apple's submission JSON keys must be matched at the
-# start of a line (not as substrings). Construct a fixture-shaped JSON
-# that contains "jobId" before "id" and "message" containing "status";
-# the production parser must extract id="real" and status="Accepted",
-# not match the substring keys. (Documents the JSON-shape contract;
-# anchor enforcement is asserted by the single-line test below.)
+# Status-parser: extraction must be structure-aware (not substring).
+# Construct a fixture-shaped JSON where `"jobId"` appears before `"id"`
+# and `"message"` contains a literal `"status": "junk"`. A naïve
+# substring grep would mis-extract; the production parser uses plutil's
+# JSON keypath extraction so it picks the top-level `id`/`status`.
 custom_xcrun="$(mktemp_tracked_file)"
 cat >"$custom_xcrun" <<'STUB'
 #!/usr/bin/env bash
@@ -238,11 +237,16 @@ case "${1:-}" in
   notarytool)
     case "${2:-}" in
       submit)
+        # Note: nested `"status": "Invalid"` appears BEFORE the
+        # top-level `"status": "Accepted"` in source order, so a
+        # substring parser would extract "Invalid" first and bail to
+        # the failure path. plutil's keypath extraction must pick the
+        # top-level scalar regardless of order.
         cat <<'JSON'
 {
   "jobId": "wrong-substring-id",
   "id": "real-id",
-  "message": "diagnostic mentioning \"status\": \"Accepted\" inline",
+  "message": "diagnostic mentioning \"status\": \"Invalid\" inline",
   "status": "Accepted"
 }
 JSON
@@ -263,12 +267,10 @@ run_case "notarize: status parser ignores substring keys" 0 'notarization accept
        XCRUN="$custom_xcrun" \
   "$notarize_script" --team-id 'TEST' "$status_parse_target"
 
-# Anchor enforcement: emit the JSON un-pretty-printed on a single line.
-# With the production sed anchor `^[[:space:]]*"status"`, status parses
-# as empty (no indented `"status"` line) and the empty-status diagnostic
-# fires → exit 1. Without the anchor, `"status":"Accepted"` would match
-# mid-line and exit 0 with "notarization accepted". Removing the anchor
-# would flip this assertion's exit code from 1 to 0.
+# Compact (single-line) JSON must parse successfully. Apple's
+# `--output-format json` only guarantees JSON, not pretty-printed
+# JSON, so a future Xcode emitting compact output must not break the
+# happy path. plutil parses both compact and pretty JSON the same way.
 single_line_xcrun="$(mktemp_tracked_file)"
 cat >"$single_line_xcrun" <<'STUB'
 #!/usr/bin/env bash
@@ -288,7 +290,7 @@ chmod +x "$single_line_xcrun"
 single_line_workdir="$(mktemp_tracked_dir)"
 single_line_target="$single_line_workdir/tprompt"
 : > "$single_line_target"
-run_case "notarize: anchor enforced — single-line JSON fails status parse" 1 '' 'could not parse notary status' \
+run_case "notarize: compact single-line JSON parses successfully" 0 'notarization accepted: single-line-id' '' \
   -- env CODESIGN="$fixtures/codesign-noop" \
        DITTO="$fixtures/ditto-noop" \
        XCRUN="$single_line_xcrun" \

@@ -19,6 +19,8 @@ Environment:
                            (default /usr/bin/xcrun). Used by tests.
   DITTO                    Override the ditto binary path
                            (default /usr/bin/ditto). Used by tests.
+  PLUTIL                   Override the plutil binary path
+                           (default /usr/bin/plutil). Used by tests.
 
 Example:
   TPROMPT_APPLE_TEAM_ID=79S467K965 \
@@ -29,6 +31,7 @@ USAGE
 codesign_bin="${CODESIGN:-/usr/bin/codesign}"
 xcrun_bin="${XCRUN:-/usr/bin/xcrun}"
 ditto_bin="${DITTO:-/usr/bin/ditto}"
+plutil_bin="${PLUTIL:-/usr/bin/plutil}"
 
 profile="${TPROMPT_NOTARY_PROFILE:-tprompt-notary}"
 keychain="${TPROMPT_NOTARY_KEYCHAIN:-}"
@@ -147,13 +150,14 @@ if [[ "$xcrun_rc" -ne 0 ]]; then
   exit 1
 fi
 
-# Anchor the JSON-key match to start-of-line + optional indent so
-# `"id"` doesn't substring-match `"jobId"` / `"appleId"` / etc., and
-# `"status"` doesn't pick up a nested message string. Apple's
-# `--output-format json` is pretty-printed in practice, so each key
-# starts a line.
-status="$(/usr/bin/sed -n 's/^[[:space:]]*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$submission_json" | /usr/bin/head -n 1)"
-submission_id="$(/usr/bin/sed -n 's/^[[:space:]]*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$submission_json" | /usr/bin/head -n 1)"
+# Use plutil (ships with macOS) for structure-aware JSON parsing so
+# this works whether notarytool emits pretty-printed or compact JSON,
+# and so a nested `"status"` inside `"message"` can't be mis-extracted.
+# `-extract <keypath> raw -o -` writes the scalar value to stdout.
+# Suppress stderr and fall back to empty so the empty-status diagnostic
+# below fires uniformly when plutil errors (missing key / invalid JSON).
+status="$("$plutil_bin" -extract status raw -o - "$submission_json" 2>/dev/null)" || status=""
+submission_id="$("$plutil_bin" -extract id raw -o - "$submission_json" 2>/dev/null)" || submission_id=""
 
 if [[ -z "$status" ]]; then
   echo "error: could not parse notary status from $submission_json" >&2
