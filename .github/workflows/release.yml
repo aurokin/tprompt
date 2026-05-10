@@ -168,7 +168,11 @@ jobs:
         if: matrix.os == 'darwin'
         env:
           TPROMPT_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          TPROMPT_NOTARY_KEYCHAIN: ${{ env.APPLE_SIGNING_KEYCHAIN }}
+        # APPLE_SIGNING_KEYCHAIN was exported via $GITHUB_ENV by the
+        # import step. Pass it through the shell rather than the
+        # `env:` block + ${{ env.* }} indirection so the value is
+        # whatever the runner's process environment sees, not an
+        # expression-language lookup that resolves at step-init time.
         # Tee stdout+stderr to a durable log file. The script's EXIT
         # trap nukes its temp workdir (where notary-log.json lives) on
         # exit, so without this capture the upload-on-failure step
@@ -176,8 +180,9 @@ jobs:
         # script's exit code through the pipe.
         run: |
           set -o pipefail
-          scripts/notarize-macos-binary.sh \
-            "dist/tprompt-${{ matrix.os }}-${{ matrix.arch }}/tprompt" \
+          TPROMPT_NOTARY_KEYCHAIN="$APPLE_SIGNING_KEYCHAIN" \
+            scripts/notarize-macos-binary.sh \
+              "dist/tprompt-${{ matrix.os }}-${{ matrix.arch }}/tprompt" \
             2>&1 | tee "$RUNNER_TEMP/notarize.log"
 
       # Acceptance criterion: codesign --verify --strict --verbose=4

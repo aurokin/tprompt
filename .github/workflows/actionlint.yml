@@ -11,6 +11,13 @@ on:
 
 permissions:
   contents: read
+  # reviewdog/action-actionlint defaults to the github-pr-check
+  # reporter, which posts findings via the Checks API. Without
+  # checks: write the action runs but can't surface results.
+  checks: write
+  # Allows the action to post review comments on PRs when it falls
+  # back to the github-pr-review reporter.
+  pull-requests: write
 
 jobs:
   actionlint:
