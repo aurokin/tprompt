@@ -92,7 +92,7 @@ type stubAssessor struct {
 	reason string
 }
 
-func (s stubAssessor) Assess(StartIntent, string) AssessResult {
+func (s stubAssessor) Assess(string) AssessResult {
 	return AssessResult{Allow: s.allow, Reason: s.reason}
 }
 
@@ -369,8 +369,13 @@ func (s *recordCooldownSpawner) Spawn(_ context.Context, _ string, _ []string, _
 	return SpawnHandle{}, errors.New("spawn refused for test")
 }
 
-func TestLauncherTrustGateRejectionImplicitOnly(t *testing.T) {
-	skipIfDarwinImplicitDisabled(t)
+// TestLauncherTrustGateRejectsExplicitStart verifies the AUR-327
+// contract: the assessor fires for IntentExplicitStart on every
+// platform. A denying assessor maps to OutcomeFailed/ReasonTrustGate,
+// and the launcher must NOT spawn. Explicit intents do not record a
+// cooldown (cooldown is implicit-only and implicit on darwin is
+// policy-disabled anyway).
+func TestLauncherTrustGateRejectsExplicitStart(t *testing.T) {
 	t.Parallel()
 	p, socket := newPaths(t)
 	prober := &stubProber{fallback: unreachable()}
@@ -383,36 +388,76 @@ func TestLauncherTrustGateRejectionImplicitOnly(t *testing.T) {
 		ReadinessTimeout: 5 * time.Millisecond,
 		PollInterval:     time.Millisecond,
 	})
-	res := l.Start(context.Background(), IntentImplicitTUI)
+	res := l.Start(context.Background(), IntentExplicitStart)
 	if res.Outcome != dlife.OutcomeFailed || res.Reason != dlife.ReasonTrustGate {
 		t.Fatalf("Outcome=%v Reason=%v, want Failed/TrustGate", res.Outcome, res.Reason)
+	}
+	if !strings.Contains(res.Detail, "ad-hoc signature") {
+		t.Fatalf("detail %q must surface the assessor's reason", res.Detail)
 	}
 	if spawner.called != 0 {
 		t.Fatal("spawn happened despite trust rejection")
 	}
-	if _, active, _ := dlife.ReadCooldown(p, time.Now); !active {
-		t.Fatal("trust-gate failure did not record cooldown")
+	if _, active, _ := dlife.ReadCooldown(p, time.Now); active {
+		t.Fatal("explicit-start trust-gate rejection recorded a cooldown (must not)")
 	}
+}
 
-	// Same denying assessor under explicit start: gate is bypassed →
-	// spawn proceeds. Cooldown set above is bypassed by explicit intent
-	// and should be cleared on success.
-	prober2 := &stubProber{results: unreachableN(2), fallback: okFallback()}
-	spawner2 := &stubSpawner{}
-	l2 := New(Options{
+// TestLauncherTrustGateAllowsExplicitStartWhenSigned verifies the
+// happy path: an allowing assessor lets the launcher proceed to
+// spawn for IntentExplicitStart.
+func TestLauncherTrustGateAllowsExplicitStartWhenSigned(t *testing.T) {
+	t.Parallel()
+	_, socket := newPaths(t)
+	prober := &stubProber{results: unreachableN(2), fallback: okFallback()}
+	spawner := &stubSpawner{}
+	assessor := &recordingAssessor{}
+	l := New(Options{
 		SocketPath:       socket,
-		Status:           prober2,
-		Spawner:          spawner2,
-		Assessor:         stubAssessor{allow: false, reason: "should not fire"},
+		Status:           prober,
+		Spawner:          spawner,
+		Assessor:         assessor,
 		ReadinessTimeout: 5 * time.Millisecond,
 		PollInterval:     time.Millisecond,
 	})
-	res2 := l2.Start(context.Background(), IntentExplicitStart)
-	if res2.Outcome != dlife.OutcomeStarted {
-		t.Fatalf("explicit start through denied trust gate = %v, want Started", res2.Outcome)
+	res := l.Start(context.Background(), IntentExplicitStart)
+	if res.Outcome != dlife.OutcomeStarted {
+		t.Fatalf("explicit start with allowing assessor = %v, want Started", res.Outcome)
 	}
-	if _, active, _ := dlife.ReadCooldown(p, time.Now); active {
-		t.Fatal("explicit start did not clear cooldown")
+	if spawner.called != 1 {
+		t.Fatalf("spawner.called = %d, want 1", spawner.called)
+	}
+	if assessor.calls != 1 {
+		t.Fatalf("assessor.calls = %d, want 1 (explicit start must invoke the gate)", assessor.calls)
+	}
+}
+
+// TestLauncherTrustGateBypassedForImplicit verifies that even when
+// the launcher receives IntentImplicitTUI (only reachable on
+// non-darwin where the policy seam doesn't fire), the trust assessor
+// is NOT invoked. Implicit is platform-policy on darwin and bypasses
+// the gate everywhere else by design.
+func TestLauncherTrustGateBypassedForImplicit(t *testing.T) {
+	skipIfDarwinImplicitDisabled(t)
+	t.Parallel()
+	_, socket := newPaths(t)
+	prober := &stubProber{results: unreachableN(2), fallback: okFallback()}
+	spawner := &stubSpawner{}
+	assessor := &recordingAssessor{}
+	l := New(Options{
+		SocketPath:       socket,
+		Status:           prober,
+		Spawner:          spawner,
+		Assessor:         assessor,
+		ReadinessTimeout: 5 * time.Millisecond,
+		PollInterval:     time.Millisecond,
+	})
+	res := l.Start(context.Background(), IntentImplicitTUI)
+	if res.Outcome != dlife.OutcomeStarted {
+		t.Fatalf("implicit start = %v, want Started", res.Outcome)
+	}
+	if assessor.calls != 0 {
+		t.Fatalf("assessor invoked %d times for implicit intent (must be 0)", assessor.calls)
 	}
 }
 
@@ -723,7 +768,7 @@ type recordingAssessor struct {
 	calls int
 }
 
-func (a *recordingAssessor) Assess(StartIntent, string) AssessResult {
+func (a *recordingAssessor) Assess(string) AssessResult {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.calls++

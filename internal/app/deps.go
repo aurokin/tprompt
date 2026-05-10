@@ -52,6 +52,7 @@ type Deps struct {
 	NewDaemonClient          func(cfg config.Resolved) (daemon.Client, error)
 	NewDaemonReadinessClient func(cfg config.Resolved, timeout time.Duration) daemon.Client
 	NewLauncher              func(cfg config.Resolved, explicitConfigPath string) DaemonLauncher
+	NewTrustAssessor         func() applife.TrustAssessor
 	NewRenderer              func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error)
 	NewSubmitter             func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter
 }
@@ -93,6 +94,7 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 		},
 		NewDaemonReadinessClient: productionNewDaemonReadinessClient,
 		NewLauncher:              productionNewLauncher,
+		NewTrustAssessor:         applife.ProductionAssessor,
 		NewRenderer: func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error) {
 			// Stub renderers (TPROMPT_TEST_RENDERER) never touch the real
 			// clipboard, so build the Reader only for the production path.

@@ -73,7 +73,7 @@ func TestDarwinAssessorAdHocSignatureViaSignatureLine(t *testing.T) {
 		sp + "/--assess": {exit: 0},
 	}}
 	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
-	res := a.Assess(IntentImplicitTUI, "/usr/local/bin/tprompt")
+	res := a.Assess("/usr/local/bin/tprompt")
 	if res.Allow {
 		t.Fatal("ad-hoc signature should be denied")
 	}
@@ -83,8 +83,11 @@ func TestDarwinAssessorAdHocSignatureViaSignatureLine(t *testing.T) {
 	if !strings.Contains(res.Reason, "/usr/local/bin/tprompt") {
 		t.Errorf("reason = %q, want path-specific", res.Reason)
 	}
-	if !strings.Contains(res.Reason, "tprompt daemon start") {
-		t.Errorf("reason = %q, want recovery hint", res.Reason)
+	if !strings.Contains(res.Reason, "sign-macos-binary.sh") {
+		t.Errorf("reason = %q, want recovery hint pointing at local signing script", res.Reason)
+	}
+	if !strings.Contains(res.Reason, trustBypassEnv) {
+		t.Errorf("reason = %q, want bypass env var hint", res.Reason)
 	}
 }
 
@@ -100,7 +103,7 @@ func TestDarwinAssessorAdHocSignatureViaCodeDirectoryFlags(t *testing.T) {
 		sp + "/--assess": {exit: 0},
 	}}
 	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
-	res := a.Assess(IntentImplicitTUI, "/x")
+	res := a.Assess("/x")
 	if res.Allow {
 		t.Fatal("flags=adhoc should be denied")
 	}
@@ -116,7 +119,7 @@ func TestDarwinAssessorInvalidSignature(t *testing.T) {
 		cs + "/--verify": {exit: 1, stderr: "/x: code object is not signed at all\nIn architecture: arm64\n"},
 	}}
 	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
-	res := a.Assess(IntentImplicitTUI, "/x")
+	res := a.Assess("/x")
 	if res.Allow {
 		t.Fatal("invalid signature should be denied")
 	}
@@ -146,7 +149,7 @@ func TestDarwinAssessorGatekeeperRejected(t *testing.T) {
 		sp + "/--assess": {exit: 3, stderr: "/x: rejected\nsource=Unverified\n"},
 	}}
 	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
-	res := a.Assess(IntentImplicitTUI, "/x")
+	res := a.Assess("/x")
 	if res.Allow {
 		t.Fatal("Gatekeeper rejection should be denied")
 	}
@@ -166,7 +169,7 @@ func TestDarwinAssessorValidCLIBypass(t *testing.T) {
 		sp + "/--assess": {exit: 3, stderr: stderr},
 	}}
 	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
-	res := a.Assess(IntentImplicitTUI, "/x")
+	res := a.Assess("/x")
 	if !res.Allow {
 		t.Fatalf("CLI bypass should be allowed; reason=%q", res.Reason)
 	}
@@ -181,7 +184,7 @@ func TestDarwinAssessorFullyAllowed(t *testing.T) {
 		sp + "/--assess": {exit: 0},
 	}}
 	a := darwinAssessor{codesign: cs, spctl: sp, run: r}
-	res := a.Assess(IntentImplicitTUI, "/x")
+	res := a.Assess("/x")
 	if !res.Allow {
 		t.Fatalf("fully signed + Gatekeeper-accepted should allow; reason=%q", res.Reason)
 	}
@@ -195,7 +198,7 @@ func TestDarwinAssessorToolsMissing(t *testing.T) {
 		spctl:    "/usr/bin/true",
 		run:      r,
 	}
-	res := a.Assess(IntentImplicitTUI, "/x")
+	res := a.Assess("/x")
 	if res.Allow {
 		t.Fatal("missing codesign should be denied (degrade-loudly path)")
 	}
@@ -218,6 +221,88 @@ func (hangingRunner) Run(ctx context.Context, _ string, _ ...string) ([]byte, []
 	return nil, nil, -1, ctx.Err()
 }
 
+// TestDarwinAssessorBypassEnvAllowsPositiveValues verifies the AUR-327
+// testing override: TPROMPT_UNSAFE_TRUST_PREFLIGHT_BYPASS short-circuits
+// the assessor when set to a known-positive value. The runner is never
+// invoked. The reason field echoes the literal value so an operator can
+// see what they set.
+func TestDarwinAssessorBypassEnvAllowsPositiveValues(t *testing.T) {
+	t.Parallel()
+	for _, v := range []string{"1", "true", "True", "YES", "on"} {
+		v := v
+		t.Run("v="+v, func(t *testing.T) {
+			t.Parallel()
+			cs, sp := availablePaths()
+			r := &fakeRunner{}
+			a := darwinAssessor{
+				codesign: cs,
+				spctl:    sp,
+				run:      r,
+				getenv: func(k string) string {
+					if k == trustBypassEnv {
+						return v
+					}
+					return ""
+				},
+			}
+			res := a.Assess("/x")
+			if !res.Allow {
+				t.Fatalf("bypass %q should allow; reason=%q", v, res.Reason)
+			}
+			if !strings.Contains(res.Reason, "testing override") {
+				t.Errorf("reason = %q, want 'testing override'", res.Reason)
+			}
+			if !strings.Contains(res.Reason, v) {
+				t.Errorf("reason = %q, want literal %q", res.Reason, v)
+			}
+			if len(r.calls) != 0 {
+				t.Errorf("runner invoked despite bypass: %v", r.calls)
+			}
+		})
+	}
+}
+
+// TestDarwinAssessorBypassEnvKnownNegativeKeepsGate verifies that
+// known-negative values, typos, and garbage do NOT bypass the gate.
+// This guards against the AUR-314 era footgun where unrecognized
+// values silently disabled the gate.
+func TestDarwinAssessorBypassEnvKnownNegativeKeepsGate(t *testing.T) {
+	t.Parallel()
+	for _, v := range []string{"0", "false", "no", "off", "bogus"} {
+		v := v
+		t.Run("v="+v, func(t *testing.T) {
+			t.Parallel()
+			cs, sp := availablePaths()
+			r := &fakeRunner{canned: map[string]runResult{
+				cs + "/--verify": {exit: 0},
+				cs + "/-d":       {exit: 0, stderr: "Authority=Apple\n"},
+				sp + "/--assess": {exit: 0},
+			}}
+			a := darwinAssessor{
+				codesign: cs,
+				spctl:    sp,
+				run:      r,
+				getenv: func(k string) string {
+					if k == trustBypassEnv {
+						return v
+					}
+					return ""
+				},
+			}
+			res := a.Assess("/x")
+			if !res.Allow {
+				t.Fatalf("known-negative bypass %q should leave gate active and reach allow path; reason=%q", v, res.Reason)
+			}
+			if strings.Contains(res.Reason, "testing override") {
+				t.Errorf("reason = %q, must NOT mention testing override", res.Reason)
+			}
+			if len(r.calls) == 0 {
+				t.Errorf("runner not invoked despite known-negative value %q", v)
+			}
+		})
+	}
+}
+
 func TestDarwinAssessorBoundsHangingToolWithTimeout(t *testing.T) {
 	t.Parallel()
 	cs, sp := availablePaths()
@@ -228,7 +313,7 @@ func TestDarwinAssessorBoundsHangingToolWithTimeout(t *testing.T) {
 		timeout:  25 * time.Millisecond,
 	}
 	start := time.Now()
-	res := a.Assess(IntentImplicitTUI, "/usr/local/bin/tprompt")
+	res := a.Assess("/usr/local/bin/tprompt")
 	elapsed := time.Since(start)
 	if res.Allow {
 		t.Fatal("hanging trust tool should be denied")

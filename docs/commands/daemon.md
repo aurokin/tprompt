@@ -51,6 +51,16 @@ Neither config nor flag re-enables the implicit path. See
 [`docs/lifecycle/auto-start.md`](../lifecycle/auto-start.md) for the
 rationale.
 
+On macOS, `tprompt daemon start` and `tprompt daemon run` perform an
+executable-trust preflight before spawning or binding (AUR-327). Ad-hoc,
+unsigned, tampered, or Gatekeeper-rejected binaries are refused with an
+error that names the binary and points at recovery options (install a
+signed release, or run `scripts/sign-macos-binary.sh` for a local dev
+build). `tprompt daemon stop` and `tprompt daemon status` never preflight
+and work against any running daemon. For local development the
+`TPROMPT_UNSAFE_TRUST_PREFLIGHT_BYPASS=1` env var short-circuits the
+preflight; do not set it in production.
+
 Duplicate daemon processes are prevented by the launcher's start-lock plus
 run-lock ownership behavior. `tprompt daemon status` remains a read-only
 lifecycle check and never starts the daemon implicitly.

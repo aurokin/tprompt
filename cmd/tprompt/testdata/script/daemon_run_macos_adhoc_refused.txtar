@@ -1,0 +1,25 @@
+# On macOS, `tprompt daemon run` runs its own AUR-327 trust preflight
+# before binding the socket. With the suite-wide
+# TPROMPT_UNSAFE_TRUST_PREFLIGHT_BYPASS cleared, the test binary
+# (ad-hoc-signed by `go test`) trips the gate and the foreground
+# daemon refuses to bind.
+
+[!darwin] skip
+
+env TPROMPT_UNSAFE_TRUST_PREFLIGHT_BYPASS=
+
+mkdir prompts state
+
+! tprompt daemon run --config config.toml
+stderr 'failed macOS trust check'
+stderr 'ad-hoc'
+
+# Daemon log must not exist either — the preflight refuses before
+# daemon.NewLogger opens it.
+! exec test -e state/daemon.log
+! exec test -e state/daemon.sock
+
+-- config.toml --
+prompts_dir = "prompts"
+socket_path = "state/daemon.sock"
+log_path = "state/daemon.log"

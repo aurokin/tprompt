@@ -30,6 +30,17 @@ const (
 	spctlPath    = "/usr/sbin/spctl"
 )
 
+// trustBypassEnv, when set to a known-positive value, short-circuits
+// the assessor with an Allow result. Intended for the test binary
+// (which is ad-hoc-signed by `go test`) and for local development.
+// The "UNSAFE" prefix is deliberate: production release operation
+// should never rely on it. Acceptance is restricted to explicit
+// values (`1`, `true`, `yes`, `on`) so a typo cannot silently
+// disable the gate.
+//
+//nolint:gosec // env var name; the "BYPASS" substring is misread as a credential pattern.
+const trustBypassEnv = "TPROMPT_UNSAFE_TRUST_PREFLIGHT_BYPASS"
+
 // runner is the seam used by darwinAssessor to invoke codesign/spctl.
 // Production wires execRunner; tests inject a fake.
 type runner interface {
@@ -64,6 +75,7 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 type darwinAssessor struct {
 	codesign string
 	spctl    string
+	getenv   func(string) string
 	run      runner
 	// timeout bounds each codesign/spctl invocation. A zero value
 	// disables the bound (used by unit tests with synchronous fake
@@ -78,20 +90,25 @@ type darwinAssessor struct {
 // the daemon log path to the failure message, so this constructor
 // takes no arguments.
 //
-// As of AUR-326, the launcher does not invoke this assessor on the
-// implicit-TUI path (implicit auto-start is hardcoded off on macOS).
-// AUR-327 will reintroduce the assessor on the explicit-start path.
+// AUR-326 hardcodes the implicit-TUI path off on macOS, so the
+// implicit path never reaches this assessor. AUR-327 wires the
+// assessor on the explicit-start path (via the launcher) and on the
+// foreground `daemon run` entrypoint (via runDaemonForeground).
 func ProductionAssessor() TrustAssessor {
 	return darwinAssessor{
 		codesign: codesignPath,
 		spctl:    spctlPath,
+		getenv:   os.Getenv,
 		run:      execRunner{},
 		timeout:  DefaultTrustGateCommandTimeout,
 	}
 }
 
 // Assess implements TrustAssessor.
-func (a darwinAssessor) Assess(intent StartIntent, exec string) AssessResult {
+func (a darwinAssessor) Assess(exec string) AssessResult {
+	if r, ok := a.evaluateBypass(); ok {
+		return r
+	}
 	if r, ok := a.checkToolsAvailable(exec); !ok {
 		return r
 	}
@@ -106,6 +123,27 @@ func (a darwinAssessor) Assess(intent StartIntent, exec string) AssessResult {
 		return r
 	}
 	return AssessResult{Allow: true}
+}
+
+// evaluateBypass short-circuits the gate when TPROMPT_UNSAFE_TRUST_PREFLIGHT_BYPASS
+// is set to a known-positive value. Used by the testscript suite (where
+// the test binary is ad-hoc-signed) and by local developers running
+// `go build`-produced binaries. Known-negative values (`0`, `false`,
+// unknown strings) leave the gate active so a typo cannot silently
+// disable the preflight.
+func (a darwinAssessor) evaluateBypass() (AssessResult, bool) {
+	if a.getenv == nil {
+		return AssessResult{}, false
+	}
+	v := strings.TrimSpace(a.getenv(trustBypassEnv))
+	if v == "" {
+		return AssessResult{}, false
+	}
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return AssessResult{Allow: true, Reason: trustBypassEnv + "=" + v + " (testing override)"}, true
+	}
+	return AssessResult{}, false
 }
 
 func (a darwinAssessor) checkToolsAvailable(execPath string) (AssessResult, bool) {
@@ -213,12 +251,9 @@ func isCLIBypass(stderr []byte) bool {
 }
 
 func (a darwinAssessor) deny(execPath, reason string) AssessResult {
-	// The daemon log path is appended by launcherFailureMessage in
-	// internal/app/tui.go so we don't end up with two copies of it
-	// when the failure surfaces in the TUI banner.
 	msg := fmt.Sprintf(
-		"daemon executable %q failed macOS trust check (%s). Run 'tprompt daemon start' to start the daemon explicitly.",
-		execPath, reason,
+		"daemon executable %q failed macOS trust check (%s). Install a signed release, or run 'scripts/sign-macos-binary.sh' for a local dev build. Use of %s=1 is permitted for local development only.",
+		execPath, reason, trustBypassEnv,
 	)
 	return AssessResult{Allow: false, Reason: msg}
 }

@@ -121,18 +121,19 @@ type Spawner interface {
 	Spawn(ctx context.Context, exec string, args []string, logPath string) (SpawnHandle, error)
 }
 
-// TrustAssessor implements the macOS executable-trust preflight wired in
-// AUR-314. The default no-op assessor allows everything; callers building
-// a Launcher on darwin set a real assessor here.
+// TrustAssessor implements the macOS executable-trust preflight. It is
+// invoked on the explicit-start path on darwin (AUR-327); other paths
+// bypass via the launcher's intent gate or the platform policy. On
+// non-darwin builds the production assessor is a no-op.
 type TrustAssessor interface {
-	Assess(intent StartIntent, exec string) AssessResult
+	Assess(exec string) AssessResult
 }
 
-// noopAssessor allows every intent to spawn. Used when no TrustAssessor
-// is supplied (Linux production, all unit tests by default).
+// noopAssessor allows everything. Used when no TrustAssessor is
+// supplied (Linux production, unit tests that don't model trust).
 type noopAssessor struct{}
 
-func (noopAssessor) Assess(StartIntent, string) AssessResult {
+func (noopAssessor) Assess(string) AssessResult {
 	return AssessResult{Allow: true}
 }
 
@@ -306,13 +307,17 @@ func (l *Launcher) applyImplicitPolicy(intent StartIntent, paths dlife.Paths) (d
 	return failed(dlife.ReasonPolicyDisabled, reason), true
 }
 
-// runTrustGate applies the macOS executable trust assessment for
-// implicit starts. Explicit intents always bypass.
+// runTrustGate applies the macOS executable trust assessment on the
+// explicit-start path (AUR-327). The implicit-TUI path on darwin is
+// already short-circuited by applyImplicitPolicy before this runs;
+// `daemon run` foreground does its own preflight in the command
+// handler since the launcher does not drive `daemon run`. Other
+// intents bypass.
 func (l *Launcher) runTrustGate(intent StartIntent) (AssessResult, dlife.StartResult, bool) {
-	if intent != IntentImplicitTUI {
+	if intent != IntentExplicitStart {
 		return AssessResult{Allow: true}, dlife.StartResult{}, false
 	}
-	res := l.opts.Assessor.Assess(intent, l.opts.Executable)
+	res := l.opts.Assessor.Assess(l.opts.Executable)
 	if res.Allow {
 		return res, dlife.StartResult{}, false
 	}

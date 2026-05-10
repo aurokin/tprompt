@@ -28,7 +28,7 @@ All four live next to the configured socket path, e.g. `~/.local/state/tprompt/d
 
 - `StatusProber.Probe(ctx) → (ProbeResult, error)`. Three outcomes: `ProbeOK`, `ProbeUnreachable`, `ProbeReachableBroken`. The launcher refuses to spawn over `ProbeReachableBroken`.
 - `Spawner.Spawn(ctx, exec, args, logPath) → (SpawnHandle, error)`. The handle carries a PID so the readiness loop can detect child early-exit via `kill(pid, 0)` and report `ReasonChildExitedEarly` instead of timing out.
-- `TrustAssessor.Assess(intent, exec) → AssessResult`. Reserved for future explicit-start preflight (AUR-327). After AUR-326 it is not invoked on the implicit path; the macOS implicit path is refused before the launcher reaches the assessor.
+- `TrustAssessor.Assess(exec) → AssessResult`. Runs the macOS executable-trust preflight (codesign verify, ad-hoc detection, Gatekeeper assess with CLI bypass) on the explicit-start path (AUR-327). The launcher fires it for `IntentExplicitStart`; the foreground `daemon run` entry has its own preflight call. Implicit on darwin is short-circuited by `MacOSImplicitAutoStartDisabled` before this runs.
 - `MacOSImplicitAutoStartDisabled(intent)` — build-tagged platform policy. Returns `(true, reason)` on darwin for `IntentImplicitTUI`; returns `(false, "")` otherwise. The launcher short-circuits before the cooldown, start lock, trust assessor, and spawn path when this returns true.
 
 The launcher also takes a `Now` clock and a `LogPreSpawn` callback so unit tests can substitute time and capture diagnostics.
@@ -73,7 +73,22 @@ Behavior:
 
 Rationale: macOS launch evaluation triggered repeated kernel panics in `AppleSystemPolicy` / `AMFI` / `syspolicyd` during implicit auto-start of real release binaries. Diagnosing the root cause requires kernel-level cooperation we do not have; until then, implicit auto-start is refused on darwin so a TUI invocation never feeds the launchd path that panicked the kernel. Explicit `daemon start` and `daemon run` exercise a different code path that has not exhibited the panic.
 
-The previous AUR-314 trust gate (`internal/app/lifecycle/trust_darwin.go`) was active on `IntentImplicitTUI` only. With AUR-326 the implicit path is refused before the assessor is consulted, so the trust gate code is dormant. AUR-327 plans to re-wire the assessor as a preflight on the explicit start path; the implementation in `trust_darwin.go` is retained for that purpose.
+## macOS executable-trust preflight (explicit path)
+
+After AUR-327, the trust assessor (`internal/app/lifecycle/trust_darwin.go`) is the explicit-start gate. It runs in two places:
+
+1. **`Launcher.runTrustGate` for `IntentExplicitStart`.** Fired before the start lock is acquired and before the spawn. A denial returns `OutcomeFailed` with `ReasonTrustGate` and the assessor's reason verbatim; the launcher does not spawn.
+2. **`preflightDaemonRun` in `runDaemonForeground`.** Fired before the daemon log is opened and the socket is bound. A denial returns a `daemon.IPCError` and the daemon process exits without touching the daemon log file or run lock.
+
+The assessor's algorithm is unchanged from AUR-314: `codesign --verify --strict` → `codesign -d -vv` (ad-hoc detection via `Signature=adhoc` or `flags=...adhoc...`) → `spctl --assess --type execute` (with CLI-bypass for "valid but does not seem to be an app"). Missing tools fail closed.
+
+`daemon start` on darwin runs the preflight twice: once in the parent under `IntentExplicitStart`, once in the child's foreground entry. The cost is ~100ms warm cache and avoids a cross-process trust hand-off. The two preflights see the same binary in practice; if they diverge (e.g., binary replaced between fork and child startup), the child fails to bind, the parent's readiness wait fires `ReasonChildExitedEarly`, and the failure surfaces through the standard channel.
+
+### Environment overrides
+
+- **`TPROMPT_UNSAFE_TRUST_PREFLIGHT_BYPASS=1`** short-circuits the assessor with an Allow result. Intended for local development (where `go build` produces ad-hoc-signed binaries) and for the testscript suite (where the test binary is ad-hoc-signed by `go test`). The `UNSAFE` prefix is deliberate: production release operation should never set it. Only the known-positive values `1`, `true`, `yes`, `on` (case-insensitive) bypass; unrecognized values leave the gate active so a typo does not silently disable it.
+
+  Inheritance caveat: `daemon start` spawns `daemon run` with the parent's environment, so a bypass set on the parent reaches the child. The double preflight described above therefore does NOT defend against an attacker who can set environment variables in the parent process — an attacker with that capability has already won (they can replace `tprompt` itself). The bypass is a developer/testing convenience, not a security control.
 
 ## Recovery paths
 
@@ -86,12 +101,12 @@ The TUI failure banner only suggests options the TUI command path accepts (i.e.,
 
 ## Signing/notarization expectation for releases
 
-Although implicit auto-start is currently disabled on macOS, the release artifacts that ship `tprompt` on macOS must still be:
+Release artifacts that ship `tprompt` on macOS must be:
 
 - **Validly signed** with a Developer ID Application certificate (or equivalent trusted by Gatekeeper).
 - **Notarized** with Apple if distributed outside the App Store.
 
-This is for two reasons: (1) Gatekeeper still inspects the binary on first launch even for explicit invocations, and (2) AUR-327's planned explicit-start preflight will reuse the existing `trust_darwin.go` assessor, at which point signing/notarization status will be re-evaluated on explicit invocations.
+Both are required for the AUR-327 explicit-start trust preflight to allow the daemon to bind. Ad-hoc-signed, unsigned, or unnotarized release binaries are refused on darwin by both `daemon start` and `daemon run`.
 
 For development builds (`go build`, `make build`) the user is expected to run `tprompt daemon start` explicitly.
 
