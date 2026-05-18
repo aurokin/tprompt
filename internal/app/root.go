@@ -33,8 +33,8 @@ func NewRootCmd(deps Deps) *cobra.Command {
   send <id>   Direct synchronous delivery of a prompt by ID.
   paste       Direct synchronous delivery of the host clipboard.
   pick        Print a prompt ID chosen via an external picker (no delivery).
-  tui         Interactive TUI; selections are delivered by the local daemon
-              after the TUI exits (daemon-backed deferred delivery).
+  tui         Interactive TUI; selections spawn a short-lived handoff worker
+              after the TUI exits.
   daemon      Manage the local daemon lifecycle (start, status, stop).
 
 Inside tmux with a tty, bare 'tprompt' dispatches to 'tprompt tui'. Outside
@@ -61,6 +61,7 @@ tmux (or without a tty), bare 'tprompt' prints this help.`,
 		newPasteCmd(deps),
 		newDoctorCmd(deps),
 		newTUICmd(deps),
+		newHandoffCmd(deps),
 		newPickCmd(deps),
 		newDaemonCmd(deps),
 		newNewCmd(deps),

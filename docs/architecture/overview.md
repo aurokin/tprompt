@@ -10,7 +10,7 @@ Responsibilities:
 - load config
 - talk to prompt store
 - invoke tmux adapter directly for `send` and standalone `paste`
-- talk to daemon for deferred TUI-flow sends
+- spawn a short-lived handoff worker for deferred TUI-flow sends
 
 ## 2. Prompt store
 
@@ -36,16 +36,18 @@ Responsibilities:
 
 All tmux interaction is centralized here rather than scattered through the CLI and daemon. See `docs/tmux/delivery.md` for the concrete command construction.
 
-## 4. Daemon
+## 4. Deferred handoff
 
 Responsibilities:
 
-- receive deferred delivery jobs over local IPC (Unix socket)
+- receive deferred delivery jobs from private per-user job files
 - validate job shape
 - verify target pane readiness
 - inject only after verification passes
-- replace any pending job targeting the same pane when a new job arrives
 - surface success/failure via `display-message` + append-only log
+
+The daemon package still provides an explicit lifecycle command surface, but
+the TUI path does not require or auto-start a long-running daemon.
 
 ## 5. Clipboard reader
 
@@ -75,7 +77,7 @@ Responsibilities:
 - resolve single-key selection to a prompt ID or the clipboard action
 - handle `/`-search with fuzzy matching over id + title + description + tags
 - read the clipboard on keypress when the user selects the clipboard row
-- submit a `DeliveryRequest` to the daemon and exit
+- submit a handoff job and exit
 
 This is distinct from `internal/picker`, which only wraps the optional external `picker_command` used by `tprompt pick`. See `docs/commands/tui.md`.
 
@@ -93,11 +95,11 @@ This is distinct from `internal/picker`, which only wraps the optional external 
 1. `tprompt tui` (or bare `tprompt` when in tmux + tty) launches — typically inside a tmux popup — with target context passed in
 2. Built-in TUI renders the board + clipboard row
 3. User selects a prompt, the clipboard row, or searches
-4. If clipboard: TUI reads and validates the clipboard; on success, submits a job with `source = clipboard`
-5. If prompt: TUI submits a job with `source = prompt` and the resolved body
+4. If clipboard: TUI reads and validates the clipboard; on success, writes a handoff job with `source = clipboard`
+5. If prompt: TUI writes a handoff job with `source = prompt` and the resolved body
 6. TUI process exits
-7. Daemon verifies the target pane has returned to selection
-8. Sanitizer processes the content in the daemon's context
+7. Handoff worker verifies the target pane has returned to selection
+8. Sanitizer processes the content in the worker's context
 9. Adapter delivers
 
 ## Architectural priorities

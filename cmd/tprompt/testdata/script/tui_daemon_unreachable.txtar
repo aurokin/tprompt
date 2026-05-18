@@ -1,14 +1,21 @@
-# `tprompt tui` with --no-daemon-auto-start and the daemon socket missing
-# exits ExitDaemon (5) during the pre-flight chain, before any Renderer
-# runs. Stderr surfaces the SocketUnavailableError message so users know
-# the daemon isn't running. Auto-start is on by default after AUR-266,
-# so this script explicitly opts out to keep exercising the
-# daemon-unreachable failure path.
+# `tprompt tui` no longer preflights the daemon. Deprecated daemon
+# auto-start flags are accepted for compatibility but have no effect.
+
+[!exec:tmux] skip
+
+env TMUX_TMPDIR=$SHORT_TMPDIR
+env TPROMPT_TEST_RENDERER=cancel
+
+exec tmux new-session -d -s tuiflag 'sleep 60'
+exec tmux display-message -p '#{socket_path}'
+stdout $SHORT_TMPDIR
 
 mkdir prompts
-! tprompt tui --target-pane %0 --no-daemon-auto-start --config config.toml
-stderr 'daemon socket .* unavailable'
+tprompt tui --target-pane %0 --no-daemon-auto-start --config config.toml
+! stderr .
 ! stdout .
+
+exec tmux kill-server
 
 -- config.toml --
 prompts_dir = "prompts"

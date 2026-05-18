@@ -47,14 +47,6 @@ func TestDoctorHealthy(t *testing.T) {
 		}
 		return "", exec.ErrNotFound
 	}
-	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
-		return &fakeDaemonClient{
-			statusFn: func() (daemon.StatusResponse, error) {
-				return daemon.StatusResponse{Socket: "/tmp/tprompt-test.sock"}, nil
-			},
-		}, nil
-	}
-
 	stdout, _, err := executeRootWith(t, deps, "doctor")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -82,7 +74,7 @@ func TestDoctorHealthy(t *testing.T) {
 	assertPrefix(t, lines[7], "ok")
 	assertContains(t, lines[7], "picker command: fzf")
 	assertPrefix(t, lines[8], "ok")
-	assertContains(t, lines[8], "daemon reachable")
+	assertContains(t, lines[8], "TUI handoff ready")
 }
 
 func TestDoctorNoTmux(t *testing.T) {
@@ -102,12 +94,7 @@ func TestDoctorNoTmux(t *testing.T) {
 	assertContains(t, stdout, "warn not inside tmux")
 }
 
-// TestDoctorNoAutoStartEnvSurfaced locks in AUR-328's observability
-// breadcrumb: when TPROMPT_NO_AUTO_START is set to a truthy value,
-// `tprompt doctor` flags the hard opt-out so operators investigating a
-// "daemon not running" warning can immediately see that the env var
-// suppressed implicit auto-start.
-func TestDoctorNoAutoStartEnvSurfaced(t *testing.T) {
+func TestDoctorNoAutoStartEnvIgnored(t *testing.T) {
 	dir := t.TempDir()
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
@@ -115,7 +102,7 @@ func TestDoctorNoAutoStartEnvSurfaced(t *testing.T) {
 		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
 	}
 	deps.Env = func(key string) string {
-		if key == noAutoStartEnv {
+		if key == "TPROMPT_NO_AUTO_START" {
 			return "1"
 		}
 		return ""
@@ -124,100 +111,45 @@ func TestDoctorNoAutoStartEnvSurfaced(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertContains(t, stdout, "warn TPROMPT_NO_AUTO_START=1 set: TUI implicit auto-start disabled")
+	if strings.Contains(stdout, "TPROMPT_NO_AUTO_START") {
+		t.Fatalf("doctor mentioned obsolete auto-start env:\n%s", stdout)
+	}
 }
 
-// TestDoctorNoAutoStartEnvUnknownValueFlagged covers the
-// known-positive-only contract: a typo or unrecognized value (e.g.
-// "yep") leaves auto-start active, but doctor still surfaces the env
-// var so the operator notices their value did not take effect.
-func TestDoctorNoAutoStartEnvUnknownValueFlagged(t *testing.T) {
+func TestDoctorHandoffReady(t *testing.T) {
 	dir := t.TempDir()
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
-	}
-	deps.Env = func(key string) string {
-		if key == noAutoStartEnv {
-			return "yep"
-		}
-		return ""
-	}
-	stdout, _, err := executeRootWith(t, deps, "doctor")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	assertContains(t, stdout, "warn TPROMPT_NO_AUTO_START=yep set but not a recognized truthy value")
-}
-
-// TestDoctorNoAutoStartEnvUnsetSilent confirms the check is silent
-// when the env var is empty or unset, so healthy operators do not see
-// an extraneous warning line.
-func TestDoctorNoAutoStartEnvUnsetSilent(t *testing.T) {
-	dir := t.TempDir()
-	fs := &fakeStore{summaries: []store.Summary{}}
-	deps := workingDeps(t, fs)
-	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
-	}
-	stdout, _, err := executeRootWith(t, deps, "doctor")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if strings.Contains(stdout, noAutoStartEnv) {
-		t.Fatalf("doctor mentioned %s when env was unset:\n%s", noAutoStartEnv, stdout)
-	}
-}
-
-func TestDoctorDaemonReachable(t *testing.T) {
-	dir := t.TempDir()
-	fs := &fakeStore{summaries: []store.Summary{}}
-	deps := workingDeps(t, fs)
-	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
-	}
-	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
-		return &fakeDaemonClient{
-			statusFn: func() (daemon.StatusResponse, error) {
-				return daemon.StatusResponse{Socket: "/tmp/tprompt-test.sock"}, nil
-			},
-		}, nil
+		return config.Resolved{PromptsDir: dir, LogPath: "/tmp/tprompt-test.log"}, nil
 	}
 
 	stdout, _, err := executeRootWith(t, deps, "doctor")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertContains(t, stdout, "ok   daemon reachable (/tmp/tprompt-test.sock)")
+	assertContains(t, stdout, "ok   TUI handoff ready (/tmp/jobs)")
 }
 
-func TestDoctorDaemonMissingIsWarning(t *testing.T) {
+func TestDoctorHandoffUnavailableIsWarning(t *testing.T) {
 	dir := t.TempDir()
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
 		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
 	}
-	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
-		return &fakeDaemonClient{
-			statusFn: func() (daemon.StatusResponse, error) {
-				return daemon.StatusResponse{}, &daemon.SocketUnavailableError{
-					Path:   "/tmp/tprompt-test.sock",
-					Reason: "connection refused",
-				}
-			},
-		}, nil
+	deps.NewTUIClient = func(config.Resolved) (daemon.Client, error) {
+		return nil, errors.New("missing executable")
 	}
 
 	stdout, _, err := executeRootWith(t, deps, "doctor")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertContains(t, stdout, "warn daemon not running (/tmp/tprompt-test.sock): connection refused")
+	assertContains(t, stdout, "warn TUI handoff unavailable: missing executable")
 }
 
-func TestDoctorInvalidDaemonConfigFails(t *testing.T) {
+func TestDoctorHandoffDoesNotRequireSocket(t *testing.T) {
 	dir := t.TempDir()
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
@@ -225,19 +157,15 @@ func TestDoctorInvalidDaemonConfigFails(t *testing.T) {
 		return config.Resolved{PromptsDir: dir}, nil
 	}
 	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
-		t.Fatal("NewDaemonClient should not be called with invalid daemon config")
+		t.Fatal("doctor should not dial the daemon for TUI handoff readiness")
 		return nil, nil
 	}
 
 	stdout, _, err := executeRootWith(t, deps, "doctor")
-	var ve *config.ValidationError
-	if !errors.As(err, &ve) {
-		t.Fatalf("want ValidationError, got %T: %v", err, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if ve.Field != "socket_path" {
-		t.Fatalf("Field = %q, want socket_path", ve.Field)
-	}
-	assertContains(t, stdout, "FAIL config: socket_path: must be set")
+	assertContains(t, stdout, "ok   TUI handoff ready")
 }
 
 func TestDoctorPickerPresent(t *testing.T) {
@@ -486,7 +414,7 @@ func TestDoctorPromptsDirMissing(t *testing.T) {
 
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
 	if len(lines) != 7 {
-		t.Fatalf("want 7 lines (config ok, policy ok, dir fail, tmux warn, clipboard, picker, daemon), got %d:\n%s", len(lines), stdout)
+		t.Fatalf("want 7 lines (config ok, policy ok, dir fail, tmux warn, clipboard, picker, handoff), got %d:\n%s", len(lines), stdout)
 	}
 	assertPrefix(t, lines[0], "ok")
 	assertContains(t, lines[0], "config loaded")
@@ -498,7 +426,7 @@ func TestDoctorPromptsDirMissing(t *testing.T) {
 	assertContains(t, lines[3], "not inside tmux")
 	assertContains(t, lines[4], "clipboard reader")
 	assertContains(t, lines[5], "picker command")
-	assertContains(t, lines[6], "daemon unreachable")
+	assertContains(t, lines[6], "TUI handoff ready")
 }
 
 func TestDoctorMissingAdditionalPromptsDirIsWarning(t *testing.T) {
@@ -551,12 +479,8 @@ func TestDoctorAdditionalPromptsDirThatIsFileIsFailure(t *testing.T) {
 	assertContains(t, stdout, "FAIL prompts directory missing: "+fileSource)
 }
 
-// TestDoctor_NeverInvokesLauncher locks in the AUR-267 contract:
-// `tprompt doctor` is a diagnostic and must not auto-start the
-// daemon, even when daemon auto-start is on. We force the socket
-// path to a deliberately-unreachable location so doctor's
-// daemon-reachability check is exercised but never escalates to a
-// launcher call.
+// TestDoctor_NeverInvokesLauncher locks in that `tprompt doctor` is a
+// diagnostic and must not start long-running background processes.
 func TestDoctor_NeverInvokesLauncher(t *testing.T) {
 	dir := t.TempDir()
 	fs := &fakeStore{summaries: []store.Summary{}}
@@ -568,24 +492,12 @@ func TestDoctor_NeverInvokesLauncher(t *testing.T) {
 			DaemonAutoStart: true,
 		}, nil
 	}
-	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
-		return &fakeDaemonClient{
-			statusFn: func() (daemon.StatusResponse, error) {
-				return daemon.StatusResponse{}, &daemon.SocketUnavailableError{
-					Path:   "/tmp/tprompt-doctor-never-listens.sock",
-					Reason: "no listener",
-				}
-			},
-		}, nil
-	}
 	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
 		t.Fatal("doctor must not invoke the lifecycle launcher")
 		return nil
 	}
 
 	_, _, _ = executeRootWith(t, deps, "doctor")
-	// We don't assert err here because doctor reports daemon
-	// unreachability as a warning, not a hard failure; what matters
-	// is that NewLauncher was never called (the t.Fatal would have
-	// fired).
+	// What matters is that NewLauncher was never called (the t.Fatal would
+	// have fired).
 }

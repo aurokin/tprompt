@@ -175,10 +175,12 @@ Assert:
 - socket permissions and stale-socket behavior are correct
 - status responses expose pid, socket, log, uptime, pending jobs, and version
 
-### Daemon lifecycle and TUI auto-start
+### Daemon lifecycle
 
-Proof surface: unit tests for the launcher seams and primitives, integration
-tests for the macOS trust gate, and testscript end-to-end for the CLI flows.
+Proof surface: unit tests for the explicit launcher seams and primitives,
+integration tests for the macOS trust gate, and testscript end-to-end for the
+daemon CLI flows. The current TUI path is covered through handoff worker tests
+rather than daemon auto-start tests.
 
 Assert (`internal/daemon/lifecycle/`):
 

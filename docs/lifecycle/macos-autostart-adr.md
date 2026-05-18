@@ -1,10 +1,13 @@
 # ADR: macOS Daemon Auto-Start And Executable Assessment
 
-Status: accepted
+Status: accepted; historical for the current TUI path
 Date: 2026-05-10
 
 This ADR is the durable record of why `tprompt` does not implicitly
-auto-start its daemon on macOS. It is adapted from agentscan's
+auto-start its daemon on macOS. The current TUI path now avoids daemon
+auto-start on every platform by using short-lived handoff workers, but this
+record remains the rationale for that removal and for the explicit daemon trust
+gate. It is adapted from agentscan's
 [`macos-daemon-autostart-adr.md`](https://github.com/aurokin/agentscan/blob/main/docs/notes/macos-daemon-autostart-adr.md)
 to reflect tprompt's TUI-driven daemon-handoff shape; agentscan and
 tprompt run on the same hosts, hit the same kernel pathway, and adopt
@@ -16,15 +19,15 @@ the same accepted decision.
 content into a target tmux pane. The signature flow is:
 
 ```text
-tmux popup -> tprompt tui -> daemon socket -> verified focus -> inject
+tmux popup -> tprompt tui -> handoff worker -> verified focus -> inject
 ```
 
-The daemon runs in the background, accepts delivery jobs from the
-TUI, waits for tmux focus to return to the originating pane, then
-runs the sanitizer and the tmux paste command. The daemon is required
-because in the popup launch, tmux will not return focus to the target
-pane until the TUI process exits — the TUI cannot do the injection
-itself.
+Earlier designs used a background daemon that accepted delivery jobs from the
+TUI, waited for tmux focus to return to the originating pane, then ran the
+sanitizer and the tmux paste command. Some deferred process is still required
+because, in the popup launch, tmux will not return focus to the target pane
+until the TUI process exits. The current design keeps the verified handoff but
+uses a short-lived worker instead.
 
 The default-on auto-start rollout (AUR-183) added a launcher seam: a
 TUI invocation that found the daemon socket unreachable would call
@@ -196,12 +199,8 @@ post-mortem; it would not prevent the panic.
   assessor on the foreground `daemon run` entrypoint with
   `IntentExplicitRun` so users invoking `daemon run` directly are
   also gated.
-- `internal/app/tui.go` — `runTUI` resolves the auto-start opt-outs
-  via `resolveTUIAutoStartIntent` (Accepted Decision §5) before
-  `LoadConfig`, then `autoStartTUIDaemon` short-circuits the
-  implicit path on darwin before constructing the launcher,
-  surfacing the policy refusal through the standard daemon IPC
-  error wrapper.
+- `internal/app/tui.go` — `runTUI` now uses short-lived handoff workers and
+  no longer constructs the daemon launcher.
 
 ## Cross-References
 

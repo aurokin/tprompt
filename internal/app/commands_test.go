@@ -204,6 +204,9 @@ func workingDeps(t *testing.T, fs *fakeStore) Deps {
 		NewDaemonClient: func(config.Resolved) (daemon.Client, error) {
 			return nil, ErrNotImplemented
 		},
+		NewTUIClient: func(config.Resolved) (daemon.Client, error) {
+			return &fakeDaemonClient{}, nil
+		},
 		NewDaemonReadinessClient: func(config.Resolved, time.Duration) daemon.Client {
 			return &fakeDaemonClient{}
 		},

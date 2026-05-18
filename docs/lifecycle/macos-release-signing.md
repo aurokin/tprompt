@@ -6,17 +6,15 @@ publishing.
 
 ## Why this matters
 
-Signing is part of the daemon lifecycle policy, not just release polish.
-A signed and notarized release passes the macOS trust gate (see
-[auto-start.md](auto-start.md#macos-executable-trust-gate)) so an
-implicit TUI auto-start can spawn the daemon without prompting the user
-to run `tprompt daemon start` explicitly. Ad-hoc and locally-built
-binaries trip the trust gate by design — that's what the gate is for.
+Signing is part of the explicit daemon lifecycle policy, not just release
+polish. A signed and notarized release passes the macOS trust gate (see
+[auto-start.md](auto-start.md#macos-executable-trust-preflight-explicit-path))
+for `tprompt daemon start` and `tprompt daemon run`. The current TUI path uses
+short-lived handoff workers and does not require daemon auto-start.
 
-For local development, prefer foreground `tprompt daemon run` rather
-than detached background startup. The trust gate refuses ad-hoc
-binaries on the implicit auto-start path, which is the right behavior;
-`daemon start` is the explicit-intent escape hatch.
+For local development, prefer foreground `tprompt daemon run` when exercising
+daemon behavior, or use the documented developer bypass. Ad-hoc and
+locally-built binaries trip the trust gate by design.
 
 ## Local signing
 

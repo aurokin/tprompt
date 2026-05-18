@@ -1,6 +1,8 @@
 # Daemon
 
-The daemon exists to support deferred and verified delivery after the TUI process exits.
+The daemon is a legacy explicit lifecycle surface for deferred and verified
+delivery. The current TUI flow uses a short-lived handoff worker instead of a
+long-running daemon.
 
 ## Role
 
@@ -27,29 +29,16 @@ Current lifecycle behavior:
 - daemon can be started explicitly (`tprompt daemon start`)
 - daemon status can be checked explicitly (`tprompt daemon status`)
 - daemon can be stopped gracefully (`tprompt daemon stop`)
-- TUI daemon auto-start is on by default and goes through the
-  lifecycle launcher (same code path explicit `tprompt daemon start`
-  uses)
+- TUI daemon auto-start is not used by the current TUI handoff path
 
 `tprompt daemon stop` sends an explicit shutdown request over the daemon's
 local socket. If no daemon is reachable, it reports `daemon not running`. If
 shutdown is acknowledged but the socket remains reachable past the bounded
 graceful wait, the command exits with a daemon/IPC error.
 
-On Linux and other non-macOS platforms, `tprompt tui` (and bare `tprompt`
-dispatching into TUI inside tmux) auto-starts the daemon by default when the
-socket is unreachable: it goes through the same lifecycle launcher used by
-explicit `tprompt daemon start`, waits briefly for readiness, and retries the
-daemon status check. Pass `--no-daemon-auto-start` (or
-`--daemon-auto-start=false`) for a single invocation, or set
-`daemon_auto_start = false` in config to opt out permanently.
-
-On macOS, implicit TUI auto-start is hardcoded off (AUR-326): a TUI invocation
-that finds the daemon unreachable refuses with a recovery hint pointing at
-`tprompt daemon start` (background) and `tprompt daemon run` (foreground).
-Neither config nor flag re-enables the implicit path. See
-[`docs/lifecycle/auto-start.md`](../lifecycle/auto-start.md) for the
-rationale.
+`tprompt tui` and bare `tprompt` inside tmux do not contact or auto-start the
+daemon. Deprecated `--daemon-auto-start` / `--no-daemon-auto-start` flags are
+accepted by the TUI command for compatibility but have no effect.
 
 On macOS, `tprompt daemon start` and `tprompt daemon run` perform an
 executable-trust preflight before spawning or binding (AUR-327). Ad-hoc,

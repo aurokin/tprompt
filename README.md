@@ -8,7 +8,7 @@ The core workflow is built for tmux popups:
 1. Open `tprompt` in a popup.
 2. Select a prompt or the clipboard row.
 3. Let the TUI exit.
-4. The daemon waits until the original target pane is active again.
+4. A short-lived handoff worker waits until the original target pane is active again.
 5. The selected content is injected into that pane.
 
 That deferred handoff avoids sleep-based popup timing and keeps delivery tied
@@ -39,8 +39,8 @@ tprompt send code-review
 tprompt paste
 tprompt pick
 tprompt tui --target-pane '#{pane_id}'
-tprompt daemon start    # spawn detached, idempotent if already running
-tprompt daemon run      # foreground (Ctrl-C / SIGTERM to stop)
+tprompt daemon start    # legacy explicit daemon path
+tprompt daemon run      # legacy foreground daemon path
 tprompt daemon status
 tprompt daemon stop
 tprompt doctor
@@ -56,13 +56,13 @@ set. Outside tmux, it prints help.
 - Duplicate prompt IDs within a source tier are invalid; global/project collisions resolve through the documented priority policy.
 - Frontmatter is metadata only; only the markdown body is delivered.
 - Direct `send` and `paste` deliver synchronously through tmux. They never start, contact, or depend on the daemon.
-- TUI selections are submitted to a local daemon for verified deferred delivery. On Linux the daemon auto-starts on demand by default; on macOS implicit auto-start is hardcoded off, and the user runs `tprompt daemon start` (or `daemon run`) explicitly. See [`docs/lifecycle/auto-start.md`](docs/lifecycle/auto-start.md) for the modes and the macOS policy, and [`docs/lifecycle/macos-autostart-adr.md`](docs/lifecycle/macos-autostart-adr.md) for the kernel-panic evidence and rejected alternatives behind the locked decision.
+- TUI selections are submitted to a short-lived handoff worker for verified deferred delivery. The TUI does not require a long-running daemon, does not auto-start one, and still exits before injection.
 - Default delivery mode is bracketed paste via `tmux load-buffer` and `paste-buffer -p`.
 - `type` mode is available as a fallback using `send-keys -l`.
 - `--enter` is opt-in and sends Enter outside the paste wrapper.
 - Clipboard reads are same-host only.
 - Sanitization defaults to `safe`; `off` and `strict` are explicit config/flag choices.
-- Deferred-job failures are surfaced through `tmux display-message` and the daemon log.
+- Deferred-job failures are surfaced through `tmux display-message` and the configured log.
 
 For the full contract, read [EXPECTATIONS.md](EXPECTATIONS.md).
 

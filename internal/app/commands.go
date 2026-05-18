@@ -650,10 +650,9 @@ func runDaemonForeground(parent context.Context, deps Deps) error {
 		})
 		// Explicit `daemon run` is a recovery path: a healthy bind
 		// here means any cooldown left over from a prior implicit
-		// auto-start failure is no longer relevant. Clear it so a
-		// later TUI auto-start (after this daemon is stopped) is not
-		// gated by a stale window. Mirrors the launcher's
-		// OutcomeStarted / OutcomeAlreadyRunning cooldown clear.
+		// auto-start failure is no longer relevant. Clear it so the
+		// legacy launcher is not gated by a stale window. Mirrors the
+		// launcher's OutcomeStarted / OutcomeAlreadyRunning cooldown clear.
 		if paths, err := dlife.PathsFor(cfg.SocketPath); err == nil {
 			_ = dlife.ClearCooldown(paths)
 		}
@@ -690,10 +689,8 @@ func runDaemonStatus(deps Deps) error {
 // runDaemonStop sends the Stop RPC over the daemon socket and waits
 // (bounded) for the socket to disappear. The handler is mode-agnostic
 // by construction: after AUR-264/265 the only daemon binary is
-// `daemon run`, and both implicit (TUI auto-start) and explicit
-// (`daemon start`) paths spawn `daemon run` detached. All three modes
-// converge on the same Server lifecycle once the daemon is bound,
-// so the same Stop RPC tears down whichever daemon owns the socket.
+// `daemon run`, and explicit `daemon start` spawns `daemon run` detached.
+// The same Stop RPC tears down whichever daemon owns the socket.
 func runDaemonStop(deps Deps, timeout time.Duration) error {
 	cfg, err := deps.LoadDaemonConfig(*deps.ConfigPath)
 	if err != nil {
