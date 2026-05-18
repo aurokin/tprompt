@@ -15,6 +15,9 @@ import (
 // executor once, then removes the job file. Delivery failures are logged and
 // surfaced by the executor; RunJob only reports setup/read failures.
 func RunJob(ctx context.Context, cfg config.Resolved, adapter tmux.Adapter, jobPath string) error {
+	if err := ValidateConfig(cfg); err != nil {
+		return err
+	}
 	job, err := readJob(jobPath)
 	if err != nil {
 		return err

@@ -130,6 +130,9 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 }
 
 func productionNewHandoffClient(cfg config.Resolved) (daemon.Client, error) {
+	if err := handoff.ValidateConfig(cfg); err != nil {
+		return nil, err
+	}
 	executable, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("resolve executable path: %w", err)

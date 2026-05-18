@@ -24,6 +24,7 @@ func (f *fakeAdapter) CurrentContext() (tmux.TargetContext, error) { return tmux
 func (f *fakeAdapter) PaneExists(context.Context, string) (bool, error) {
 	return true, nil
 }
+
 func (f *fakeAdapter) IsTargetSelected(context.Context, tmux.TargetContext) (bool, error) {
 	return true, nil
 }
@@ -84,9 +85,27 @@ func TestRunJobRejectsMalformedJobBeforeDelivery(t *testing.T) {
 	}
 }
 
+func TestRunJobRejectsInvalidConfigBeforeDelivery(t *testing.T) {
+	dir := t.TempDir()
+	jobPath := filepath.Join(dir, "job.json")
+	writeJobFile(t, jobPath, validJob())
+
+	adapter := &fakeAdapter{}
+	cfg := config.Resolved{LogPath: "", MaxPasteBytes: 1024}
+	if err := RunJob(context.Background(), cfg, adapter, jobPath); err == nil {
+		t.Fatal("RunJob err = nil, want config validation error")
+	}
+	if adapter.pastedBody != "" {
+		t.Fatalf("unexpected delivery body %q", adapter.pastedBody)
+	}
+	if _, err := os.Stat(jobPath); err != nil {
+		t.Fatalf("job file should remain for setup failure: %v", err)
+	}
+}
+
 func TestClientRejectsMalformedJobBeforeSpawn(t *testing.T) {
 	dir := t.TempDir()
-	cfg := config.Resolved{LogPath: filepath.Join(dir, "handoff.log")}
+	cfg := config.Resolved{LogPath: filepath.Join(dir, "handoff.log"), MaxPasteBytes: 1024}
 	client := NewClient(cfg, "/bin/false", "")
 
 	_, err := client.Submit(daemon.SubmitRequest{Job: daemon.Job{
@@ -107,6 +126,50 @@ func TestClientRejectsMalformedJobBeforeSpawn(t *testing.T) {
 	entries, err := os.ReadDir(JobsDir(cfg))
 	if err == nil && len(entries) != 0 {
 		t.Fatalf("job files were written despite validation failure: %v", entries)
+	}
+}
+
+func TestClientRejectsInvalidConfigBeforeWritingJob(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Resolved{
+		SocketPath:     filepath.Join(dir, "daemon.sock"),
+		LogPath:        "",
+		MaxPasteBytes:  1024,
+		DefaultMode:    "paste",
+		Sanitize:       "safe",
+		DefaultEnter:   false,
+		PickerArgv:     []string{"true"},
+		KeybindPool:    []rune{'1'},
+		ConfigPath:     "",
+		PromptsDir:     dir,
+		PromptPriority: "global",
+	}
+	client := NewClient(cfg, "/bin/false", "")
+
+	_, err := client.Submit(daemon.SubmitRequest{Job: validJob()})
+	var ipc *daemon.IPCError
+	if !errors.As(err, &ipc) {
+		t.Fatalf("Submit err = %T: %v, want IPCError", err, err)
+	}
+	if ipc.Op != "validate handoff config" {
+		t.Fatalf("IPCError.Op = %q, want validate handoff config", ipc.Op)
+	}
+	if _, err := os.Stat(JobsDir(cfg)); !os.IsNotExist(err) {
+		t.Fatalf("jobs dir exists despite config validation failure: %v", err)
+	}
+}
+
+func validJob() daemon.Job {
+	return daemon.Job{
+		JobID:        "h-1",
+		Source:       daemon.SourcePrompt,
+		PromptID:     "demo",
+		Body:         []byte("hello"),
+		Mode:         "paste",
+		Enter:        true,
+		SanitizeMode: "safe",
+		PaneID:       "%9",
+		Verification: daemon.VerificationPolicy{TimeoutMS: 100, PollIntervalMS: 10},
 	}
 }
 

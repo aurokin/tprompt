@@ -29,6 +29,9 @@ func NewClient(cfg config.Resolved, executable, configPath string) *Client {
 
 // Submit implements the daemon.Client Submit subset used by the TUI submitter.
 func (c *Client) Submit(req daemon.SubmitRequest) (daemon.SubmitResponse, error) {
+	if err := ValidateConfig(c.cfg); err != nil {
+		return daemon.SubmitResponse{}, &daemon.IPCError{Op: "validate handoff config", Reason: err.Error(), Err: err}
+	}
 	if c.executable == "" {
 		return daemon.SubmitResponse{}, &daemon.IPCError{Op: "handoff", Reason: "empty executable path"}
 	}
@@ -119,6 +122,20 @@ func (c *Client) spawn(jobPath string) error {
 		return err
 	}
 	return cmd.Process.Release()
+}
+
+// ValidateConfig checks the config fields required by the TUI handoff path.
+func ValidateConfig(cfg config.Resolved) error {
+	if cfg.LogPath == "" {
+		return &config.ValidationError{Field: "log_path", Message: "must be set"}
+	}
+	if cfg.MaxPasteBytes <= 0 {
+		return &config.ValidationError{
+			Field:   "max_paste_bytes",
+			Message: fmt.Sprintf("must be positive, got %d", cfg.MaxPasteBytes),
+		}
+	}
+	return nil
 }
 
 func nextJobID() string {
