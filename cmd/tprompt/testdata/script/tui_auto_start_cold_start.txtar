@@ -1,12 +1,7 @@
-# Cold-start TUI auto-spawns the daemon via the AUR-265/AUR-266
-# launcher path. Verifies the AUR-266 default-on contract end-to-end.
-# AUR-326 hardcoded implicit auto-start off on macOS, so this script
-# is gated [!darwin]; the darwin contract (refusal with explicit
-# recovery hint) is asserted by tui_macos_implicit_disabled.txtar.
+# Cold-start TUI no longer auto-spawns the daemon. The cancel renderer exits
+# cleanly without touching daemon lifecycle state.
 
 [!exec:tmux] skip
-[darwin] skip
-
 env TMUX_TMPDIR=$SHORT_TMPDIR
 env TPROMPT_TEST_RENDERER=cancel
 
@@ -16,20 +11,12 @@ stdout $SHORT_TMPDIR
 
 mkdir prompts state
 
-# No `daemon run &` here — the TUI's auto-start should spawn a
-# detached daemon for us. The cancel renderer exits cleanly without
-# a real bubbletea TUI.
 tprompt tui --target-pane %0 --config config.toml
 ! stderr .
 
-# Daemon should be reachable now.
-tprompt daemon status --config config.toml
-stdout 'tprompt daemon'
-
-# Clean up: stop the daemon we spawned. Without this, the detached
-# daemon would survive testscript's process group teardown.
-tprompt daemon stop --config config.toml
-stdout 'tprompt daemon stopped'
+# Daemon should not have been spawned.
+! exec test -e state/daemon.sock
+! exec test -e state/daemon.sock.lock
 
 exec tmux kill-server
 

@@ -139,7 +139,7 @@ This is distinct from the built-in TUI, which is not configurable. `pick` is a s
 
 ### `tprompt tui`
 
-Launches the built-in interactive TUI, which submits a delivery job to the daemon for deferred injection into the target pane. Typically invoked from a tmux popup, but works in any terminal context. See `docs/commands/tui-flow.md` for the end-to-end flow and `docs/commands/tui.md` for the TUI details.
+Launches the built-in interactive TUI, which submits a delivery job to a short-lived handoff worker for deferred injection into the target pane. Typically invoked from a tmux popup, but works in any terminal context. See `docs/commands/tui-flow.md` for the end-to-end flow and `docs/commands/tui.md` for the TUI details.
 
 ### `tprompt doctor`
 

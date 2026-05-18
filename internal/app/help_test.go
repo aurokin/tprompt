@@ -16,8 +16,8 @@ func TestRootLongDescribesWorkflows(t *testing.T) {
 			t.Errorf("root.Long missing workflow %q\n--- Long ---\n%s", want, long)
 		}
 	}
-	if !strings.Contains(strings.ToLower(long), "daemon-backed") {
-		t.Errorf("root.Long should describe tui as daemon-backed\n%s", long)
+	if !strings.Contains(strings.ToLower(long), "handoff") {
+		t.Errorf("root.Long should describe tui as handoff-backed\n%s", long)
 	}
 }
 
@@ -60,7 +60,7 @@ func TestSubcommandHelpText(t *testing.T) {
 		},
 		{
 			path:   []string{"tui"},
-			want:   []string{"daemon", "--target-pane", "--daemon-auto-start", "--no-daemon-auto-start"},
+			want:   []string{"handoff", "--target-pane"},
 			banned: []string{"templat"},
 		},
 		{

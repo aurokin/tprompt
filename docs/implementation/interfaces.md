@@ -135,9 +135,9 @@ DaemonServer
 
 ## Daemon lifecycle launcher
 
-The launcher in `internal/app/lifecycle/` orchestrates start across
-all three modes (TUI auto-start, explicit `daemon start`, foreground
-`daemon run` via direct exec). Three seams are pluggable for tests:
+The launcher in `internal/app/lifecycle/` orchestrates explicit daemon
+starts (`daemon start`, foreground `daemon run` via direct exec). Three
+seams are pluggable for tests:
 
 ```text
 StatusProber
@@ -159,7 +159,7 @@ Sentinel types in `internal/daemon/lifecycle/`:
 StartIntent
 - IntentExplicitStart  // tprompt daemon start
 - IntentExplicitRun    // tprompt daemon run
-- IntentImplicitTUI    // TUI default-on auto-start
+- IntentImplicitTUI    // legacy TUI auto-start intent; current TUI uses handoff
 
 StartResult
 - Outcome: OutcomeStarted | OutcomeAlreadyRunning | OutcomeFailed

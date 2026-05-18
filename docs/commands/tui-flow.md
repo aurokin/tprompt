@@ -1,6 +1,6 @@
 # TUI Flow
 
-The signature workflow of `tprompt`: TUI → daemon → injection. For the TUI rendering, keybind layout, and search specifics, see `docs/commands/tui.md`.
+The signature workflow of `tprompt`: TUI → handoff worker → injection. For the TUI rendering, keybind layout, and search specifics, see `docs/commands/tui.md`.
 
 The TUI typically runs inside a tmux popup (the signature launch path), but nothing in this flow requires that. The same flow works if the TUI is launched from any other terminal context, so long as the target pane is passed in.
 
@@ -14,34 +14,17 @@ Allow the user to select a prompt **or** paste the clipboard from the TUI, then 
 2. It captures the original target context passed in from tmux (pane id, client tty, session id).
 3. The built-in TUI presents the keybind board (pinned clipboard row + prompts).
 4. On selection:
-   - **Prompt row** — TUI resolves the prompt body and submits a `DeliveryRequest` with `source = "prompt"`.
-   - **Clipboard row** — TUI reads the clipboard, validates it, and submits a `DeliveryRequest` with `source = "clipboard"` and the captured bytes in `body`. If validation fails, the TUI shows an inline error and stays open.
+   - **Prompt row** — TUI resolves the prompt body and submits a handoff job with `source = "prompt"`.
+   - **Clipboard row** — TUI reads the clipboard, validates it, and submits a handoff job with `source = "clipboard"` and the captured bytes in `body`. If validation fails, the TUI shows an inline error and stays open.
    - **Search match** — same as the corresponding row above.
-5. TUI submits the job to the daemon and exits.
-6. Daemon waits until tmux state indicates the target pane is again the intended active target.
-7. Daemon runs the sanitizer over the request body.
-8. Daemon injects via the tmux adapter.
+5. TUI writes the job to a private per-user jobs directory, spawns `tprompt handoff --job <path>` detached, and exits.
+6. The worker waits until tmux state indicates the target pane is again the intended active target.
+7. The worker runs the sanitizer over the request body.
+8. The worker injects via the tmux adapter and removes the job file.
 
-Daemon auto-start is on by default. When `tprompt tui` (or bare
-`tprompt` dispatching to TUI inside tmux) finds the configured daemon
-socket unreachable, it goes through the lifecycle launcher: spawns a
-detached daemon, waits briefly for readiness, then retries the daemon
-preflight before rendering. Pass `--no-daemon-auto-start` (or
-`--daemon-auto-start=false`) to skip auto-start for one invocation, or
-set `daemon_auto_start = false` in config to opt out permanently. Set
-`TPROMPT_NO_AUTO_START` to a truthy value (`1`, `true`, `yes`, `on`;
-case-insensitive, whitespace-trimmed) to opt out across every entry
-point — including tmux popups, scripts, and mise hooks — without
-retrofitting flags. The env var is treated as a hard opt-out: it short-
-circuits before config loading, so a malformed config still cannot
-re-enable auto-start. Setting it together with `--daemon-auto-start`
-(explicit on) is rejected with a conflict error; setting it together
-with `--no-daemon-auto-start` is allowed because both express the same
-intent. Unrecognized values leave auto-start active so a typo cannot
-silently disable it; `tprompt doctor` flags both truthy and unrecognized
-values for visibility. On macOS, implicit auto-start is hardcoded off
-regardless of flag, config, or env var; explicit `tprompt daemon start`
-remains the supported launch path.
+The TUI path does not contact or auto-start a long-running daemon.
+Deprecated `--daemon-auto-start` and `--no-daemon-auto-start` flags are
+accepted for CLI compatibility but have no effect.
 
 ## Cancellation
 
@@ -51,9 +34,9 @@ If the user cancels (`Esc` or equivalent):
 - TUI exits with **status 0**
 - no delivery occurs
 
-## Why the daemon is required
+## Why the handoff worker is required
 
-In the signature tmux-popup launch, tmux won't return focus to the target pane until the TUI process exits — so the TUI can't do the injection itself. A daemon accepts the job, waits for verified focus, then injects. A fixed sleep is brittle and should be avoided. See `docs/tmux/verification.md` for verification conditions.
+In the signature tmux-popup launch, tmux won't return focus to the target pane until the TUI process exits, so the TUI can't do the injection itself. A short-lived worker accepts the job, waits for verified focus, then injects. A fixed sleep is brittle and should be avoided. See `docs/tmux/verification.md` for verification conditions.
 
 ## Required input context
 
@@ -67,12 +50,12 @@ Minimum recommended context:
 
 ## Clipboard in the TUI flow
 
-The TUI process is responsible for reading the clipboard — not the daemon. Reasons:
+The TUI process is responsible for reading the clipboard, not the handoff worker. Reasons:
 
 - The user's clipboard can change between TUI exit and verification success (they might copy something else while waiting for focus to return). Capturing at keypress pins the content to the moment of intent.
-- Keeps the daemon simpler: one code path for delivery regardless of source.
+- Keeps the worker simpler: one code path for delivery regardless of source.
 
-The TUI passes the captured bytes inside the `DeliveryRequest.body` field. The daemon treats clipboard-sourced and prompt-sourced jobs identically from that point on.
+The TUI passes the captured bytes inside the handoff job body. The worker treats clipboard-sourced and prompt-sourced jobs identically from that point on.
 
 ## Recommended tmux binding style
 
@@ -86,12 +69,12 @@ If job submission fails:
 - the CLI surfaces the submit error on stderr with the normal exit-code mapping
 - background retry logic after submission is outside the current contract
 
-Inline TUI footer errors are reserved for recoverable, pre-submit choices such as empty clipboard content or an oversized prompt body. Once submission to the daemon has started, failures are not recoverable from inside the TUI.
+Inline TUI footer errors are reserved for recoverable, pre-submit choices such as empty clipboard content or an oversized prompt body. Once handoff has started, failures are not recoverable from inside the TUI.
 
 ## Concurrency and replacement
 
 - Multiple TUI instances may be open simultaneously (singleton is not enforced — see DECISIONS.md §28).
-- When a newly submitted job targets the same `pane_id` as a pending job, the pending job is **replaced**. See `docs/commands/daemon.md`.
+- Handoff workers are per selection. Replacement across simultaneous workers is not currently part of the TUI contract.
 
 ## Verification before injection
 
@@ -99,4 +82,4 @@ See `docs/tmux/verification.md` for the exact expectations.
 
 ## Post-delivery failure feedback
 
-If the daemon's verification or injection fails, the daemon surfaces the error via `tmux display-message` on the originating client plus the daemon log. The TUI is already gone at that point; in-tmux banner is the only user-facing feedback channel. See `docs/commands/daemon.md`.
+If the worker's verification or injection fails, it surfaces the error via `tmux display-message` on the originating client plus the configured log. The TUI is already gone at that point; in-tmux banner is the only user-facing feedback channel.

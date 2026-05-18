@@ -17,6 +17,7 @@ import (
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
 	dlife "github.com/hsadler/tprompt/internal/daemon/lifecycle"
+	"github.com/hsadler/tprompt/internal/handoff"
 	"github.com/hsadler/tprompt/internal/picker"
 	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/store"
@@ -25,8 +26,8 @@ import (
 	"github.com/hsadler/tprompt/internal/tui"
 )
 
-// DaemonLauncher is the seam used by `daemon start` and TUI implicit
-// auto-start. Production wires applife.Launcher; tests inject fakes.
+// DaemonLauncher is the seam used by explicit daemon lifecycle commands.
+// Production wires applife.Launcher; tests inject fakes.
 type DaemonLauncher interface {
 	Start(ctx context.Context, intent applife.StartIntent) dlife.StartResult
 }
@@ -50,6 +51,7 @@ type Deps struct {
 	NewClip                  func(cfg config.Resolved) (clipboard.Reader, error)
 	NewPicker                func(cfg config.Resolved) (picker.Picker, error)
 	NewDaemonClient          func(cfg config.Resolved) (daemon.Client, error)
+	NewTUIClient             func(cfg config.Resolved) (daemon.Client, error)
 	NewDaemonReadinessClient func(cfg config.Resolved, timeout time.Duration) daemon.Client
 	NewLauncher              func(cfg config.Resolved, explicitConfigPath string) DaemonLauncher
 	NewTrustAssessor         func() applife.TrustAssessor
@@ -92,6 +94,7 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 		NewDaemonClient: func(cfg config.Resolved) (daemon.Client, error) {
 			return daemon.NewSocketClient(cfg.SocketPath), nil
 		},
+		NewTUIClient:             productionNewHandoffClient,
 		NewDaemonReadinessClient: productionNewDaemonReadinessClient,
 		NewLauncher:              productionNewLauncher,
 		NewTrustAssessor:         applife.ProductionAssessor,
@@ -126,6 +129,14 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 	}
 }
 
+func productionNewHandoffClient(cfg config.Resolved) (daemon.Client, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("resolve executable path: %w", err)
+	}
+	return handoff.NewClient(cfg, executable, cfg.ConfigPath), nil
+}
+
 func productionNewDaemonReadinessClient(cfg config.Resolved, timeout time.Duration) daemon.Client {
 	dialTimeout := daemon.DefaultDialTimeout
 	if timeout > 0 && timeout < dialTimeout {
@@ -155,7 +166,7 @@ func (e errLauncher) Start(context.Context, applife.StartIntent) dlife.StartResu
 // daemon log so spawn-time failures still leave evidence.
 //
 // If os.Executable() fails (constrained /proc, permissions), we return
-// a fail-closed errLauncher so daemon start / TUI auto-start surface a
+// a fail-closed errLauncher so daemon start surfaces a
 // direct ReasonConfig error rather than failing later inside the
 // spawner with a generic "empty executable path" message.
 func productionNewLauncher(cfg config.Resolved, explicitConfigPath string) DaemonLauncher {

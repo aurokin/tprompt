@@ -49,13 +49,13 @@ The tool must detect this and fail clearly.
 
 The tool should be designed around reliable use when the TUI is launched from a tmux popup, not treat that launch path as a bolt-on extra.
 
-### 6. Deferred send must be daemon-backed
+### 6. Deferred send must use a short-lived handoff worker
 
-The TUI process should not sleep and then try to inject directly. It should hand off a job to a daemon, then exit.
+The TUI process should not sleep and then try to inject directly. It should write a private handoff job, spawn a short-lived worker, then exit. The worker owns verified delivery after tmux returns focus to the target pane. The TUI path must not require a long-running daemon or implicit daemon auto-start.
 
 ### 7. Verification must use tmux state, not timers
 
-The daemon should only inject after confirming that the original target pane is available and back in the intended active state.
+The deferred delivery worker should only inject after confirming that the original target pane is available and back in the intended active state.
 
 ### 8. Delivery modes
 
@@ -207,7 +207,7 @@ Rows are rendered as three columns: `[key]  id  description`.
 
 When the TUI opens, the clipboard is **not** read. It is read only when the user presses the clipboard key (`P` by default).
 
-The TUI process reads the clipboard, captures the content, and submits it as part of the daemon job payload before exiting. The daemon never reads the clipboard itself.
+The TUI process reads the clipboard, captures the content, and submits it as part of the handoff job payload before exiting. Deferred workers never read the clipboard themselves.
 
 ### 22. Clipboard edge cases fail loudly
 
@@ -313,21 +313,19 @@ Command semantics:
 
 - **`tprompt daemon start`** is non-blocking. It calls the launcher with `IntentExplicitStart`, which on darwin runs the trust preflight (AUR-327), then spawns `daemon run` detached, polls `Status` until ready, and prints either `tprompt daemon started on <socket>` or `tprompt daemon already running on <socket>`. Idempotent success when a compatible daemon is already running. Explicit intents bypass the macOS implicit-disabled policy and cooldown.
 - **`tprompt daemon run`** is foreground. On darwin it runs its own trust preflight before binding the socket (AUR-327) — the launcher does not drive `daemon run`, so this preflight covers users who invoke `daemon run` directly. The same `Server.Listen → Serve → Close` lifecycle as the spawned child uses; `SIGINT`/`SIGTERM` and the `Stop` RPC both unwind through `Close`. Note: `daemon start` spawns a `daemon run` child, so on darwin the trust preflight runs twice on that path — once in the parent under `IntentExplicitStart`, once in the child's foreground entry. The cost is small (~100ms warm cache) and avoids a cross-process trust hand-off.
-- **TUI auto-start** is default-on on Linux and other non-macOS platforms. It calls the same launcher with `IntentImplicitTUI`. Failure records a cooldown that gates subsequent implicit starts; explicit `daemon start`/`daemon run` always bypass the cooldown. The `TPROMPT_NO_AUTO_START` environment variable is a hard opt-out (AUR-328): set to a truthy value (`1`, `true`, `yes`, `on`; case-insensitive, whitespace-trimmed) it disables implicit auto-start across every entry point — tmux popups, scripts, mise hooks — without retrofitting flags on each call site. The opt-out check runs before config loading, so a malformed config cannot re-enable auto-start. Combining the env var with `--daemon-auto-start=true` is rejected with a conflict error so the operator's intent is unambiguous; combining it with `--no-daemon-auto-start` is allowed because both express the same intent. Unrecognized values leave auto-start active so a typo cannot silently disable the daemon. `tprompt doctor` flags both truthy and unrecognized values for visibility.
+- **TUI handoff** no longer uses daemon auto-start. `tprompt tui` writes a private job file and spawns `tprompt handoff --job <path>` as a detached, short-lived worker. Deprecated daemon auto-start flags are accepted for CLI compatibility but have no effect.
 - **`tprompt daemon stop`** is mode-agnostic. It dials the configured socket, issues the `Stop` RPC, and waits (bounded) for the socket to disappear. Works for daemons spawned by any of the three modes because all converge on the same `Server.Close` cleanup.
 - **`tprompt daemon status`** is a read-only probe. Never auto-starts the daemon.
-- **`tprompt send`, `tprompt paste`, `tprompt doctor`** never contact or auto-start the daemon. Direct delivery and diagnostics are daemon-free.
+- **`tprompt send`, `tprompt paste`, `tprompt tui`, `tprompt doctor`** never contact or auto-start the daemon. Direct delivery, TUI handoff, and diagnostics are daemon-free.
 
 A "compatible daemon" is one reachable at the configured socket whose `Status` RPC succeeds. Reachable-but-broken is its own classification with a manual-recovery message.
 
-macOS implicit-disabled policy (`internal/app/lifecycle/policy_darwin.go`, AUR-326):
+macOS daemon trust policy (`internal/app/lifecycle/policy_darwin.go`, AUR-326):
 
-- `IntentImplicitTUI` is refused on darwin before the launcher reaches the cooldown, start lock, trust assessor, or spawn path. The launcher returns `OutcomeFailed` with `ReasonPolicyDisabled` and emits a `lifecycle_implicit_disabled` diagnostic.
-- The TUI command path mirrors the refusal before constructing the launcher: `autoStartTUIDaemon` consults the same policy seam and surfaces the result through the standard daemon IPC error wrapper (`ExitDaemon` exit code).
-- The refusal message mirrors agentscan's `macos_implicit_auto_start_disabled_reason` shape (AUR-329): a single line stating the daemon is not running, explaining macOS does not implicitly auto-start, and naming both recovery commands (`tprompt daemon run` for the foreground long-lived tmux pane path, `tprompt daemon start` for the detached signed-release path) so the user can act on the failure without consulting docs. The opt-out env var (`TPROMPT_NO_AUTO_START`) and `--no-daemon-auto-start` flag are intentionally omitted from the message: on darwin they short-circuit the auto-start attempt before this code path runs but they do not re-enable the implicit path, so mentioning them in the refusal would mislead the operator.
+- `IntentImplicitTUI` remains refused on darwin in the legacy launcher, but the current TUI path no longer invokes that launcher.
 - The trust-gate refusal on explicit `daemon start` / `daemon run` is intent-aware (AUR-329): the assessor receives the `StartIntent` and renders distinct recovery hints. `IntentExplicitStart` names the failed action as "detached daemon start" and points at `tprompt daemon run` as the foreground fallback plus signed-release / self-sign as the longer path. `IntentExplicitRun` skips the foreground hint (the user is already there) and points at the signed-release / self-sign path. Both variants name the binary path, the failure category, and the `TPROMPT_UNSAFE_TRUST_PREFLIGHT_BYPASS=1` escape hatch.
 - `IntentExplicitStart` and `IntentExplicitRun` bypass the policy. There is no environment override that re-enables the implicit path; the policy is hardcoded.
-- Rationale: macOS launch evaluation triggered repeated kernel panics in `AppleSystemPolicy` / `AMFI` / `syspolicyd` during implicit auto-start on real release binaries. The platform owns the cost of restoring implicit auto-start; until then, explicit intent is the contract. The kernel-panic evidence and the rejected alternatives (Options A, C, D) are recorded in the [macOS daemon auto-start ADR](docs/lifecycle/macos-autostart-adr.md), status: accepted.
+- Rationale: macOS launch evaluation triggered repeated kernel panics in `AppleSystemPolicy` / `AMFI` / `syspolicyd` during implicit auto-start on real release binaries. The TUI redesign removes that launch path from normal operation; explicit daemon commands keep the trust gate.
 - Release signing covers `darwin/arm64` only (AUR-324). Other macOS architectures are not currently distributed as Developer ID-signed + notarized binaries, so the explicit `tprompt daemon start` path on those targets requires either a self-signed local build (`scripts/sign-macos-binary.sh`) or use of the `TPROMPT_UNSAFE_TRUST_PREFLIGHT_BYPASS=1` developer escape hatch.
 
 The full narrative — including signing/notarization expectations and rejection-class behavior — lives in [docs/lifecycle/auto-start.md](docs/lifecycle/auto-start.md). The locked decision behind macOS implicit-disabled is the [macOS daemon auto-start ADR](docs/lifecycle/macos-autostart-adr.md).

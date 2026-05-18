@@ -2,7 +2,7 @@
 
 The TUI is a **built-in** interactive terminal UI. It is not a thin wrapper around an external picker. `picker_command` in config is a separate mechanism used only by `tprompt pick` (see `cli.md`).
 
-This file describes what the TUI renders and how keybinds behave. For the end-to-end delivery flow (daemon handoff, verification, injection) see `docs/commands/tui-flow.md`.
+This file describes what the TUI renders and how keybinds behave. For the end-to-end delivery flow (handoff worker, verification, injection) see `docs/commands/tui-flow.md`.
 
 ## Layout
 
@@ -83,7 +83,7 @@ Triggered by `/`. All prompts (including overflow and shadowed prompts) are sear
   1. TUI invokes the clipboard reader.
   2. TUI validates content (empty / non-UTF-8 / size cap).
   3. On validation failure, the TUI shows an **inline error** in the footer and stays open so the user can choose something else.
-  4. On success, the TUI submits a `DeliveryRequest` with `source = clipboard` to the daemon and exits.
+  4. On success, the TUI submits a handoff job with `source = clipboard` and exits.
 
 ## Footer / status line
 
@@ -100,7 +100,7 @@ There are two ways to deliver a row from the board:
 - **Single-key shortcut.** Press the printable rune in `[brackets]` next to the row (e.g. `c` for the `code-review` row). Submits immediately; works regardless of cursor position.
 - **Cursor + Select.** Move the cursor with `↑`/`↓`, then press the **Select** key (default `Enter`). Submits the row currently under the cursor. The Select binding is reconfigurable via `[reserved_keys]` in `config.toml`.
 
-Both paths route through the same `selectPrompt` / `selectClipboard` flow: the pinned clipboard row triggers a clipboard read; a prompt row resolves the body and submits to the daemon.
+Both paths route through the same `selectPrompt` / `selectClipboard` flow: the pinned clipboard row triggers a clipboard read; a prompt row resolves the body and submits a handoff job.
 
 ## Scrolling
 

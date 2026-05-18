@@ -29,7 +29,7 @@ tracker; planned work lives in Linear.
 - `tprompt send <id>` performs direct prompt delivery.
 - `tprompt paste` performs direct clipboard delivery.
 - `tprompt pick` invokes the configured external picker and prints the selected prompt ID.
-- `tprompt tui` launches the built-in TUI and submits delivery through the daemon.
+- `tprompt tui` launches the built-in TUI and submits delivery through a short-lived handoff worker.
 - Bare `tprompt` dispatches to `tprompt tui` when stdin is a tty and `$TMUX` is set.
 - Bare `tprompt` outside tmux or without a tty prints help.
 - Operational failures return non-zero exit codes.
@@ -44,10 +44,10 @@ tracker; planned work lives in Linear.
 - `/` enters fuzzy search over prompt ID, title, description, and tags.
 - Overflow prompts are not shown on the board but are reachable through search.
 - The TUI reads clipboard content only when the clipboard row is selected.
-- The TUI submits prompt or clipboard content to the daemon, then exits.
-- The daemon verifies target pane readiness using tmux state before injection.
-- The daemon fails cleanly if the target pane vanishes or becomes invalid.
-- A newer deferred job for the same pane replaces the older pending job.
+- The TUI writes prompt or clipboard content to a private handoff job, spawns a short-lived worker, then exits.
+- The handoff worker verifies target pane readiness using tmux state before injection.
+- The worker fails cleanly if the target pane vanishes or becomes invalid.
+- Handoff jobs are per selection; no long-running queue or daemon is required for the TUI path.
 
 ## Daemon Lifecycle
 
@@ -55,11 +55,11 @@ tracker; planned work lives in Linear.
 - `tprompt daemon run` is foreground: the daemon runs in the invoking terminal and is stopped by SIGINT/SIGTERM or `tprompt daemon stop` from another shell.
 - `tprompt daemon stop` works the same way regardless of how the daemon was started: it dials the configured socket, issues the Stop RPC, and reports success when the socket disappears. With no daemon running it prints "daemon not running" and exits successfully.
 - `tprompt daemon status` is read-only and never starts the daemon implicitly.
-- On Linux and other non-macOS platforms, TUI flows (`tprompt tui` and bare `tprompt` dispatching into TUI inside tmux+tty) auto-start the daemon by default when the configured socket is unreachable. Pass `--no-daemon-auto-start` (or `--daemon-auto-start=false`) to opt out for one invocation; set `daemon_auto_start = false` in config to opt out permanently. Set `TPROMPT_NO_AUTO_START` in the environment to a truthy value (`1`, `true`, `yes`, `on`; case-insensitive, whitespace-trimmed) to opt out across every entry point — including tmux popups, scripts, and mise hooks — without retrofitting flags. Unrecognized values leave auto-start active so a typo cannot silently disable it. Combining the env var with `--daemon-auto-start` (explicit on) is rejected with a conflict error; combining it with `--no-daemon-auto-start` is allowed because both express the same intent. Surface state via `tprompt doctor`, which calls out the env var when set.
-- On macOS, implicit TUI auto-start is hardcoded off. A TUI invocation that finds the daemon unreachable refuses with a single actionable line: it states the daemon is not running, explains that macOS does not implicitly auto-start the tprompt daemon, and points at `tprompt daemon run` (foreground, long-lived tmux pane) plus `tprompt daemon start` (detached, signed-release binaries) as recovery commands. The opt-out env var and `--no-daemon-auto-start` flag are intentionally NOT mentioned in the refusal message because they do not bypass the platform refusal — they only short-circuit the auto-start attempt upstream. Neither config nor flag re-enables the implicit path. This is locked because the macOS launch evaluation path triggered kernel panics in `AppleSystemPolicy`/`AMFI`/`syspolicyd` during implicit auto-start; the platform owns the cost of restoring it.
+- TUI flows (`tprompt tui` and bare `tprompt` dispatching into TUI inside tmux+tty) do not contact or auto-start the daemon. Deprecated `--daemon-auto-start` / `--no-daemon-auto-start` flags are accepted for compatibility but have no effect.
+- The daemon commands are retained as an explicit lifecycle surface while the TUI path uses handoff workers.
 - On macOS, `tprompt daemon start` and `tprompt daemon run` perform an executable-trust preflight against the current binary (codesign verify, ad-hoc detection, Gatekeeper assess with CLI bypass). Ad-hoc-signed, unsigned, tampered, or Gatekeeper-rejected binaries are refused before any socket is bound. The refusal message is intent-aware: a `daemon start` failure names the failed action as "detached daemon start", names the binary path and failure category, and points at `tprompt daemon run` (foreground), a signed release binary, and `scripts/sign-macos-binary.sh` for self-signing local dev builds. A `daemon run` failure names the failed action as `'tprompt daemon run'`, names the binary and category, and points at the signed-release / self-sign path (it does not advise the user to run `daemon run` again — they are already there). Both variants name the `TPROMPT_UNSAFE_TRUST_PREFLIGHT_BYPASS=1` escape hatch for local development. `tprompt daemon stop` and `tprompt daemon status` never preflight and work against any running daemon. The bypass env var must not be set in normal release operation.
 - Release signing covers `darwin/arm64` only. Operators on other macOS architectures get a self-sign path via `scripts/sign-macos-binary.sh` (or the developer escape hatch). The full kernel-panic evidence and rejected alternatives behind the macOS auto-start policy are recorded in the [macOS daemon auto-start ADR](docs/lifecycle/macos-autostart-adr.md).
-- `tprompt send`, `tprompt paste`, and `tprompt doctor` are direct-path commands. They never start, contact, or depend on the daemon.
+- `tprompt send`, `tprompt paste`, `tprompt tui`, and `tprompt doctor` do not start, contact, or depend on the daemon.
 - Concurrent cold starts are serialized: only one daemon process owns the configured socket at a time.
 - A "compatible daemon" is one reachable at the configured socket whose `Status` RPC succeeds. A reachable-but-broken socket is reported with a manual-recovery message rather than respawned.
 
@@ -69,7 +69,7 @@ tracker; planned work lives in Linear.
 - Fallback `type` mode uses `send-keys -l` with rune-safe chunking.
 - `--enter` sends Enter as a separate tmux command after content delivery.
 - Default behavior is no trailing Enter.
-- Direct sends never touch the daemon queue.
+- Direct sends never touch deferred-delivery state.
 - A configurable `max_paste_bytes` limit rejects oversized prompt or clipboard content before tmux delivery.
 
 ## Clipboard Reader
@@ -79,7 +79,7 @@ tracker; planned work lives in Linear.
   `pbpaste`, `wl-paste`, `xclip`, or `xsel`.
 - `clipboard_read_command` overrides auto-detection.
 - Empty, non-UTF-8, and oversized clipboard content is rejected before delivery.
-- The daemon never reads the clipboard. Clipboard bytes are captured by the submitting process.
+- Handoff workers and the daemon never read the clipboard. Clipboard bytes are captured by the submitting process.
 
 ## Sanitization
 
@@ -87,13 +87,13 @@ tracker; planned work lives in Linear.
 - Default mode is `safe`.
 - `safe` strips dangerous terminal control classes while preserving cosmetic sequences.
 - `strict` rejects any escape sequence and reports class plus byte offset.
-- The same sanitization contract applies to `send`, `paste`, and daemon-executed TUI jobs.
+- The same sanitization contract applies to `send`, `paste`, and handoff-executed TUI jobs.
 
 ## Error Feedback
 
 - Deferred-job failures are shown through `tmux display-message` when there is a scoped target.
-- Deferred-job failures are appended to the daemon log.
-- Daemon logs must not include prompt bodies or clipboard bytes.
+- Deferred-job failures are appended to the configured log.
+- Logs must not include prompt bodies or clipboard bytes.
 - Success is silent by default.
 
 ## Reliability
@@ -101,7 +101,7 @@ tracker; planned work lives in Linear.
 - TUI-flow correctness must not depend on fixed sleeps.
 - Target readiness is based on tmux pane and selection state.
 - Direct sends must not block on daemon state.
-- Config, prompt, tmux, daemon, and delivery failures should remain distinguishable through exit-code mapping.
+- Config, prompt, tmux, handoff/daemon, and delivery failures should remain distinguishable through exit-code mapping.
 
 ## Behavioral Boundary
 
@@ -118,7 +118,7 @@ That boundary is intentional.
 ## Platform And Packaging
 
 - Primary platforms are Linux and macOS.
-- Packaging target is a single CLI binary plus a per-user local daemon.
+- Packaging target is a single CLI binary; explicit daemon commands remain available in the binary.
 - Windows is outside the current tmux-first workflow.
 
 ## Non-Goals

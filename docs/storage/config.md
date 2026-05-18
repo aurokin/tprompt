@@ -20,7 +20,7 @@ default_mode = "paste"
 default_enter = false
 socket_path = "~/.local/state/tprompt/daemon.sock"
 log_path = "~/.local/state/tprompt/daemon.log"
-daemon_auto_start = true
+daemon_auto_start = true                  # legacy; ignored by current TUI handoff
 picker_command = "fzf"
 verification_timeout_ms = 5000
 verification_poll_interval_ms = 100
@@ -56,7 +56,7 @@ select    = "Enter"
 - additional global prompt directories
 - prompt priority policy (`global` by default; `project` opt-in)
 - picker command (affects `tprompt pick`; does not affect the built-in TUI)
-- daemon auto-start for TUI flows
+- daemon auto-start for legacy daemon flows (ignored by current TUI handoff)
 - verification timeout
 - poll interval
 - post-injection verification warning
@@ -162,18 +162,11 @@ clipboard = ""     # disable clipboard keybind; still accessible via search
 
 ## Daemon Auto-Start
 
-`daemon_auto_start` defaults to `true`. When `tprompt tui` (or bare
-`tprompt` dispatching to TUI inside tmux) finds the configured socket
-unreachable, it spawns a detached daemon, waits briefly for readiness,
-then retries the daemon preflight. To opt out for one invocation pass
-`--no-daemon-auto-start` (or `--daemon-auto-start=false`); to opt out
-permanently set `daemon_auto_start = false` in config. This is
-limited to TUI-oriented flows; explicit lifecycle commands such as
-`tprompt daemon status` do not start the daemon implicitly. On macOS,
-implicit auto-start is gated by an executable-trust check (see
-[lifecycle docs](../lifecycle/auto-start.md) once written, or
-`internal/app/lifecycle/trust_darwin.go`); explicit
-`tprompt daemon start` always bypasses that gate.
+`daemon_auto_start` is retained for compatibility with existing config files,
+but the current TUI handoff path ignores it. `tprompt tui` does not contact or
+auto-start the daemon; it spawns a short-lived handoff worker per selection.
+Explicit lifecycle commands such as `tprompt daemon start`, `daemon run`,
+`daemon status`, and `daemon stop` remain available.
 
 ## `max_paste_bytes`
 

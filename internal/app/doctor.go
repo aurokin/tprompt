@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/daemon"
-	"github.com/hsadler/tprompt/internal/envutil"
+	"github.com/hsadler/tprompt/internal/handoff"
 	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/store"
 )
@@ -31,15 +29,12 @@ func runDoctor(deps Deps) error {
 	}
 
 	checkTmux(w, env)
-	checkAutoStartEnv(w, env)
 	if cfgErr == nil {
 		// Clipboard check needs a loaded cfg; earlier prompt/discovery failures
 		// don't affect it.
 		checkClipboard(w, env, lookPath, cfg)
 		checkPicker(w, lookPath, cfg)
-		if err := checkDaemon(w, deps, cfg); err != nil && firstErr == nil {
-			firstErr = err
-		}
+		checkHandoff(w, deps, cfg)
 	}
 	return firstErr
 }
@@ -172,23 +167,6 @@ func checkTmux(w io.Writer, env func(string) string) {
 	}
 }
 
-// checkAutoStartEnv surfaces the TPROMPT_NO_AUTO_START hard opt-out so
-// operators investigating "why didn't the daemon spawn?" can see the
-// env-var state at a glance instead of working it out from the
-// SocketUnavailableError shape (AUR-328).
-func checkAutoStartEnv(w io.Writer, env func(string) string) {
-	rawEnv := readEnv(env, noAutoStartEnv)
-	raw := strings.TrimSpace(rawEnv)
-	if raw == "" {
-		return
-	}
-	if envutil.TruthyOf(rawEnv) {
-		printWarn(w, fmt.Sprintf("%s=%s set: TUI implicit auto-start disabled (hard opt-out)", noAutoStartEnv, raw))
-		return
-	}
-	printWarn(w, fmt.Sprintf("%s=%s set but not a recognized truthy value (1/true/yes/on); auto-start unaffected", noAutoStartEnv, raw))
-}
-
 func checkClipboard(w io.Writer, env func(string) string, lookPath func(string) (string, error), cfg config.Resolved) {
 	if len(cfg.ClipboardArgv) > 0 {
 		tool := cfg.ClipboardArgv[0]
@@ -221,32 +199,16 @@ func checkPicker(w io.Writer, lookPath func(string) (string, error), cfg config.
 	printOK(w, fmt.Sprintf("picker command: %s", tool))
 }
 
-func checkDaemon(w io.Writer, deps Deps, cfg config.Resolved) error {
-	if err := validateDaemonStatusConfig(cfg); err != nil {
-		printFail(w, err.Error())
-		return err
+func checkHandoff(w io.Writer, deps Deps, cfg config.Resolved) {
+	if deps.NewTUIClient == nil {
+		printWarn(w, "TUI handoff unavailable: no client factory configured")
+		return
 	}
-	client, err := deps.NewDaemonClient(cfg)
-	if err != nil {
-		printWarn(w, fmt.Sprintf("daemon unreachable (%s): %v", cfg.SocketPath, err))
-		return nil
+	if _, err := deps.NewTUIClient(cfg); err != nil {
+		printWarn(w, fmt.Sprintf("TUI handoff unavailable: %v", err))
+		return
 	}
-	status, err := client.Status()
-	if err != nil {
-		var socketErr *daemon.SocketUnavailableError
-		if errors.As(err, &socketErr) {
-			printWarn(w, fmt.Sprintf("daemon not running (%s): %s", socketErr.Path, socketErr.Reason))
-			return nil
-		}
-		printWarn(w, fmt.Sprintf("daemon unreachable (%s): %v", cfg.SocketPath, err))
-		return nil
-	}
-	socket := status.Socket
-	if socket == "" {
-		socket = cfg.SocketPath
-	}
-	printOK(w, fmt.Sprintf("daemon reachable (%s)", socket))
-	return nil
+	printOK(w, fmt.Sprintf("TUI handoff ready (%s)", handoff.JobsDir(cfg)))
 }
 
 func printOK(w io.Writer, msg string) {

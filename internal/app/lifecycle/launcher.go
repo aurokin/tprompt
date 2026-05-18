@@ -1,5 +1,5 @@
-// Package lifecycle owns the parent-side daemon launcher used by both
-// `tprompt daemon start` and TUI implicit auto-start. It wraps the
+// Package lifecycle owns the parent-side daemon launcher used by
+// `tprompt daemon start`. It wraps the
 // foundational primitives in internal/daemon/lifecycle (run lock, start
 // lock, identity sidecar, cooldown marker, structured start result) with
 // CLI knowledge: spawn argv, --config propagation, daemon log path,
@@ -33,9 +33,7 @@ func processAlive(pid int) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
-// StartIntent classifies why the launcher was invoked. The trust gate
-// fires only for IntentImplicitTUI; explicit recovery commands bypass it
-// so users can always recover from a hostile macOS trust state.
+// StartIntent classifies why the launcher was invoked.
 type StartIntent int
 
 const (
@@ -46,8 +44,8 @@ const (
 	// exists so explicit intent can be recorded in pre-spawn diagnostics
 	// and the trust gate hook can match on it.
 	IntentExplicitRun
-	// IntentImplicitTUI is TUI default-on auto-start when the daemon is
-	// unreachable.
+	// IntentImplicitTUI is the legacy TUI auto-start intent. The current
+	// TUI path uses short-lived handoff workers instead.
 	IntentImplicitTUI
 )
 
@@ -183,8 +181,8 @@ func New(opts Options) *Launcher {
 }
 
 // Start runs the lifecycle launcher under the start lock. It returns a
-// structured StartResult — callers (CLI commands, TUI auto-start) map
-// that to user-visible output and exit codes.
+// structured StartResult; CLI commands map that to user-visible output and
+// exit codes.
 func (l *Launcher) Start(ctx context.Context, intent StartIntent) dlife.StartResult {
 	paths, err := dlife.PathsFor(l.opts.SocketPath)
 	if err != nil {
@@ -193,9 +191,9 @@ func (l *Launcher) Start(ctx context.Context, intent StartIntent) dlife.StartRes
 
 	if res, decided := l.classifyProbe(ctx); decided {
 		// A successful probe means a compatible daemon owns the
-		// socket. Clear any stale cooldown marker so a later implicit
-		// start (after the user stops the daemon) is not gated by an
-		// expired-window cooldown left over from before this success.
+		// socket. Clear any stale cooldown marker so the legacy implicit
+		// start path is not gated by an expired-window cooldown left over
+		// from before this success.
 		// Mirrors the post-lock OutcomeAlreadyRunning branch below.
 		if res.Outcome == dlife.OutcomeAlreadyRunning {
 			_ = dlife.ClearCooldown(paths)

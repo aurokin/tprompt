@@ -2,6 +2,13 @@ package daemon
 
 import "fmt"
 
+// ValidateJob checks submitted Job fields before enqueueing/running so callers
+// reject malformed requests synchronously instead of surfacing the failure later
+// via tmux display-message.
+func ValidateJob(j Job) error {
+	return validateJob(j)
+}
+
 // validateJob checks wire-submitted Job fields before enqueueing so the daemon
 // rejects malformed requests synchronously on SubmitResponse instead of
 // surfacing the failure later via tmux display-message. Clients get a clear

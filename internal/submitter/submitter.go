@@ -1,6 +1,6 @@
-// Package submitter converts a tui.Result into a daemon SubmitRequest and
-// dials the daemon. Pure orchestration; no UI coupling. Lives outside
-// internal/tui so the tui package stays a presentation-only leaf.
+// Package submitter converts a tui.Result into a delivery submission. Pure
+// orchestration; no UI coupling. Lives outside internal/tui so the tui package
+// stays a presentation-only leaf.
 package submitter
 
 import (
@@ -16,7 +16,7 @@ import (
 	"github.com/hsadler/tprompt/internal/tui"
 )
 
-// Submitter converts a TUI selection into a daemon submission. Errors are
+// Submitter converts a TUI selection into a delivery submission. Errors are
 // typed so the renderer can decide between staying open with an inline
 // message and propagating to runTUI for an exit-code mapping.
 type Submitter interface {
@@ -124,14 +124,14 @@ func (s *submitter) submitPrompt(id, scope string) error {
 	if !resp.Accepted {
 		return &daemon.IPCError{
 			Op:     "submit",
-			Reason: fmt.Sprintf("daemon did not accept job (job_id=%q)", resp.JobID),
+			Reason: fmt.Sprintf("delivery client did not accept job (job_id=%q)", resp.JobID),
 		}
 	}
 	return nil
 }
 
 func (s *submitter) submitClipboard(body []byte) error {
-	// Validate content before resolving delivery or dialing the daemon so
+	// Validate content before resolving delivery so
 	// typed content errors propagate cheaply. The 5b Renderer pre-validates
 	// via clipboard.Validate, but the Phase 5a stub Renderer and tests hand
 	// bytes in directly — defense in depth.
@@ -174,7 +174,7 @@ func (s *submitter) submitClipboard(body []byte) error {
 	if !resp.Accepted {
 		return &daemon.IPCError{
 			Op:     "submit",
-			Reason: fmt.Sprintf("daemon did not accept job (job_id=%q)", resp.JobID),
+			Reason: fmt.Sprintf("delivery client did not accept job (job_id=%q)", resp.JobID),
 		}
 	}
 	return nil

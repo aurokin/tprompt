@@ -37,7 +37,7 @@ belong in Linear milestones, not in the repo.
 ## I Want To Change The TUI
 
 - [TUI](commands/tui.md) - interaction contract and rendering rules.
-- [TUI flow](commands/tui-flow.md) - daemon handoff behavior.
+- [TUI flow](commands/tui-flow.md) - short-lived handoff worker behavior.
 - [Architecture overview](architecture/overview.md) - where the TUI sits in the system.
 - [Interfaces](implementation/interfaces.md) - renderer, state, and submitter seams.
 - [Testing harness](testing/harness.md) - proof surfaces for model/view behavior.
@@ -53,8 +53,8 @@ belong in Linear milestones, not in the repo.
 ## I Want To Change The Daemon
 
 - [Daemon command](commands/daemon.md) - daemon lifecycle and operator behavior.
-- [Daemon lifecycle and TUI auto-start](lifecycle/auto-start.md) - launcher seams, primitives, macOS trust gate, recovery paths.
-- [macOS daemon auto-start ADR](lifecycle/macos-autostart-adr.md) - locked decision (status: accepted) on why macOS does not implicitly auto-start the daemon, with kernel-panic evidence and rejected alternatives.
+- [Daemon lifecycle](lifecycle/auto-start.md) - explicit daemon launcher seams, primitives, macOS trust gate, recovery paths.
+- [macOS daemon auto-start ADR](lifecycle/macos-autostart-adr.md) - historical decision and evidence for removing implicit daemon auto-start from the TUI path.
 - [macOS release signing](lifecycle/macos-release-signing.md) - signing/notarization pipeline and the GitHub Actions secrets contract that feeds it.
 - [Data model](architecture/data-model.md) - deferred job and status shapes.
 - [Components](architecture/components.md) - package responsibilities.
