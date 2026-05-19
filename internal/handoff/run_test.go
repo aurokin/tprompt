@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/daemon"
+	"github.com/hsadler/tprompt/internal/delivery"
 	"github.com/hsadler/tprompt/internal/tmux"
 )
 
@@ -44,16 +44,16 @@ func (f *fakeAdapter) DisplayMessage(_ tmux.MessageTarget, msg string) error {
 func TestRunJobDeliversAndRemovesJobFile(t *testing.T) {
 	dir := t.TempDir()
 	jobPath := filepath.Join(dir, "job.json")
-	job := daemon.Job{
+	job := delivery.Job{
 		JobID:        "h-1",
-		Source:       daemon.SourcePrompt,
+		Source:       delivery.SourcePrompt,
 		PromptID:     "demo",
 		Body:         []byte("hello"),
 		Mode:         "paste",
 		Enter:        true,
 		SanitizeMode: "safe",
 		PaneID:       "%9",
-		Verification: daemon.VerificationPolicy{TimeoutMS: 100, PollIntervalMS: 10},
+		Verification: delivery.VerificationPolicy{TimeoutMS: 100, PollIntervalMS: 10},
 	}
 	writeJobFile(t, jobPath, job)
 
@@ -73,7 +73,7 @@ func TestRunJobDeliversAndRemovesJobFile(t *testing.T) {
 func TestRunJobRejectsMalformedJobBeforeDelivery(t *testing.T) {
 	dir := t.TempDir()
 	jobPath := filepath.Join(dir, "job.json")
-	writeJobFile(t, jobPath, daemon.Job{JobID: "bad"})
+	writeJobFile(t, jobPath, delivery.Job{JobID: "bad"})
 
 	adapter := &fakeAdapter{}
 	cfg := config.Resolved{LogPath: filepath.Join(dir, "handoff.log"), MaxPasteBytes: 1024}
@@ -108,15 +108,15 @@ func TestClientRejectsMalformedJobBeforeSpawn(t *testing.T) {
 	cfg := config.Resolved{LogPath: filepath.Join(dir, "handoff.log"), MaxPasteBytes: 1024}
 	client := NewClient(cfg, "/bin/false", "")
 
-	_, err := client.Submit(daemon.SubmitRequest{Job: daemon.Job{
-		Source:       daemon.SourcePrompt,
+	_, err := client.Submit(delivery.SubmitRequest{Job: delivery.Job{
+		Source:       delivery.SourcePrompt,
 		Body:         []byte("hello"),
 		Mode:         "paste",
 		SanitizeMode: "safe",
 		PaneID:       "%9",
-		Verification: daemon.VerificationPolicy{TimeoutMS: 0, PollIntervalMS: 10},
+		Verification: delivery.VerificationPolicy{TimeoutMS: 0, PollIntervalMS: 10},
 	}})
-	var ipc *daemon.IPCError
+	var ipc *delivery.IPCError
 	if !errors.As(err, &ipc) {
 		t.Fatalf("Submit err = %T: %v, want IPCError", err, err)
 	}
@@ -132,7 +132,7 @@ func TestClientRejectsMalformedJobBeforeSpawn(t *testing.T) {
 func TestClientRejectsInvalidConfigBeforeWritingJob(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Resolved{
-		SocketPath:     filepath.Join(dir, "daemon.sock"),
+		SocketPath:     filepath.Join(dir, "delivery.sock"),
 		LogPath:        "",
 		MaxPasteBytes:  1024,
 		DefaultMode:    "paste",
@@ -146,8 +146,8 @@ func TestClientRejectsInvalidConfigBeforeWritingJob(t *testing.T) {
 	}
 	client := NewClient(cfg, "/bin/false", "")
 
-	_, err := client.Submit(daemon.SubmitRequest{Job: validJob()})
-	var ipc *daemon.IPCError
+	_, err := client.Submit(delivery.SubmitRequest{Job: validJob()})
+	var ipc *delivery.IPCError
 	if !errors.As(err, &ipc) {
 		t.Fatalf("Submit err = %T: %v, want IPCError", err, err)
 	}
@@ -159,21 +159,21 @@ func TestClientRejectsInvalidConfigBeforeWritingJob(t *testing.T) {
 	}
 }
 
-func validJob() daemon.Job {
-	return daemon.Job{
+func validJob() delivery.Job {
+	return delivery.Job{
 		JobID:        "h-1",
-		Source:       daemon.SourcePrompt,
+		Source:       delivery.SourcePrompt,
 		PromptID:     "demo",
 		Body:         []byte("hello"),
 		Mode:         "paste",
 		Enter:        true,
 		SanitizeMode: "safe",
 		PaneID:       "%9",
-		Verification: daemon.VerificationPolicy{TimeoutMS: 100, PollIntervalMS: 10},
+		Verification: delivery.VerificationPolicy{TimeoutMS: 100, PollIntervalMS: 10},
 	}
 }
 
-func writeJobFile(t *testing.T, path string, job daemon.Job) {
+func writeJobFile(t *testing.T, path string, job delivery.Job) {
 	t.Helper()
 	f, err := os.Create(path)
 	if err != nil {

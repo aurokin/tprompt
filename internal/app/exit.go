@@ -7,6 +7,7 @@ import (
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
+	"github.com/hsadler/tprompt/internal/delivery"
 	"github.com/hsadler/tprompt/internal/keybind"
 	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/sanitize"
@@ -148,6 +149,22 @@ func ExitCode(err error) int {
 	}
 	var policyErr *daemon.InvalidPolicyError
 	if errors.As(err, &policyErr) {
+		return ExitDaemon
+	}
+	var deliveryUnavailable *delivery.UnavailableError
+	if errors.As(err, &deliveryUnavailable) {
+		return ExitDaemon
+	}
+	var deliveryIPC *delivery.IPCError
+	if errors.As(err, &deliveryIPC) {
+		return ExitDaemon
+	}
+	var deliveryTimeout *delivery.TimeoutError
+	if errors.As(err, &deliveryTimeout) {
+		return ExitDaemon
+	}
+	var deliveryPolicy *delivery.InvalidPolicyError
+	if errors.As(err, &deliveryPolicy) {
 		return ExitDaemon
 	}
 

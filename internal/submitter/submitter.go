@@ -10,7 +10,7 @@ import (
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/daemon"
+	"github.com/hsadler/tprompt/internal/delivery"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
 	"github.com/hsadler/tprompt/internal/tui"
@@ -40,7 +40,7 @@ func (e *BodyTooLargeError) Error() string {
 }
 
 // New returns a Submitter wired against real dependencies.
-func New(prompts store.Store, client daemon.Client, cfg config.Resolved, target tmux.TargetContext) Submitter {
+func New(prompts store.Store, client delivery.Client, cfg config.Resolved, target tmux.TargetContext) Submitter {
 	return &submitter{
 		prompts: prompts,
 		client:  client,
@@ -51,7 +51,7 @@ func New(prompts store.Store, client daemon.Client, cfg config.Resolved, target 
 
 type submitter struct {
 	prompts store.Store
-	client  daemon.Client
+	client  delivery.Client
 	cfg     config.Resolved
 	target  tmux.TargetContext
 }
@@ -87,7 +87,7 @@ func (s *submitter) submitPrompt(id, scope string) error {
 		return err
 	}
 
-	delivery, err := config.ResolveDelivery(s.cfg, config.FrontmatterDefaults{
+	resolved, err := config.ResolveDelivery(s.cfg, config.FrontmatterDefaults{
 		Mode:  prompt.Defaults.Mode,
 		Enter: prompt.Defaults.Enter,
 	}, config.DeliveryFlags{})
@@ -100,29 +100,29 @@ func (s *submitter) submitPrompt(id, scope string) error {
 		return &BodyTooLargeError{Bytes: len(body), Limit: s.cfg.MaxPasteBytes}
 	}
 
-	job := daemon.Job{
+	job := delivery.Job{
 		SubmitterPID: os.Getpid(),
-		Source:       daemon.SourcePrompt,
+		Source:       delivery.SourcePrompt,
 		PromptID:     prompt.ID,
 		SourcePath:   prompt.Path,
 		Body:         body,
-		Mode:         delivery.Mode,
-		Enter:        delivery.Enter,
-		SanitizeMode: delivery.Sanitize,
+		Mode:         resolved.Mode,
+		Enter:        resolved.Enter,
+		SanitizeMode: resolved.Sanitize,
 		PaneID:       s.target.PaneID,
 		Origin:       buildOrigin(s.target),
-		Verification: daemon.VerificationPolicy{
+		Verification: delivery.VerificationPolicy{
 			TimeoutMS:      s.cfg.VerificationTimeoutMS,
 			PollIntervalMS: s.cfg.VerificationPollIntervalMS,
 		},
 	}
 
-	resp, err := s.client.Submit(daemon.SubmitRequest{Job: job})
+	resp, err := s.client.Submit(delivery.SubmitRequest{Job: job})
 	if err != nil {
 		return err
 	}
 	if !resp.Accepted {
-		return &daemon.IPCError{
+		return &delivery.IPCError{
 			Op:     "submit",
 			Reason: fmt.Sprintf("delivery client did not accept job (job_id=%q)", resp.JobID),
 		}
@@ -147,32 +147,32 @@ func (s *submitter) submitClipboard(body []byte) error {
 		return &BodyTooLargeError{Bytes: len(body), Limit: s.cfg.MaxPasteBytes}
 	}
 
-	delivery, err := config.ResolveDelivery(s.cfg, config.FrontmatterDefaults{}, config.DeliveryFlags{})
+	resolved, err := config.ResolveDelivery(s.cfg, config.FrontmatterDefaults{}, config.DeliveryFlags{})
 	if err != nil {
 		return err
 	}
 
-	job := daemon.Job{
+	job := delivery.Job{
 		SubmitterPID: os.Getpid(),
-		Source:       daemon.SourceClipboard,
+		Source:       delivery.SourceClipboard,
 		Body:         body,
-		Mode:         delivery.Mode,
-		Enter:        delivery.Enter,
-		SanitizeMode: delivery.Sanitize,
+		Mode:         resolved.Mode,
+		Enter:        resolved.Enter,
+		SanitizeMode: resolved.Sanitize,
 		PaneID:       s.target.PaneID,
 		Origin:       buildOrigin(s.target),
-		Verification: daemon.VerificationPolicy{
+		Verification: delivery.VerificationPolicy{
 			TimeoutMS:      s.cfg.VerificationTimeoutMS,
 			PollIntervalMS: s.cfg.VerificationPollIntervalMS,
 		},
 	}
 
-	resp, err := s.client.Submit(daemon.SubmitRequest{Job: job})
+	resp, err := s.client.Submit(delivery.SubmitRequest{Job: job})
 	if err != nil {
 		return err
 	}
 	if !resp.Accepted {
-		return &daemon.IPCError{
+		return &delivery.IPCError{
 			Op:     "submit",
 			Reason: fmt.Sprintf("delivery client did not accept job (job_id=%q)", resp.JobID),
 		}

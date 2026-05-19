@@ -13,6 +13,7 @@ import (
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
+	"github.com/hsadler/tprompt/internal/delivery"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
 )
@@ -138,7 +139,7 @@ func TestDoctorHandoffUnavailableIsWarning(t *testing.T) {
 	deps.LoadConfig = func(string) (config.Resolved, error) {
 		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
 	}
-	deps.NewTUIClient = func(config.Resolved) (daemon.Client, error) {
+	deps.NewTUIClient = func(config.Resolved) (delivery.Client, error) {
 		return nil, errors.New("missing executable")
 	}
 

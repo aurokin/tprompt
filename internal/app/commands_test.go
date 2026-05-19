@@ -13,6 +13,7 @@ import (
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
 	dlife "github.com/hsadler/tprompt/internal/daemon/lifecycle"
+	"github.com/hsadler/tprompt/internal/delivery"
 	"github.com/hsadler/tprompt/internal/picker"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/submitter"
@@ -204,8 +205,8 @@ func workingDeps(t *testing.T, fs *fakeStore) Deps {
 		NewDaemonClient: func(config.Resolved) (daemon.Client, error) {
 			return nil, ErrNotImplemented
 		},
-		NewTUIClient: func(config.Resolved) (daemon.Client, error) {
-			return &fakeDaemonClient{}, nil
+		NewTUIClient: func(config.Resolved) (delivery.Client, error) {
+			return &fakeDeliveryClient{}, nil
 		},
 		NewDaemonReadinessClient: func(config.Resolved, time.Duration) daemon.Client {
 			return &fakeDaemonClient{}
@@ -218,7 +219,7 @@ func workingDeps(t *testing.T, fs *fakeStore) Deps {
 		NewRenderer: func(config.Resolved, store.Store, submitter.Submitter) (tui.Renderer, error) {
 			return cancelRenderer{}, nil
 		},
-		NewSubmitter: func(config.Resolved, store.Store, daemon.Client, tmux.TargetContext) submitter.Submitter {
+		NewSubmitter: func(config.Resolved, store.Store, delivery.Client, tmux.TargetContext) submitter.Submitter {
 			return noopSubmitter{}
 		},
 	}

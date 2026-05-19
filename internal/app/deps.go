@@ -17,6 +17,7 @@ import (
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/daemon"
 	dlife "github.com/hsadler/tprompt/internal/daemon/lifecycle"
+	"github.com/hsadler/tprompt/internal/delivery"
 	"github.com/hsadler/tprompt/internal/handoff"
 	"github.com/hsadler/tprompt/internal/picker"
 	"github.com/hsadler/tprompt/internal/promptsource"
@@ -51,12 +52,12 @@ type Deps struct {
 	NewClip                  func(cfg config.Resolved) (clipboard.Reader, error)
 	NewPicker                func(cfg config.Resolved) (picker.Picker, error)
 	NewDaemonClient          func(cfg config.Resolved) (daemon.Client, error)
-	NewTUIClient             func(cfg config.Resolved) (daemon.Client, error)
+	NewTUIClient             func(cfg config.Resolved) (delivery.Client, error)
 	NewDaemonReadinessClient func(cfg config.Resolved, timeout time.Duration) daemon.Client
 	NewLauncher              func(cfg config.Resolved, explicitConfigPath string) DaemonLauncher
 	NewTrustAssessor         func() applife.TrustAssessor
 	NewRenderer              func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error)
-	NewSubmitter             func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter
+	NewSubmitter             func(cfg config.Resolved, prompts store.Store, client delivery.Client, target tmux.TargetContext) submitter.Submitter
 }
 
 // ProductionDeps returns a Deps wired for real execution.
@@ -123,13 +124,13 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 				Output: stdout,
 			}), nil
 		},
-		NewSubmitter: func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter {
+		NewSubmitter: func(cfg config.Resolved, prompts store.Store, client delivery.Client, target tmux.TargetContext) submitter.Submitter {
 			return submitter.New(prompts, client, cfg, target)
 		},
 	}
 }
 
-func productionNewHandoffClient(cfg config.Resolved) (daemon.Client, error) {
+func productionNewHandoffClient(cfg config.Resolved) (delivery.Client, error) {
 	if err := handoff.ValidateConfig(cfg); err != nil {
 		return nil, err
 	}
