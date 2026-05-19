@@ -111,7 +111,7 @@ mise install
 
 That installs:
 
-- `go 1.26.2`
+- `go 1.26.3`
 - `golangci-lint v2.1.6`
 - `gofumpt v0.7.0`
 - `goimports v0.26.0`

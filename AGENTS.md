@@ -2,7 +2,7 @@
 
 ## Toolchain
 
-Go module project (`go.mod`). Pinned via `mise.toml`: Go 1.26.2, `golangci-lint v2.1.6`, `gofumpt v0.7.0`, `goimports v0.26.0`. `mise install` or `make tools` to bootstrap.
+Go module project (`go.mod`). Pinned via `mise.toml`: Go 1.26.3, `golangci-lint v2.1.6`, `gofumpt v0.7.0`, `goimports v0.26.0`. `mise install` or `make tools` to bootstrap.
 
 ## File-Scoped Commands
 

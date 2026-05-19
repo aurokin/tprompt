@@ -134,13 +134,6 @@ func renderAndDispatchTUI(deps Deps, cfg config.Resolved, s store.Store, client 
 	}
 }
 
-func explicitConfigPath(deps Deps) string {
-	if deps.ConfigPath == nil {
-		return ""
-	}
-	return *deps.ConfigPath
-}
-
 // buildTUIState assembles the State the Renderer sees: pinned clipboard row,
 // alphabetically-sorted board rows, overflow rows, and the reserved-key map.
 func buildTUIState(summaries []store.Summary, cfg config.Resolved) tui.State {
