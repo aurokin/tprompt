@@ -240,7 +240,7 @@ Search uses fuzzy (fzf-style) matching over `id + title + description + tags`, r
 Deferred-job failures surface in two channels:
 
 - `tmux display-message` banner on the originating client at the moment of failure
-- append-only delivery log at `~/.local/state/tprompt/daemon.log`
+- append-only delivery log at `~/.local/state/tprompt/delivery.log`
 
 No success banner by default.
 

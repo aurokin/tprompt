@@ -132,7 +132,6 @@ func TestClientRejectsMalformedJobBeforeSpawn(t *testing.T) {
 func TestClientRejectsInvalidConfigBeforeWritingJob(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Resolved{
-		SocketPath:     filepath.Join(dir, "delivery.sock"),
 		LogPath:        "",
 		MaxPasteBytes:  1024,
 		DefaultMode:    "paste",

@@ -23,14 +23,14 @@ func TestDefaultMatchesDocumentedMVPValues(t *testing.T) {
 	if got.DefaultEnter {
 		t.Fatal("Default().DefaultEnter = true, want false")
 	}
-	if got.SocketPath != "~/.local/state/tprompt/daemon.sock" {
-		t.Fatalf("Default().SocketPath = %q", got.SocketPath)
+	if got.SocketPath != "" {
+		t.Fatalf("Default().SocketPath = %q, want empty legacy field", got.SocketPath)
 	}
-	if got.LogPath != "~/.local/state/tprompt/daemon.log" {
+	if got.LogPath != "~/.local/state/tprompt/delivery.log" {
 		t.Fatalf("Default().LogPath = %q", got.LogPath)
 	}
-	if !got.DaemonAutoStart {
-		t.Fatal("Default().DaemonAutoStart = false, want true")
+	if got.DaemonAutoStart {
+		t.Fatal("Default().DaemonAutoStart = true, want false legacy field")
 	}
 	if got.PickerCommand != "fzf" {
 		t.Fatalf("Default().PickerCommand = %q, want %q", got.PickerCommand, "fzf")
@@ -91,13 +91,11 @@ func TestDefaultReservedKeysUseRoleToKeyMapping(t *testing.T) {
 func TestConfigDecodesDocumentedExampleShape(t *testing.T) {
 	const configTOML = `
 prompts_dir = "~/.config/tprompt/prompts"
-additional_prompts_dirs = ["~/team-prompts", "/srv/shared-prompts"]
-default_mode = "paste"
-default_enter = false
-socket_path = "~/.local/state/tprompt/daemon.sock"
-log_path = "~/.local/state/tprompt/daemon.log"
-daemon_auto_start = true
-picker_command = "fzf"
+	additional_prompts_dirs = ["~/team-prompts", "/srv/shared-prompts"]
+	default_mode = "paste"
+	default_enter = false
+	log_path = "~/.local/state/tprompt/delivery.log"
+	picker_command = "fzf"
 verification_timeout_ms = 5000
 verification_poll_interval_ms = 100
 post_injection_verification = true
@@ -132,9 +130,6 @@ select = "Enter"
 	if got.PickerCommand != "fzf" {
 		t.Fatalf("PickerCommand = %q", got.PickerCommand)
 	}
-	if !got.DaemonAutoStart {
-		t.Fatal("DaemonAutoStart = false, want true")
-	}
 	if !got.PostInjectionVerification {
 		t.Fatal("PostInjectionVerification = false, want true")
 	}
@@ -146,6 +141,24 @@ select = "Enter"
 	}
 	if got.ReservedKeys["clipboard"] != "P" || got.ReservedKeys["select"] != "Enter" {
 		t.Fatalf("ReservedKeys decoded incorrectly: %#v", got.ReservedKeys)
+	}
+}
+
+func TestConfigAcceptsLegacyDaemonFields(t *testing.T) {
+	const configTOML = `
+socket_path = "~/.local/state/tprompt/daemon.sock"
+daemon_auto_start = true
+`
+
+	var got Config
+	if _, err := toml.Decode(configTOML, &got); err != nil {
+		t.Fatalf("toml.Decode returned error: %v", err)
+	}
+	if got.SocketPath != "~/.local/state/tprompt/daemon.sock" {
+		t.Fatalf("legacy SocketPath = %q", got.SocketPath)
+	}
+	if !got.DaemonAutoStart {
+		t.Fatal("legacy DaemonAutoStart = false, want true")
 	}
 }
 
@@ -268,9 +281,6 @@ func TestNormalizeExpandsHomePaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
 	}
-	if strings.Contains(r.SocketPath, "~") {
-		t.Fatalf("SocketPath still contains ~: %q", r.SocketPath)
-	}
 	if strings.Contains(r.LogPath, "~") {
 		t.Fatalf("LogPath still contains ~: %q", r.LogPath)
 	}
@@ -282,20 +292,6 @@ func TestNormalizeExpandsHomePaths(t *testing.T) {
 	}
 	if r.AdditionalPromptsDirs[1] != filepath.Join(dir, "shared") {
 		t.Fatalf("AdditionalPromptsDirs[1] = %q", r.AdditionalPromptsDirs[1])
-	}
-}
-
-func TestNormalizeThreadsDaemonAutoStart(t *testing.T) {
-	cfg := Default()
-	cfg.PromptsDir = t.TempDir()
-	cfg.DaemonAutoStart = true
-
-	r, err := Normalize(cfg, "")
-	if err != nil {
-		t.Fatalf("Normalize: %v", err)
-	}
-	if !r.DaemonAutoStart {
-		t.Fatal("Resolved.DaemonAutoStart = false, want true")
 	}
 }
 
@@ -520,29 +516,22 @@ func stringSliceEqual(a, b []string) bool {
 	return true
 }
 
-func TestResolveDaemonIgnoresPromptAndClipboardFields(t *testing.T) {
+func TestResolveHandoffIgnoresPromptAndClipboardFields(t *testing.T) {
 	cfg := Default()
 	cfg.PromptsDir = ""
 	cfg.ClipboardReadCommand = `"unterminated`
 	cfg.ReservedKeys["clipboard"] = "ctrl+x"
-	cfg.DaemonAutoStart = true
 	cfg.PostInjectionVerification = true
 
-	r := ResolveDaemon(cfg, "/tmp/config.toml")
-	if r.SocketPath == "" {
-		t.Fatal("ResolveDaemon left SocketPath empty")
-	}
+	r := ResolveHandoff(cfg, "/tmp/config.toml")
 	if r.LogPath == "" {
-		t.Fatal("ResolveDaemon left LogPath empty")
+		t.Fatal("ResolveHandoff left LogPath empty")
 	}
 	if r.ConfigPath != "/tmp/config.toml" {
 		t.Fatalf("ConfigPath = %q, want %q", r.ConfigPath, "/tmp/config.toml")
 	}
-	if !r.DaemonAutoStart {
-		t.Fatal("ResolveDaemon did not carry DaemonAutoStart")
-	}
 	if !r.PostInjectionVerification {
-		t.Fatal("ResolveDaemon did not carry PostInjectionVerification")
+		t.Fatal("ResolveHandoff did not carry PostInjectionVerification")
 	}
 }
 
@@ -575,12 +564,6 @@ func TestValidateRejectsInvalidSanitize(t *testing.T) {
 	r := validResolved(t)
 	r.Sanitize = "maybe"
 	assertValidationField(t, Validate(r), "sanitize")
-}
-
-func TestValidateRejectsEmptySocketPath(t *testing.T) {
-	r := validResolved(t)
-	r.SocketPath = ""
-	assertValidationField(t, Validate(r), "socket_path")
 }
 
 func TestValidateRejectsNonPositiveMaxPasteBytes(t *testing.T) {
@@ -701,8 +684,7 @@ func validResolved(t *testing.T) Resolved {
 		PromptsDir:    promptsDir,
 		DefaultMode:   "paste",
 		Sanitize:      "off",
-		SocketPath:    filepath.Join(dir, "daemon.sock"),
-		LogPath:       filepath.Join(dir, "daemon.log"),
+		LogPath:       filepath.Join(dir, "delivery.log"),
 		MaxPasteBytes: 1 << 20,
 	}
 }

@@ -6,7 +6,6 @@ import (
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/delivery"
 	"github.com/hsadler/tprompt/internal/keybind"
 	"github.com/hsadler/tprompt/internal/promptsource"
@@ -23,7 +22,7 @@ const (
 	ExitUsage    = 2
 	ExitPrompt   = 3
 	ExitTmux     = 4
-	ExitDaemon   = 5
+	ExitHandoff  = 5
 	ExitDelivery = 6
 )
 
@@ -131,41 +130,21 @@ func ExitCode(err error) int {
 		return ExitPrompt
 	}
 
-	var socketErr *daemon.SocketUnavailableError
-	if errors.As(err, &socketErr) {
-		return ExitDaemon
-	}
-	var ipcErr *daemon.IPCError
-	if errors.As(err, &ipcErr) {
-		return ExitDaemon
-	}
-	var shutdownTimeoutErr *daemon.ShutdownTimeoutError
-	if errors.As(err, &shutdownTimeoutErr) {
-		return ExitDaemon
-	}
-	var timeoutErr *daemon.TimeoutError
-	if errors.As(err, &timeoutErr) {
-		return ExitDaemon
-	}
-	var policyErr *daemon.InvalidPolicyError
-	if errors.As(err, &policyErr) {
-		return ExitDaemon
-	}
 	var deliveryUnavailable *delivery.UnavailableError
 	if errors.As(err, &deliveryUnavailable) {
-		return ExitDaemon
+		return ExitHandoff
 	}
 	var deliveryIPC *delivery.IPCError
 	if errors.As(err, &deliveryIPC) {
-		return ExitDaemon
+		return ExitHandoff
 	}
 	var deliveryTimeout *delivery.TimeoutError
 	if errors.As(err, &deliveryTimeout) {
-		return ExitDaemon
+		return ExitHandoff
 	}
 	var deliveryPolicy *delivery.InvalidPolicyError
 	if errors.As(err, &deliveryPolicy) {
-		return ExitDaemon
+		return ExitHandoff
 	}
 
 	var envErr *tmux.EnvError

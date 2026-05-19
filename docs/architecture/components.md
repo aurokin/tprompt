@@ -25,9 +25,6 @@ Shared delivery executor: verification, sanitizer enforcement, tmux injection, l
 ### `internal/handoff`
 Private handoff job files and short-lived worker spawning for TUI selections.
 
-### `internal/daemon`
-Legacy IPC runtime retained temporarily during removal. It is not part of the public command surface.
-
 ### `internal/clipboard`
 Clipboard reader: auto-detect, override, error wrapping. See `docs/storage/clipboard.md`.
 
@@ -67,8 +64,9 @@ Takes content + target + mode + sanitize mode and performs injection.
 ### VerificationEngine
 Evaluates whether it is safe to inject yet.
 
-### JobQueue / DaemonServer
-Receives jobs and processes them serially or with carefully bounded concurrency. Implements replace-same-target semantics.
+### HandoffWorker
+Reads one private job file, verifies the original tmux context, runs delivery,
+and exits.
 
 ### KeybindResolver
 Pure function over the `PromptIndex` + `reserved_keys` + `keybind_pool` config → final `(key → prompt)` map, plus a list of overflow prompt IDs (search-only).

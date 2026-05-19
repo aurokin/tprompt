@@ -62,7 +62,7 @@ func TestFormatLineUTCsLocalTime(t *testing.T) {
 
 func TestNewLoggerDefersFileCreationUntilFirstLog(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "nested", "daemon.log")
+	path := filepath.Join(dir, "nested", "delivery.log")
 
 	logger, err := NewLogger(path)
 	if err != nil {
@@ -87,7 +87,7 @@ func TestNewLoggerDefersFileCreationUntilFirstLog(t *testing.T) {
 }
 
 func TestLoggerCloseIsNoopWhenFileNeverOpened(t *testing.T) {
-	logger, err := NewLogger(filepath.Join(t.TempDir(), "daemon.log"))
+	logger, err := NewLogger(filepath.Join(t.TempDir(), "delivery.log"))
 	if err != nil {
 		t.Fatalf("NewLogger: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestLoggerCloseIsNoopWhenFileNeverOpened(t *testing.T) {
 
 func TestNewLoggerCreatesParentDirAndFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "nested", "subdir", "daemon.log")
+	path := filepath.Join(dir, "nested", "subdir", "delivery.log")
 
 	logger, err := NewLogger(path)
 	if err != nil {
@@ -129,7 +129,7 @@ func TestNewLoggerCreatesParentDirAndFile(t *testing.T) {
 
 func TestLoggerAppendsAcrossOpens(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "daemon.log")
+	path := filepath.Join(dir, "delivery.log")
 
 	first, err := NewLogger(path)
 	if err != nil {
@@ -249,7 +249,7 @@ func TestLoggerStderrFallbackOnWriteFailure(t *testing.T) {
 func TestLoggerStderrFallbackOnOpenFailure(t *testing.T) {
 	// Path under a directory that doesn't exist, so lazy OpenFile fails
 	// every call.
-	path := filepath.Join(t.TempDir(), "missing-dir", "daemon.log")
+	path := filepath.Join(t.TempDir(), "missing-dir", "delivery.log")
 	var stderr bytes.Buffer
 	logger := &Logger{path: path, now: time.Now, stderr: &stderr}
 

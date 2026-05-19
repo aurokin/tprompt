@@ -7,7 +7,6 @@ import (
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/daemon"
 	"github.com/hsadler/tprompt/internal/delivery"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/submitter"
@@ -60,8 +59,7 @@ func tuiDeps(t *testing.T, fs *fakeStore, rend tui.Renderer, cfgOverride ...func
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
 		cfg := config.Resolved{
-			PromptsDir:      "/prompts",
-			DaemonAutoStart: true, // legacy config retained for compatibility
+			PromptsDir: "/prompts",
 			ReservedPrintable: map[rune]string{
 				'p': "clipboard",
 				'/': "search",
@@ -75,11 +73,6 @@ func tuiDeps(t *testing.T, fs *fakeStore, rend tui.Renderer, cfgOverride ...func
 			fn(&cfg)
 		}
 		return cfg, nil
-	}
-	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
-		return &fakeDaemonClient{
-			statusFn: func() (daemon.StatusResponse, error) { return daemon.StatusResponse{}, nil },
-		}, nil
 	}
 	deps.NewTUIClient = func(config.Resolved) (delivery.Client, error) {
 		return &fakeDeliveryClient{}, nil
@@ -374,9 +367,9 @@ func TestTUI_StoreErrorShortCircuits(t *testing.T) {
 	fs := &fakeStore{discoverErr: storeErr}
 	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
 	deps := tuiDeps(t, fs, rend)
-	daemonCalled := false
-	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
-		daemonCalled = true
+	clientCalled := false
+	deps.NewTUIClient = func(config.Resolved) (delivery.Client, error) {
+		clientCalled = true
 		return nil, nil
 	}
 
@@ -388,8 +381,8 @@ func TestTUI_StoreErrorShortCircuits(t *testing.T) {
 	if ExitCode(err) != ExitPrompt {
 		t.Fatalf("want ExitPrompt, got %d", ExitCode(err))
 	}
-	if daemonCalled {
-		t.Fatal("daemon factory must not be called when store load fails")
+	if clientCalled {
+		t.Fatal("handoff client factory must not be called when store load fails")
 	}
 	if rend.called {
 		t.Fatal("renderer must not run when store load fails")
@@ -468,7 +461,7 @@ func TestTUI_PromptSelectionThreadsDepsIntoSubmitterFactory(t *testing.T) {
 		t.Error("store not threaded into submitter")
 	}
 	if rec.client == nil {
-		t.Error("daemon client not threaded into submitter")
+		t.Error("handoff client not threaded into submitter")
 	}
 }
 
@@ -496,7 +489,7 @@ func TestTUI_OversizePromptExitsExitPrompt(t *testing.T) {
 	}
 }
 
-func TestTUI_DaemonSubmitFailureExitsExitDaemon(t *testing.T) {
+func TestTUI_HandoffSubmitFailureExitsExitHandoff(t *testing.T) {
 	fs := &fakeStore{
 		summaries: []store.Summary{{ID: "demo", Key: "1"}},
 	}
@@ -509,10 +502,10 @@ func TestTUI_DaemonSubmitFailureExitsExitDaemon(t *testing.T) {
 
 	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
 	if !errors.Is(err, dialErr) {
-		t.Fatalf("want SocketUnavailableError, got %v", err)
+		t.Fatalf("want UnavailableError, got %v", err)
 	}
-	if ExitCode(err) != ExitDaemon {
-		t.Fatalf("ExitCode = %d, want ExitDaemon", ExitCode(err))
+	if ExitCode(err) != ExitHandoff {
+		t.Fatalf("ExitCode = %d, want ExitHandoff", ExitCode(err))
 	}
 }
 
@@ -552,7 +545,7 @@ func TestTUI_ClipboardSelectionInvokesSubmitterWithDeps(t *testing.T) {
 		t.Error("store not threaded into submitter")
 	}
 	if rec.client == nil {
-		t.Error("daemon client not threaded into submitter")
+		t.Error("handoff client not threaded into submitter")
 	}
 }
 
@@ -596,7 +589,7 @@ func TestTUI_ClipboardEmptyExitsExitPrompt(t *testing.T) {
 	}
 }
 
-func TestTUI_ClipboardDaemonFailureExitsExitDaemon(t *testing.T) {
+func TestTUI_ClipboardHandoffFailureExitsExitHandoff(t *testing.T) {
 	rend := &recordingRenderer{result: tui.Result{
 		Action:        tui.ActionClipboard,
 		ClipboardBody: []byte("x"),
@@ -609,10 +602,10 @@ func TestTUI_ClipboardDaemonFailureExitsExitDaemon(t *testing.T) {
 
 	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
 	if !errors.Is(err, dialErr) {
-		t.Fatalf("want SocketUnavailableError, got %v", err)
+		t.Fatalf("want UnavailableError, got %v", err)
 	}
-	if ExitCode(err) != ExitDaemon {
-		t.Fatalf("ExitCode = %d, want ExitDaemon", ExitCode(err))
+	if ExitCode(err) != ExitHandoff {
+		t.Fatalf("ExitCode = %d, want ExitHandoff", ExitCode(err))
 	}
 }
 

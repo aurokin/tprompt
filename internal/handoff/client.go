@@ -139,8 +139,5 @@ func JobsDir(cfg config.Resolved) string {
 	if cfg.LogPath != "" {
 		return filepath.Join(filepath.Dir(cfg.LogPath), "jobs")
 	}
-	if cfg.SocketPath != "" {
-		return filepath.Join(filepath.Dir(cfg.SocketPath), "jobs")
-	}
 	return filepath.Join(os.TempDir(), "tprompt", "jobs")
 }

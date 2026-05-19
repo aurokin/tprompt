@@ -5,8 +5,8 @@ package tmux
 import "context"
 
 // TargetContext identifies the delivery pane plus any extra tmux context the
-// daemon can use for verification and failure routing. JSON tags make the
-// struct safe to transport over the daemon IPC wire (see internal/daemon).
+// handoff worker can use for verification and failure routing. JSON tags make
+// the struct safe to store in handoff job files.
 type TargetContext struct {
 	Session   string `json:"session,omitempty"`
 	Window    string `json:"window,omitempty"`
@@ -15,8 +15,8 @@ type TargetContext struct {
 }
 
 // OriginContext carries the submitting tmux client metadata that can help the
-// daemon verify focus return and scope failure banners. It intentionally omits
-// pane identity, which is tracked separately by daemon jobs.
+// handoff worker verify focus return and scope failure banners. It
+// intentionally omits pane identity, which is tracked separately by jobs.
 type OriginContext struct {
 	Session   string `json:"session,omitempty"`
 	Window    string `json:"window,omitempty"`

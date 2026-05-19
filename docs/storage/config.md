@@ -18,9 +18,7 @@ additional_prompts_dirs = []
 prompt_priority = "global"             # "global" | "project"
 default_mode = "paste"
 default_enter = false
-socket_path = "~/.local/state/tprompt/daemon.sock" # legacy; currently still required
-log_path = "~/.local/state/tprompt/daemon.log"
-daemon_auto_start = true               # legacy; ignored by current TUI handoff
+log_path = "~/.local/state/tprompt/delivery.log"
 picker_command = "fzf"
 verification_timeout_ms = 5000
 verification_poll_interval_ms = 100
@@ -47,7 +45,7 @@ select    = "Enter"
 
 - default delivery mode
 - default enter behavior
-- socket path (legacy; currently still validated)
+- log path (for TUI handoff jobs and diagnostics)
 
 ## Optional config fields
 
@@ -127,8 +125,8 @@ Recommended order for resolved delivery settings (`mode`, `enter`, `sanitize`, t
 3. config file
 4. built-in defaults
 
-`prompts_dir`, log path, legacy `socket_path`, picker configuration, reserved
-keys, and the keybind pool are config-only settings, so they resolve as:
+`prompts_dir`, log path, picker configuration, reserved keys, and the keybind
+pool are config-only settings, so they resolve as:
 
 1. CLI flags where supported
 2. config file
@@ -160,11 +158,12 @@ clipboard = ""     # disable clipboard keybind; still accessible via search
 
 `sanitize` accepts `"off"`, `"safe"`, or `"strict"`. Default is `"safe"`: strips dangerous control sequences (OSC, DCS, mode toggles, bracketed-paste protocol terminators) while preserving cosmetic CSI (SGR colors, cursor movement). See `docs/implementation/sanitization.md` for the full denylist and the rationale behind the default. `"off"` is opt-in for users who legitimately need raw escape passthrough; `"strict"` rejects on any escape sequence and reports class plus byte offset. Invalid values fail config validation.
 
-## Daemon Auto-Start
+## Legacy daemon fields
 
-`daemon_auto_start` is retained for compatibility with existing config files,
-but the current TUI handoff path ignores it. `tprompt tui` does not contact or
-auto-start a daemon; it spawns a short-lived handoff worker per selection.
+`socket_path` and `daemon_auto_start` are retained only so existing config
+files keep loading. They are ignored by the current handoff path. `tprompt tui`
+does not contact or auto-start a daemon; it spawns a short-lived handoff worker
+per selection.
 
 ## `max_paste_bytes`
 

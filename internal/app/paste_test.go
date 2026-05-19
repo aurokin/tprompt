@@ -353,22 +353,3 @@ func TestPaste_ClipboardReadError(t *testing.T) {
 		t.Fatal("adapter should not be called after clipboard read failure")
 	}
 }
-
-// TestPaste_NeverInvokesLauncher locks in the AUR-267 contract: `paste`
-// is a direct tmux-adapter delivery path; it must never go through
-// the lifecycle launcher even when daemon auto-start is on.
-func TestPaste_NeverInvokesLauncher(t *testing.T) {
-	adapter := &fakeAdapter{paneExists: true}
-	deps := pasteDeps(t, []byte("clipboard body"), adapter, func(c *config.Resolved) {
-		c.DaemonAutoStart = true
-	})
-	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
-		t.Fatal("paste must not invoke the lifecycle launcher")
-		return nil
-	}
-
-	_, _, err := executeRootWith(t, deps, "paste", "--target-pane", "%5")
-	if err != nil {
-		t.Fatalf("unexpected: %v", err)
-	}
-}

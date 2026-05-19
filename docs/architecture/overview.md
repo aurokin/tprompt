@@ -34,7 +34,7 @@ Responsibilities:
 - perform `paste` (bracketed via `load-buffer` + `paste-buffer -p`) or `type` (via `send-keys -l`) delivery
 - surface errors via `tmux display-message`
 
-All tmux interaction is centralized here rather than scattered through the CLI and daemon. See `docs/tmux/delivery.md` for the concrete command construction.
+All tmux interaction is centralized here rather than scattered through command handlers and handoff code. See `docs/tmux/delivery.md` for the concrete command construction.
 
 ## 4. Deferred handoff
 

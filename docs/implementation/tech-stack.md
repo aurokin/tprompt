@@ -28,7 +28,6 @@ internal/keybind/     keybind resolver (pool + frontmatter merge)
 internal/tmux/        tmux command construction and verification
 internal/delivery/    verification, logging, sanitize, and injection executor
 internal/handoff/     private job files and short-lived worker spawning
-internal/daemon/      legacy runtime retained temporarily during removal
 internal/clipboard/   clipboard reader (auto-detect + override)
 internal/sanitize/    off / safe / strict sanitizer
 internal/tui/         Bubble Tea TUI (board + search + clipboard row)

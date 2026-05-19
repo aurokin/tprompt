@@ -32,7 +32,7 @@ See `docs/tmux/delivery.md` for the exact tmux command construction.
 4. Apply sanitization if configured.
 5. Deliver via the tmux adapter using the selected mode.
 
-## Daemon vs direct path
+## Handoff vs direct path
 
 `tprompt paste` is **always a direct send**. It never writes a handoff job.
 

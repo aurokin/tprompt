@@ -379,22 +379,3 @@ func TestSend_OversizeCheckedBeforeSanitize(t *testing.T) {
 		t.Fatalf("want OversizeError (cap is pre-sanitize), got %T: %v", err, err)
 	}
 }
-
-// TestSend_NeverInvokesLauncher locks in the AUR-267 contract: `send`
-// is a direct tmux-adapter delivery path; it must never go through
-// the lifecycle launcher even when daemon auto-start is on.
-func TestSend_NeverInvokesLauncher(t *testing.T) {
-	adapter := &fakeAdapter{paneExists: true}
-	deps := sendDeps(t, basePrompt(), adapter, func(c *config.Resolved) {
-		c.DaemonAutoStart = true
-	})
-	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
-		t.Fatal("send must not invoke the lifecycle launcher")
-		return nil
-	}
-
-	_, _, err := executeRootWith(t, deps, "send", "code-review", "--target-pane", "%5")
-	if err != nil {
-		t.Fatalf("unexpected: %v", err)
-	}
-}

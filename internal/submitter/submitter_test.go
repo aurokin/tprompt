@@ -31,14 +31,14 @@ func (f *fakeStore) Resolve(id string) (store.Prompt, error) {
 	return p, nil
 }
 
-type fakeDaemonClient struct {
+type fakeDeliveryClient struct {
 	lastReq delivery.SubmitRequest
 	resp    delivery.SubmitResponse
 	err     error
 	calls   int
 }
 
-func (f *fakeDaemonClient) Submit(req delivery.SubmitRequest) (delivery.SubmitResponse, error) {
+func (f *fakeDeliveryClient) Submit(req delivery.SubmitRequest) (delivery.SubmitResponse, error) {
 	f.lastReq = req
 	f.calls++
 	if f.err != nil {
@@ -80,7 +80,7 @@ func baseTarget() tmux.TargetContext {
 func TestSubmit_PromptHappyPath(t *testing.T) {
 	prompt := basePrompt()
 	fs := &fakeStore{prompts: map[string]store.Prompt{"demo": prompt}}
-	dc := &fakeDaemonClient{resp: delivery.SubmitResponse{Accepted: true, JobID: "job-1"}}
+	dc := &fakeDeliveryClient{resp: delivery.SubmitResponse{Accepted: true, JobID: "job-1"}}
 	cfg := baseCfg()
 	target := baseTarget()
 
@@ -136,7 +136,7 @@ func TestSubmit_FrontmatterOverridesDelivery(t *testing.T) {
 	prompt := basePrompt()
 	prompt.Defaults = store.DeliveryDefaults{Mode: "type", Enter: &enter}
 	fs := &fakeStore{prompts: map[string]store.Prompt{"demo": prompt}}
-	dc := &fakeDaemonClient{resp: delivery.SubmitResponse{Accepted: true}}
+	dc := &fakeDeliveryClient{resp: delivery.SubmitResponse{Accepted: true}}
 
 	s := New(fs, dc, baseCfg(), baseTarget())
 	if err := s.Submit(tui.Result{Action: tui.ActionPrompt, PromptID: "demo"}); err != nil {
@@ -156,14 +156,14 @@ func TestSubmit_BodyAtLimitSucceeds(t *testing.T) {
 	prompt := basePrompt()
 	prompt.Body = "12345" // exactly at limit
 	fs := &fakeStore{prompts: map[string]store.Prompt{"demo": prompt}}
-	dc := &fakeDaemonClient{resp: delivery.SubmitResponse{Accepted: true}}
+	dc := &fakeDeliveryClient{resp: delivery.SubmitResponse{Accepted: true}}
 
 	s := New(fs, dc, cfg, baseTarget())
 	if err := s.Submit(tui.Result{Action: tui.ActionPrompt, PromptID: "demo"}); err != nil {
 		t.Fatalf("body at limit should submit, got %v", err)
 	}
 	if dc.calls != 1 {
-		t.Fatalf("daemon calls = %d, want 1", dc.calls)
+		t.Fatalf("handoff calls = %d, want 1", dc.calls)
 	}
 }
 
@@ -173,7 +173,7 @@ func TestSubmit_BodyOverLimitReturnsTypedError(t *testing.T) {
 	prompt := basePrompt()
 	prompt.Body = "123456" // 1 over limit
 	fs := &fakeStore{prompts: map[string]store.Prompt{"demo": prompt}}
-	dc := &fakeDaemonClient{}
+	dc := &fakeDeliveryClient{}
 
 	s := New(fs, dc, cfg, baseTarget())
 	err := s.Submit(tui.Result{Action: tui.ActionPrompt, PromptID: "demo"})
@@ -185,13 +185,13 @@ func TestSubmit_BodyOverLimitReturnsTypedError(t *testing.T) {
 		t.Errorf("error fields = {%d, %d}, want {6, 5}", tooLarge.Bytes, tooLarge.Limit)
 	}
 	if dc.calls != 0 {
-		t.Errorf("daemon should not be called on oversize, got %d calls", dc.calls)
+		t.Errorf("handoff should not be called on oversize, got %d calls", dc.calls)
 	}
 }
 
-func TestSubmit_DaemonRejectsReturnsIPCError(t *testing.T) {
+func TestSubmit_HandoffRejectsReturnsIPCError(t *testing.T) {
 	fs := &fakeStore{prompts: map[string]store.Prompt{"demo": basePrompt()}}
-	dc := &fakeDaemonClient{resp: delivery.SubmitResponse{Accepted: false, JobID: "rejected"}}
+	dc := &fakeDeliveryClient{resp: delivery.SubmitResponse{Accepted: false, JobID: "rejected"}}
 
 	s := New(fs, dc, baseCfg(), baseTarget())
 	err := s.Submit(tui.Result{Action: tui.ActionPrompt, PromptID: "demo"})
@@ -201,10 +201,10 @@ func TestSubmit_DaemonRejectsReturnsIPCError(t *testing.T) {
 	}
 }
 
-func TestSubmit_DaemonDialFailurePropagates(t *testing.T) {
+func TestSubmit_HandoffFailurePropagates(t *testing.T) {
 	dialErr := &delivery.UnavailableError{Path: "/tmp/x.sock", Reason: "connection refused"}
 	fs := &fakeStore{prompts: map[string]store.Prompt{"demo": basePrompt()}}
-	dc := &fakeDaemonClient{err: dialErr}
+	dc := &fakeDeliveryClient{err: dialErr}
 
 	s := New(fs, dc, baseCfg(), baseTarget())
 	err := s.Submit(tui.Result{Action: tui.ActionPrompt, PromptID: "demo"})
@@ -216,7 +216,7 @@ func TestSubmit_DaemonDialFailurePropagates(t *testing.T) {
 
 func TestSubmit_PromptNotFoundPropagates(t *testing.T) {
 	fs := &fakeStore{prompts: map[string]store.Prompt{}}
-	dc := &fakeDaemonClient{}
+	dc := &fakeDeliveryClient{}
 
 	s := New(fs, dc, baseCfg(), baseTarget())
 	err := s.Submit(tui.Result{Action: tui.ActionPrompt, PromptID: "missing"})
@@ -225,26 +225,26 @@ func TestSubmit_PromptNotFoundPropagates(t *testing.T) {
 		t.Fatalf("want *store.NotFoundError, got %T: %v", err, err)
 	}
 	if dc.calls != 0 {
-		t.Errorf("daemon should not be dialed when prompt is missing, got %d calls", dc.calls)
+		t.Errorf("handoff should not be started when prompt is missing, got %d calls", dc.calls)
 	}
 }
 
 func TestSubmit_ActionCancelIsNoop(t *testing.T) {
 	fs := &fakeStore{prompts: map[string]store.Prompt{"demo": basePrompt()}}
-	dc := &fakeDaemonClient{}
+	dc := &fakeDeliveryClient{}
 
 	s := New(fs, dc, baseCfg(), baseTarget())
 	if err := s.Submit(tui.Result{Action: tui.ActionCancel}); err != nil {
 		t.Fatalf("ActionCancel: want nil, got %v", err)
 	}
 	if dc.calls != 0 {
-		t.Errorf("daemon should not be dialed on cancel, got %d calls", dc.calls)
+		t.Errorf("handoff should not be started on cancel, got %d calls", dc.calls)
 	}
 }
 
 func TestSubmit_ClipboardHappyPath(t *testing.T) {
 	fs := &fakeStore{} // must never be touched on clipboard path
-	dc := &fakeDaemonClient{resp: delivery.SubmitResponse{Accepted: true, JobID: "job-c1"}}
+	dc := &fakeDeliveryClient{resp: delivery.SubmitResponse{Accepted: true, JobID: "job-c1"}}
 
 	s := New(fs, dc, baseCfg(), baseTarget())
 	err := s.Submit(tui.Result{Action: tui.ActionClipboard, ClipboardBody: []byte("hello clip")})
@@ -253,7 +253,7 @@ func TestSubmit_ClipboardHappyPath(t *testing.T) {
 	}
 
 	if dc.calls != 1 {
-		t.Fatalf("daemon calls = %d, want 1", dc.calls)
+		t.Fatalf("handoff calls = %d, want 1", dc.calls)
 	}
 	job := dc.lastReq.Job
 	if job.Source != delivery.SourceClipboard {
@@ -295,7 +295,7 @@ func TestSubmit_ClipboardSkipsStoreResolution(t *testing.T) {
 	// If the clipboard path ever calls Resolve, this poisoned fakeStore will
 	// return an error instead of a prompt, surfacing the accidental coupling.
 	fs := &fakeStore{err: errors.New("store must not be called on ActionClipboard")}
-	dc := &fakeDaemonClient{resp: delivery.SubmitResponse{Accepted: true}}
+	dc := &fakeDeliveryClient{resp: delivery.SubmitResponse{Accepted: true}}
 
 	s := New(fs, dc, baseCfg(), baseTarget())
 	if err := s.Submit(tui.Result{Action: tui.ActionClipboard, ClipboardBody: []byte("x")}); err != nil {
@@ -304,7 +304,7 @@ func TestSubmit_ClipboardSkipsStoreResolution(t *testing.T) {
 }
 
 func TestSubmit_ClipboardEmptyReturnsTypedError(t *testing.T) {
-	dc := &fakeDaemonClient{}
+	dc := &fakeDeliveryClient{}
 	s := New(&fakeStore{}, dc, baseCfg(), baseTarget())
 	err := s.Submit(tui.Result{Action: tui.ActionClipboard, ClipboardBody: nil})
 	var empty *clipboard.EmptyClipboardError
@@ -312,12 +312,12 @@ func TestSubmit_ClipboardEmptyReturnsTypedError(t *testing.T) {
 		t.Fatalf("want *clipboard.EmptyClipboardError, got %T: %v", err, err)
 	}
 	if dc.calls != 0 {
-		t.Errorf("daemon should not be dialed on empty clipboard, got %d calls", dc.calls)
+		t.Errorf("handoff should not be started on empty clipboard, got %d calls", dc.calls)
 	}
 }
 
 func TestSubmit_ClipboardInvalidUTF8ReturnsTypedError(t *testing.T) {
-	dc := &fakeDaemonClient{}
+	dc := &fakeDeliveryClient{}
 	s := New(&fakeStore{}, dc, baseCfg(), baseTarget())
 	err := s.Submit(tui.Result{Action: tui.ActionClipboard, ClipboardBody: []byte{0xff, 0xfe}})
 	var badUTF8 *clipboard.InvalidUTF8Error
@@ -325,14 +325,14 @@ func TestSubmit_ClipboardInvalidUTF8ReturnsTypedError(t *testing.T) {
 		t.Fatalf("want *clipboard.InvalidUTF8Error, got %T: %v", err, err)
 	}
 	if dc.calls != 0 {
-		t.Errorf("daemon should not be dialed on non-UTF-8 clipboard, got %d calls", dc.calls)
+		t.Errorf("handoff should not be started on non-UTF-8 clipboard, got %d calls", dc.calls)
 	}
 }
 
 func TestSubmit_ClipboardOversizeReturnsBodyTooLargeError(t *testing.T) {
 	cfg := baseCfg()
 	cfg.MaxPasteBytes = 5
-	dc := &fakeDaemonClient{}
+	dc := &fakeDeliveryClient{}
 	s := New(&fakeStore{}, dc, cfg, baseTarget())
 
 	err := s.Submit(tui.Result{Action: tui.ActionClipboard, ClipboardBody: []byte("123456")})
@@ -344,12 +344,12 @@ func TestSubmit_ClipboardOversizeReturnsBodyTooLargeError(t *testing.T) {
 		t.Errorf("error fields = {%d, %d}, want {6, 5}", tooLarge.Bytes, tooLarge.Limit)
 	}
 	if dc.calls != 0 {
-		t.Errorf("daemon should not be dialed on oversize clipboard, got %d calls", dc.calls)
+		t.Errorf("handoff should not be started on oversize clipboard, got %d calls", dc.calls)
 	}
 }
 
-func TestSubmit_ClipboardDaemonRejectsReturnsIPCError(t *testing.T) {
-	dc := &fakeDaemonClient{resp: delivery.SubmitResponse{Accepted: false, JobID: "rejected"}}
+func TestSubmit_ClipboardHandoffRejectsReturnsIPCError(t *testing.T) {
+	dc := &fakeDeliveryClient{resp: delivery.SubmitResponse{Accepted: false, JobID: "rejected"}}
 	s := New(&fakeStore{}, dc, baseCfg(), baseTarget())
 
 	err := s.Submit(tui.Result{Action: tui.ActionClipboard, ClipboardBody: []byte("hi")})
@@ -359,9 +359,9 @@ func TestSubmit_ClipboardDaemonRejectsReturnsIPCError(t *testing.T) {
 	}
 }
 
-func TestSubmit_ClipboardDaemonDialFailurePropagates(t *testing.T) {
+func TestSubmit_ClipboardHandoffFailurePropagates(t *testing.T) {
 	dialErr := &delivery.UnavailableError{Path: "/tmp/x.sock", Reason: "connection refused"}
-	dc := &fakeDaemonClient{err: dialErr}
+	dc := &fakeDeliveryClient{err: dialErr}
 	s := New(&fakeStore{}, dc, baseCfg(), baseTarget())
 
 	err := s.Submit(tui.Result{Action: tui.ActionClipboard, ClipboardBody: []byte("hi")})
