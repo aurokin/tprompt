@@ -38,9 +38,9 @@ The following are milestone work, but not AUR-105 coverage-audit scope:
 - Expanded `doctor` diagnostics: AUR-106.
 - Resolved keybind display in `list` and `show`: AUR-107.
 - Help text polish: AUR-108.
-- Daemon status and log readability: AUR-109.
-- Opt-in daemon auto-start: AUR-110.
-- `daemon stop`: AUR-111.
+- Delivery log readability: AUR-109.
+- Handoff reliability hardening: AUR-110.
+- Handoff cleanup behavior: AUR-111.
 - Warning-only post-injection verification: AUR-112.
 - Final user-facing documentation pass: AUR-113.
 - Final full release gate: AUR-114.

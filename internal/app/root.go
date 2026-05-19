@@ -35,7 +35,6 @@ func NewRootCmd(deps Deps) *cobra.Command {
   pick        Print a prompt ID chosen via an external picker (no delivery).
   tui         Interactive TUI; selections spawn a short-lived handoff worker
               after the TUI exits.
-  daemon      Manage the local daemon lifecycle (start, status, stop).
 
 Inside tmux with a tty, bare 'tprompt' dispatches to 'tprompt tui'. Outside
 tmux (or without a tty), bare 'tprompt' prints this help.`,
@@ -63,7 +62,6 @@ tmux (or without a tty), bare 'tprompt' prints this help.`,
 		newTUICmd(deps),
 		newHandoffCmd(deps),
 		newPickCmd(deps),
-		newDaemonCmd(deps),
 		newNewCmd(deps),
 	)
 

@@ -34,7 +34,7 @@ Responsibilities:
 - perform `paste` (bracketed via `load-buffer` + `paste-buffer -p`) or `type` (via `send-keys -l`) delivery
 - surface errors via `tmux display-message`
 
-All tmux interaction is centralized here rather than scattered through the CLI and daemon. See `docs/tmux/delivery.md` for the concrete command construction.
+All tmux interaction is centralized here rather than scattered through command handlers and handoff code. See `docs/tmux/delivery.md` for the concrete command construction.
 
 ## 4. Deferred handoff
 
@@ -46,8 +46,7 @@ Responsibilities:
 - inject only after verification passes
 - surface success/failure via `display-message` + append-only log
 
-The daemon package still provides an explicit lifecycle command surface, but
-the TUI path does not require or auto-start a long-running daemon.
+The TUI path does not require or auto-start a long-running daemon.
 
 ## 5. Clipboard reader
 

@@ -20,7 +20,7 @@ func newHandoffCmd(deps Deps) *cobra.Command {
 			if jobPath == "" {
 				return fmt.Errorf("handoff: --job is required")
 			}
-			cfg, err := deps.LoadDaemonConfig(*deps.ConfigPath)
+			cfg, err := deps.LoadHandoffConfig(*deps.ConfigPath)
 			if err != nil {
 				return err
 			}

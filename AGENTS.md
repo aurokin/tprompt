@@ -21,7 +21,7 @@ Go module project (`go.mod`). Pinned via `mise.toml`: Go 1.26.2, `golangci-lint 
 ## Contracts that must not regress
 
 - Exit-code mapping: `internal/app/exit.go` + `exit_test.go`. Documented in [docs/commands/cli.md](docs/commands/cli.md).
-- No prompt body or clipboard content in logs. Enforced by `internal/daemon/executor_test.go`.
+- No prompt body or clipboard content in logs. Enforced by `internal/delivery/executor_test.go`.
 - Frontmatter rules: see [docs/storage/prompt-store.md](docs/storage/prompt-store.md).
 - User-visible behavior contract: [EXPECTATIONS.md](EXPECTATIONS.md).
 - Locked product/engineering decisions: [DECISIONS.md](DECISIONS.md).

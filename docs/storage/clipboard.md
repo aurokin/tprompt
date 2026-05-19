@@ -99,7 +99,7 @@ warn clipboard reader: none available (install pbpaste, wl-paste, xclip, or xsel
 
 - The reader command runs with the user's permissions; no privilege elevation.
 - `clipboard_read_command` is **not** shell-expanded by `tprompt`. It is split with standard argv parsing. This prevents config-injection surprises.
-- Clipboard content is never written to disk by the reader. It may hit the daemon log only if sanitization or validation fails and the failure message includes a snippet — the log policy for failure snippets is controlled by the sanitizer (see `docs/implementation/sanitization.md`).
+- Clipboard content is never written to disk by the reader. Delivery logs must not include raw clipboard content; sanitizer failures record class and offset instead (see `docs/implementation/sanitization.md`).
 
 ## Non-goals
 

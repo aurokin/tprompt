@@ -1,4 +1,4 @@
-package daemon
+package delivery
 
 import (
 	"bytes"
@@ -62,7 +62,7 @@ func TestFormatLineUTCsLocalTime(t *testing.T) {
 
 func TestNewLoggerDefersFileCreationUntilFirstLog(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "nested", "daemon.log")
+	path := filepath.Join(dir, "nested", "delivery.log")
 
 	logger, err := NewLogger(path)
 	if err != nil {
@@ -87,7 +87,7 @@ func TestNewLoggerDefersFileCreationUntilFirstLog(t *testing.T) {
 }
 
 func TestLoggerCloseIsNoopWhenFileNeverOpened(t *testing.T) {
-	logger, err := NewLogger(filepath.Join(t.TempDir(), "daemon.log"))
+	logger, err := NewLogger(filepath.Join(t.TempDir(), "delivery.log"))
 	if err != nil {
 		t.Fatalf("NewLogger: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestLoggerCloseIsNoopWhenFileNeverOpened(t *testing.T) {
 
 func TestNewLoggerCreatesParentDirAndFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "nested", "subdir", "daemon.log")
+	path := filepath.Join(dir, "nested", "subdir", "delivery.log")
 
 	logger, err := NewLogger(path)
 	if err != nil {
@@ -129,7 +129,7 @@ func TestNewLoggerCreatesParentDirAndFile(t *testing.T) {
 
 func TestLoggerAppendsAcrossOpens(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "daemon.log")
+	path := filepath.Join(dir, "delivery.log")
 
 	first, err := NewLogger(path)
 	if err != nil {
@@ -231,11 +231,11 @@ func TestLoggerStderrFallbackOnWriteFailure(t *testing.T) {
 	}
 
 	if fw.calls != 3 {
-		t.Fatalf("expected 3 write attempts (daemon keeps trying), got %d", fw.calls)
+		t.Fatalf("expected 3 write attempts (delivery keeps trying), got %d", fw.calls)
 	}
 
 	out := stderr.String()
-	if !strings.Contains(out, "tprompt: daemon log write failed: disk full") {
+	if !strings.Contains(out, "tprompt: delivery log write failed: disk full") {
 		t.Fatalf("expected stderr notice, got: %q", out)
 	}
 	if !strings.Contains(out, "further errors suppressed") {
@@ -249,7 +249,7 @@ func TestLoggerStderrFallbackOnWriteFailure(t *testing.T) {
 func TestLoggerStderrFallbackOnOpenFailure(t *testing.T) {
 	// Path under a directory that doesn't exist, so lazy OpenFile fails
 	// every call.
-	path := filepath.Join(t.TempDir(), "missing-dir", "daemon.log")
+	path := filepath.Join(t.TempDir(), "missing-dir", "delivery.log")
 	var stderr bytes.Buffer
 	logger := &Logger{path: path, now: time.Now, stderr: &stderr}
 
@@ -260,7 +260,7 @@ func TestLoggerStderrFallbackOnOpenFailure(t *testing.T) {
 	}
 
 	out := stderr.String()
-	if !strings.Contains(out, "tprompt: daemon log open failed") {
+	if !strings.Contains(out, "tprompt: delivery log open failed") {
 		t.Fatalf("expected open-failure stderr notice, got: %q", out)
 	}
 	if !strings.Contains(out, "further errors suppressed") {

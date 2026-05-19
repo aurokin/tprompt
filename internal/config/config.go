@@ -15,14 +15,16 @@ import (
 
 // Config mirrors the user-facing fields documented in docs/storage/config.md.
 type Config struct {
-	PromptsDir                 string            `toml:"prompts_dir"`
-	AdditionalPromptsDirs      []string          `toml:"additional_prompts_dirs"`
-	PromptPriority             string            `toml:"prompt_priority"`
-	DefaultMode                string            `toml:"default_mode"`
-	DefaultEnter               bool              `toml:"default_enter"`
+	PromptsDir            string   `toml:"prompts_dir"`
+	AdditionalPromptsDirs []string `toml:"additional_prompts_dirs"`
+	PromptPriority        string   `toml:"prompt_priority"`
+	DefaultMode           string   `toml:"default_mode"`
+	DefaultEnter          bool     `toml:"default_enter"`
+	// Legacy daemon fields are accepted so existing config files keep loading.
+	// They are ignored by the daemonless handoff runtime.
 	SocketPath                 string            `toml:"socket_path"`
-	LogPath                    string            `toml:"log_path"`
 	DaemonAutoStart            bool              `toml:"daemon_auto_start"`
+	LogPath                    string            `toml:"log_path"`
 	PickerCommand              string            `toml:"picker_command"`
 	VerificationTimeoutMS      int               `toml:"verification_timeout_ms"`
 	VerificationPollIntervalMS int               `toml:"verification_poll_interval_ms"`
@@ -40,9 +42,7 @@ func Default() Config {
 		DefaultMode:                "paste",
 		PromptPriority:             "global",
 		DefaultEnter:               false,
-		SocketPath:                 "~/.local/state/tprompt/daemon.sock",
-		LogPath:                    "~/.local/state/tprompt/daemon.log",
-		DaemonAutoStart:            true,
+		LogPath:                    "~/.local/state/tprompt/delivery.log",
 		PickerCommand:              "fzf",
 		VerificationTimeoutMS:      5000,
 		VerificationPollIntervalMS: 100,
@@ -76,9 +76,7 @@ type Resolved struct {
 	PromptPriority             string
 	DefaultMode                string
 	DefaultEnter               bool
-	SocketPath                 string
 	LogPath                    string
-	DaemonAutoStart            bool
 	PickerCommand              string
 	VerificationTimeoutMS      int
 	VerificationPollIntervalMS int
@@ -94,15 +92,13 @@ type Resolved struct {
 	ConfigPath                 string
 }
 
-// ResolveDaemon extracts only the config fields the daemon lifecycle needs.
-// Unlike Normalize, it intentionally skips prompt-store, keybinding, and
-// clipboard parsing so daemon start/status are not coupled to unrelated
-// validation.
-func ResolveDaemon(cfg Config, configPath string) Resolved {
+// ResolveHandoff extracts only the config fields the hidden handoff worker
+// needs. Unlike Normalize, it intentionally skips prompt-store, keybinding,
+// picker, and clipboard parsing so job delivery is not coupled to unrelated
+// interactive configuration.
+func ResolveHandoff(cfg Config, configPath string) Resolved {
 	return Resolved{
-		SocketPath:                expandHome(cfg.SocketPath),
 		LogPath:                   expandHome(cfg.LogPath),
-		DaemonAutoStart:           cfg.DaemonAutoStart,
 		MaxPasteBytes:             cfg.MaxPasteBytes,
 		PostInjectionVerification: cfg.PostInjectionVerification,
 		ConfigPath:                configPath,
@@ -187,7 +183,6 @@ func Normalize(cfg Config, configPath string) (Resolved, error) {
 		PickerCommand:              cfg.PickerCommand,
 		VerificationTimeoutMS:      cfg.VerificationTimeoutMS,
 		VerificationPollIntervalMS: cfg.VerificationPollIntervalMS,
-		DaemonAutoStart:            cfg.DaemonAutoStart,
 		PostInjectionVerification:  cfg.PostInjectionVerification,
 		ClipboardReadCommand:       cfg.ClipboardReadCommand,
 		MaxPasteBytes:              cfg.MaxPasteBytes,
@@ -197,7 +192,6 @@ func Normalize(cfg Config, configPath string) (Resolved, error) {
 
 	r.PromptsDir = expandHome(cfg.PromptsDir)
 	r.AdditionalPromptsDirs = expandHomeSlice(cfg.AdditionalPromptsDirs)
-	r.SocketPath = expandHome(cfg.SocketPath)
 	r.LogPath = expandHome(cfg.LogPath)
 
 	pickerArgv, err := parseCommandArgv("picker_command", cfg.PickerCommand)
@@ -278,10 +272,6 @@ func Validate(r Resolved) error {
 			Field:   "prompt_priority",
 			Message: fmt.Sprintf("invalid value %q: must be global or project", r.PromptPriority),
 		}
-	}
-
-	if r.SocketPath == "" {
-		return &ValidationError{Field: "socket_path", Message: "must be set"}
 	}
 
 	return nil

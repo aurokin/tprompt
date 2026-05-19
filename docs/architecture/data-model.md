@@ -102,8 +102,8 @@ DeliveryRequest {
 
 Notes:
 
-- `source = "clipboard"` means the TUI already captured the bytes before exiting; the daemon does not re-read the clipboard.
-- `sanitize_mode` is resolved at request construction (flag > config > default) so the daemon does not need to re-resolve config.
+- `source = "clipboard"` means the TUI already captured the bytes before exiting; the handoff worker does not re-read the clipboard.
+- `sanitize_mode` is resolved at request construction (flag > config > default) so the handoff worker does not need to re-resolve config.
 - `body` is the post-resolution content but **pre-sanitization**. The sanitizer runs in the delivery path immediately before the tmux adapter.
 
 ## Deferred job
@@ -127,7 +127,7 @@ VerificationPolicy {
 }
 ```
 
-The require-style behavior is baked into the daemon rather than expressed as wire fields: verify target pane existence, wait for the submitter process to exit when `submitter_pid` is present, then verify pane selection before delivery. Post-injection capture-pane comparison is an opt-in daemon diagnostic controlled by config, and remains warning-only.
+The require-style behavior is baked into the handoff worker rather than expressed as wire fields: verify target pane existence, wait for the submitter process to exit when `submitter_pid` is present, then verify pane selection before delivery. Post-injection capture-pane comparison is an opt-in delivery diagnostic controlled by config, and remains warning-only.
 
 ## Replacement semantics
 
@@ -137,5 +137,5 @@ When a new `DeferredJob` arrives with the same `request.pane_id` as a pending jo
 
 - Keep the in-memory model straightforward.
 - Persisted job queues are not part of the current contract.
-- If the daemon restarts, in-flight TUI-submitted jobs may be lost.
+- If the handoff worker exits before delivery, the TUI-submitted job may be lost.
 - Clipboard bytes embedded in a `DeliveryRequest.body` are transient — they live only for the lifetime of the job and must not be written to logs.

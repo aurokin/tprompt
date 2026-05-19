@@ -6,7 +6,7 @@ import (
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/daemon"
+	"github.com/hsadler/tprompt/internal/delivery"
 	"github.com/hsadler/tprompt/internal/keybind"
 	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/sanitize"
@@ -102,20 +102,20 @@ func TestExitCodePromptFileExists(t *testing.T) {
 	}
 }
 
-func TestExitCodeDaemonErrors(t *testing.T) {
+func TestExitCodeHandoffErrors(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
 	}{
-		{"SocketUnavailable", &daemon.SocketUnavailableError{Path: "/tmp/x.sock"}},
-		{"IPC", &daemon.IPCError{Path: "/tmp/x.sock", Op: "read response", Reason: "EOF"}},
-		{"Timeout", &daemon.TimeoutError{TimeoutMS: 5000}},
-		{"InvalidPolicy", &daemon.InvalidPolicyError{Field: "timeout_ms", Value: 0}},
+		{"Unavailable", &delivery.UnavailableError{Path: "/tmp/x.sock"}},
+		{"IPC", &delivery.IPCError{Path: "/tmp/x.sock", Op: "read response", Reason: "EOF"}},
+		{"Timeout", &delivery.TimeoutError{TimeoutMS: 5000}},
+		{"InvalidPolicy", &delivery.InvalidPolicyError{Field: "timeout_ms", Value: 0}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := ExitCode(tc.err); got != ExitDaemon {
-				t.Fatalf("ExitCode(%T) = %d, want %d", tc.err, got, ExitDaemon)
+			if got := ExitCode(tc.err); got != ExitHandoff {
+				t.Fatalf("ExitCode(%T) = %d, want %d", tc.err, got, ExitHandoff)
 			}
 		})
 	}

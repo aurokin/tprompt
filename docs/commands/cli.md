@@ -110,7 +110,7 @@ Behavior:
   - prompt frontmatter defaults
   - config file
   - built-in defaults
-- always a direct send; never touches the daemon queue
+- always a direct send; never writes a handoff job
 
 ### `tprompt paste`
 
@@ -161,13 +161,12 @@ Checks, in order:
    `$PATH`. `tprompt send`-only workflows do not need a reader.
 7. **picker command** — `warn` when `picker_command` is empty or its binary is
    not on `$PATH`. Only `tprompt pick` needs this.
-8. **daemon reachable** — `warn` when the configured socket is unreachable or
-   the daemon is not running. Only the TUI flow requires it; direct
-   `send`/`paste` are unaffected.
+8. **TUI handoff ready** — `warn` when the handoff worker cannot be
+   constructed. Direct `send`/`paste` are unaffected.
 
 Only the first three checks affect the exit code. Tmux, clipboard, picker, and
-daemon failures are reported as warnings so a user who only runs `tprompt
-send` is not blocked by missing optional tooling.
+handoff-readiness failures are reported as warnings so a user who only runs
+`tprompt send` is not blocked by missing optional tooling.
 
 Example output:
 
@@ -180,18 +179,8 @@ ok   4 prompts discovered
 ok   inside tmux
 ok   clipboard reader: pbpaste (auto-detected, darwin)
 warn picker command: fzf not found on $PATH (tprompt pick unavailable)
-warn daemon not running (/home/user/.local/state/tprompt/daemon.sock): connection refused
+ok   TUI handoff ready (/home/user/.local/state/tprompt/jobs)
 ```
-
-### `tprompt daemon start`
-### `tprompt daemon status`
-### `tprompt daemon stop`
-
-Used for local daemon lifecycle.
-
-`start`, `status`, and `stop` are the current daemon lifecycle commands. `stop`
-requests graceful shutdown over local daemon IPC and reports `daemon not
-running` when the configured socket is unreachable.
 
 ## Cancel semantics
 
@@ -203,7 +192,7 @@ When the user cancels an interactive flow (TUI `Esc`, `pick` external cancel), t
 - `2` usage/config error
 - `3` prompt resolution error / clipboard validation error / sanitizer strict-mode rejection
 - `4` tmux environment error
-- `5` daemon/IPC error
+- `5` local handoff/IPC error
 - `6` delivery or verification error
 
 These are the current command contract and should remain stable unless the

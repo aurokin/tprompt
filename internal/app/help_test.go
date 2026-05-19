@@ -11,7 +11,7 @@ func TestRootLongDescribesWorkflows(t *testing.T) {
 	if long == "" {
 		t.Fatal("root.Long is empty")
 	}
-	for _, want := range []string{"new", "send", "paste", "pick", "tui", "daemon"} {
+	for _, want := range []string{"new", "send", "paste", "pick", "tui"} {
 		if !strings.Contains(long, want) {
 			t.Errorf("root.Long missing workflow %q\n--- Long ---\n%s", want, long)
 		}
@@ -41,7 +41,7 @@ func TestSubcommandHelpText(t *testing.T) {
 	}{
 		{
 			path:   []string{"send"},
-			want:   []string{"synchronous", "does not use the daemon"},
+			want:   []string{"synchronous", "does not use handoff"},
 			banned: []string{"templat", "remote"},
 		},
 		{
@@ -62,26 +62,6 @@ func TestSubcommandHelpText(t *testing.T) {
 			path:   []string{"tui"},
 			want:   []string{"handoff", "--target-pane"},
 			banned: []string{"templat"},
-		},
-		{
-			path: []string{"daemon"},
-			want: []string{"start", "run", "status", "stop"},
-		},
-		{
-			path: []string{"daemon", "start"},
-			want: []string{"background", "already running"},
-		},
-		{
-			path: []string{"daemon", "run"},
-			want: []string{"foreground", "run lock"},
-		},
-		{
-			path: []string{"daemon", "status"},
-			want: []string{"read-only"},
-		},
-		{
-			path: []string{"daemon", "stop"},
-			want: []string{"graceful", "daemon not running"},
 		},
 	}
 

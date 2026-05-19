@@ -1,4 +1,4 @@
-package daemon
+package delivery
 
 import (
 	"bytes"
@@ -43,6 +43,11 @@ type executorCall struct {
 	Target tmux.TargetContext
 	Body   string
 	Enter  bool
+}
+
+type displayCall struct {
+	Target  tmux.MessageTarget
+	Message string
 }
 
 func newExecutorAdapter() *executorAdapter {

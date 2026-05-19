@@ -642,7 +642,7 @@ func TestUpdate_SubmitResultMsgSetsResultAndErrAndQuits(t *testing.T) {
 	deps, _, _ := promptDeps(nil, nil, nil)
 	m := NewModel(sampleState(), deps)
 
-	boom := errors.New("daemon down")
+	boom := errors.New("handoff down")
 	next, cmd := m.Update(submitResultMsg{
 		result: Result{Action: ActionPrompt, PromptID: "code-review"},
 		err:    boom,
@@ -737,7 +737,7 @@ func TestUpdate_PromptKeyIgnoredWhileSubmitPending(t *testing.T) {
 
 func TestUpdate_CancelIgnoredWhileSubmitPending(t *testing.T) {
 	// Codex P1: after a prompt select, the submit is already in flight against
-	// the daemon. Esc/Ctrl+C before submitResultMsg arrives must not exit 0 —
+	// handoff. Esc/Ctrl+C before submitResultMsg arrives must not exit 0 -
 	// that would drop the submit outcome and hide failures behind a fake
 	// cancel success.
 	deps, _, _ := promptDeps(nil, nil, nil)
@@ -775,7 +775,7 @@ func TestUpdate_SubmitResultMsgClearsPendingSubmit(t *testing.T) {
 }
 
 func TestRenderer_RunSurfacesSubmitErrFromFinalModel(t *testing.T) {
-	boom := errors.New("daemon down")
+	boom := errors.New("handoff down")
 	sub := &fakeSubmitter{err: boom}
 	st := &fakeStore{bodies: map[string]string{"code-review": "ok"}}
 	deps := ModelDeps{
@@ -1016,7 +1016,7 @@ func TestUpdate_ClipboardKeyIgnoredWhilePendingClipboard(t *testing.T) {
 }
 
 func TestUpdate_ClipboardKeyIgnoredWhilePendingSubmit(t *testing.T) {
-	// A prompt or clipboard submit already dialing the daemon must not be
+	// A prompt or clipboard submit already starting handoff must not be
 	// preempted by a clipboard retry — the submit outcome is still pending.
 	deps, _, clip := clipboardDeps([]byte("ok"), nil, nil)
 	m := NewModel(sampleState(), deps)
@@ -1103,7 +1103,7 @@ func TestReadClipboardCmd_NilReaderEmitsInlineError(t *testing.T) {
 }
 
 func TestRenderer_RunSubmitsClipboardAndSurfacesErr(t *testing.T) {
-	boom := errors.New("daemon down")
+	boom := errors.New("handoff down")
 	sub := &fakeSubmitter{err: boom}
 	clip := &fakeClip{body: []byte("ok")}
 	deps := ModelDeps{

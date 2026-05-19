@@ -1,22 +1,17 @@
 package app
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
-	"time"
 
-	applife "github.com/hsadler/tprompt/internal/app/lifecycle"
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/daemon"
-	dlife "github.com/hsadler/tprompt/internal/daemon/lifecycle"
+	"github.com/hsadler/tprompt/internal/delivery"
 	"github.com/hsadler/tprompt/internal/handoff"
 	"github.com/hsadler/tprompt/internal/picker"
 	"github.com/hsadler/tprompt/internal/promptsource"
@@ -25,12 +20,6 @@ import (
 	"github.com/hsadler/tprompt/internal/tmux"
 	"github.com/hsadler/tprompt/internal/tui"
 )
-
-// DaemonLauncher is the seam used by explicit daemon lifecycle commands.
-// Production wires applife.Launcher; tests inject fakes.
-type DaemonLauncher interface {
-	Start(ctx context.Context, intent applife.StartIntent) dlife.StartResult
-}
 
 // Deps provides the capabilities that CLI handlers need. Production code
 // supplies real implementations; tests inject fakes. Lazy factory functions
@@ -42,34 +31,30 @@ type Deps struct {
 	Env      func(string) string
 	LookPath func(string) (string, error)
 
-	ConfigPath               *string
-	LoadConfig               func(explicitPath string) (config.Resolved, error)
-	LoadPasteConfig          func(explicitPath string) (config.Resolved, error)
-	LoadDaemonConfig         func(explicitPath string) (config.Resolved, error)
-	NewStore                 func(cfg config.Resolved) (store.Store, error)
-	NewTmux                  func() (tmux.Adapter, error)
-	NewClip                  func(cfg config.Resolved) (clipboard.Reader, error)
-	NewPicker                func(cfg config.Resolved) (picker.Picker, error)
-	NewDaemonClient          func(cfg config.Resolved) (daemon.Client, error)
-	NewTUIClient             func(cfg config.Resolved) (daemon.Client, error)
-	NewDaemonReadinessClient func(cfg config.Resolved, timeout time.Duration) daemon.Client
-	NewLauncher              func(cfg config.Resolved, explicitConfigPath string) DaemonLauncher
-	NewTrustAssessor         func() applife.TrustAssessor
-	NewRenderer              func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error)
-	NewSubmitter             func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter
+	ConfigPath        *string
+	LoadConfig        func(explicitPath string) (config.Resolved, error)
+	LoadPasteConfig   func(explicitPath string) (config.Resolved, error)
+	LoadHandoffConfig func(explicitPath string) (config.Resolved, error)
+	NewStore          func(cfg config.Resolved) (store.Store, error)
+	NewTmux           func() (tmux.Adapter, error)
+	NewClip           func(cfg config.Resolved) (clipboard.Reader, error)
+	NewPicker         func(cfg config.Resolved) (picker.Picker, error)
+	NewTUIClient      func(cfg config.Resolved) (delivery.Client, error)
+	NewRenderer       func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error)
+	NewSubmitter      func(cfg config.Resolved, prompts store.Store, client delivery.Client, target tmux.TargetContext) submitter.Submitter
 }
 
 // ProductionDeps returns a Deps wired for real execution.
 func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 	return Deps{
-		Stdout:           stdout,
-		Stderr:           stderr,
-		Stdin:            stdin,
-		Env:              lookupEnv,
-		LookPath:         exec.LookPath,
-		LoadConfig:       productionLoadConfig,
-		LoadPasteConfig:  productionLoadPasteConfig,
-		LoadDaemonConfig: productionLoadDaemonConfig,
+		Stdout:            stdout,
+		Stderr:            stderr,
+		Stdin:             stdin,
+		Env:               lookupEnv,
+		LookPath:          exec.LookPath,
+		LoadConfig:        productionLoadConfig,
+		LoadPasteConfig:   productionLoadPasteConfig,
+		LoadHandoffConfig: productionLoadHandoffConfig,
 		NewStore: func(cfg config.Resolved) (store.Store, error) {
 			sources, err := promptSources(cfg)
 			if err != nil {
@@ -91,13 +76,7 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 		NewPicker: func(cfg config.Resolved) (picker.Picker, error) {
 			return picker.NewCommand(cfg.PickerArgv), nil
 		},
-		NewDaemonClient: func(cfg config.Resolved) (daemon.Client, error) {
-			return daemon.NewSocketClient(cfg.SocketPath), nil
-		},
-		NewTUIClient:             productionNewHandoffClient,
-		NewDaemonReadinessClient: productionNewDaemonReadinessClient,
-		NewLauncher:              productionNewLauncher,
-		NewTrustAssessor:         applife.ProductionAssessor,
+		NewTUIClient: productionNewHandoffClient,
 		NewRenderer: func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error) {
 			// Stub renderers (TPROMPT_TEST_RENDERER) never touch the real
 			// clipboard, so build the Reader only for the production path.
@@ -123,13 +102,13 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 				Output: stdout,
 			}), nil
 		},
-		NewSubmitter: func(cfg config.Resolved, prompts store.Store, client daemon.Client, target tmux.TargetContext) submitter.Submitter {
+		NewSubmitter: func(cfg config.Resolved, prompts store.Store, client delivery.Client, target tmux.TargetContext) submitter.Submitter {
 			return submitter.New(prompts, client, cfg, target)
 		},
 	}
 }
 
-func productionNewHandoffClient(cfg config.Resolved) (daemon.Client, error) {
+func productionNewHandoffClient(cfg config.Resolved) (delivery.Client, error) {
 	if err := handoff.ValidateConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -138,104 +117,6 @@ func productionNewHandoffClient(cfg config.Resolved) (daemon.Client, error) {
 		return nil, fmt.Errorf("resolve executable path: %w", err)
 	}
 	return handoff.NewClient(cfg, executable, cfg.ConfigPath), nil
-}
-
-func productionNewDaemonReadinessClient(cfg config.Resolved, timeout time.Duration) daemon.Client {
-	dialTimeout := daemon.DefaultDialTimeout
-	if timeout > 0 && timeout < dialTimeout {
-		dialTimeout = timeout
-	}
-	return daemon.NewSocketClientWithTimeouts(cfg.SocketPath, dialTimeout, timeout)
-}
-
-// errLauncher is the DaemonLauncher returned when the production
-// launcher cannot be constructed at all — currently only when
-// os.Executable() fails. Start surfaces a structured StartResult with
-// ReasonConfig so callers see a clear "executable resolution failed"
-// message instead of every later spawn failing with the opaque
-// "empty executable path" error.
-type errLauncher struct {
-	detail string
-}
-
-func (e errLauncher) Start(context.Context, applife.StartIntent) dlife.StartResult {
-	return dlife.StartResult{Outcome: dlife.OutcomeFailed, Reason: dlife.ReasonConfig, Detail: e.detail}
-}
-
-// productionNewLauncher wires applife.Launcher with the production
-// status prober (a fresh socket client per probe with a tight readiness
-// timeout), the production spawner (setsid + stderr → daemon log), and a
-// pre-spawn diagnostic appender that writes a single logfmt line to the
-// daemon log so spawn-time failures still leave evidence.
-//
-// If os.Executable() fails (constrained /proc, permissions), we return
-// a fail-closed errLauncher so daemon start surfaces a
-// direct ReasonConfig error rather than failing later inside the
-// spawner with a generic "empty executable path" message.
-func productionNewLauncher(cfg config.Resolved, explicitConfigPath string) DaemonLauncher {
-	executable, err := os.Executable()
-	if err != nil {
-		return errLauncher{detail: "resolve executable path: " + err.Error()}
-	}
-	return applife.New(applife.Options{
-		SocketPath: cfg.SocketPath,
-		LogPath:    cfg.LogPath,
-		ConfigPath: explicitConfigPath,
-		Executable: executable,
-		Status: productionStatusProber{
-			socketPath:  cfg.SocketPath,
-			dialTimeout: daemon.DefaultDialTimeout,
-			rpcTimeout:  500 * time.Millisecond,
-			constructor: daemon.NewSocketClientWithTimeouts,
-		},
-		Spawner:  applife.ProductionSpawner{},
-		Assessor: applife.ProductionAssessor(),
-		LogPreSpawn: func(line string) {
-			if cfg.LogPath == "" {
-				return
-			}
-			// First-run spawns: the daemon log's parent dir may not
-			// exist yet (daemon.NewLogger normally creates it). Match
-			// that behavior here so the diagnostic isn't silently lost
-			// on the user's very first start, which is exactly when
-			// they're most likely to need it.
-			if err := os.MkdirAll(filepath.Dir(cfg.LogPath), 0o700); err != nil {
-				return
-			}
-			f, err := os.OpenFile(cfg.LogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-			if err != nil {
-				return
-			}
-			defer func() { _ = f.Close() }()
-			_, _ = fmt.Fprintf(f, "time=%s %s\n", time.Now().UTC().Format(time.RFC3339Nano), line)
-		},
-	})
-}
-
-// productionStatusProber dials the daemon socket once per probe with
-// short timeouts and runs the Status RPC. ProbeOK on success;
-// ProbeUnreachable when the dial step itself failed (no socket, ENOENT,
-// ECONNREFUSED); ProbeReachableBroken when the dial succeeded but the
-// RPC could not complete — that is, some process is bound but cannot
-// answer Status, and the launcher must NOT respawn over it.
-type productionStatusProber struct {
-	socketPath  string
-	dialTimeout time.Duration
-	rpcTimeout  time.Duration
-	constructor func(path string, dial, rpc time.Duration) daemon.Client
-}
-
-func (p productionStatusProber) Probe(context.Context) (applife.ProbeResult, error) {
-	client := p.constructor(p.socketPath, p.dialTimeout, p.rpcTimeout)
-	_, err := client.Status()
-	if err == nil {
-		return applife.ProbeOK, nil
-	}
-	var sue *daemon.SocketUnavailableError
-	if errors.As(err, &sue) {
-		return applife.ProbeUnreachable, err
-	}
-	return applife.ProbeReachableBroken, err
 }
 
 func productionLoadConfig(explicitPath string) (config.Resolved, error) {
@@ -261,12 +142,16 @@ func loadNormalizedConfig(explicitPath string, validate func(config.Resolved) er
 	return r, nil
 }
 
-func productionLoadDaemonConfig(explicitPath string) (config.Resolved, error) {
+func productionLoadHandoffConfig(explicitPath string) (config.Resolved, error) {
 	cfg, path, err := config.LoadOrDefault(explicitPath, lookupEnv)
 	if err != nil {
 		return config.Resolved{}, err
 	}
-	return config.ResolveDaemon(cfg, path), nil
+	r := config.ResolveHandoff(cfg, path)
+	if err := handoff.ValidateConfig(r); err != nil {
+		return config.Resolved{}, err
+	}
+	return r, nil
 }
 
 // promptSources resolves all configured prompt sources for cfg.

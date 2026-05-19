@@ -19,8 +19,11 @@ Frontmatter parsing and body extraction helpers.
 ### `internal/tmux`
 All tmux-facing functions and types. See `docs/tmux/delivery.md` for the command construction this module owns.
 
-### `internal/daemon`
-IPC server, job handling, verification loop, replace-same-target logic, `display-message` error surfacing.
+### `internal/delivery`
+Shared delivery executor: verification, sanitizer enforcement, tmux injection, logging, and `display-message` error surfacing.
+
+### `internal/handoff`
+Private handoff job files and short-lived worker spawning for TUI selections.
 
 ### `internal/clipboard`
 Clipboard reader: auto-detect, override, error wrapping. See `docs/storage/clipboard.md`.
@@ -61,8 +64,9 @@ Takes content + target + mode + sanitize mode and performs injection.
 ### VerificationEngine
 Evaluates whether it is safe to inject yet.
 
-### JobQueue / DaemonServer
-Receives jobs and processes them serially or with carefully bounded concurrency. Implements replace-same-target semantics.
+### HandoffWorker
+Reads one private job file, verifies the original tmux context, runs delivery,
+and exits.
 
 ### KeybindResolver
 Pure function over the `PromptIndex` + `reserved_keys` + `keybind_pool` config → final `(key → prompt)` map, plus a list of overflow prompt IDs (search-only).
@@ -75,18 +79,18 @@ Single-method service returning cleaned bytes or a rejection. One instance per c
 
 ## Concurrency guidance
 
-Daemon execution should stay simple unless the behavior contract requires more.
+TUI handoff execution should stay simple unless the behavior contract requires more.
 
 Recommended default:
 
-- single daemon process
-- jobs processed one at a time
-- same-target replacement: dropping the old pending job when a new one arrives
-- different-target jobs may run concurrently if implementation is simple; otherwise serialize
+- short-lived worker per submitted selection
+- job file written before the TUI exits
+- worker verifies the original pane context before delivery
+- no persisted queue or background process contract
 
 ## Logging guidance
 
-The daemon should emit logs that help diagnose:
+The delivery path should emit logs that help diagnose:
 
 - target pane vanished
 - TUI process did not exit / focus did not return to expected pane

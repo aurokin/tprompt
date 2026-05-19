@@ -89,11 +89,11 @@ Exit code: **3** (`ExitPrompt`), treated as a content-validation error
 parallel to clipboard validation failures. See `docs/commands/cli.md` and
 `docs/implementation/error-handling.md`.
 
-Callers surface this via the daemon's normal error-feedback channels (`tmux display-message` + log) or directly as CLI stderr.
+Callers surface this via delivery feedback (`tmux display-message` + delivery log) or directly as CLI stderr.
 
 ## Failure snippet logging
 
-When a delivery is rejected by `strict`, the daemon log records the error message and the offending **class/offset**, but **not** the raw content. This avoids accidentally persisting sensitive clipboard bytes to the log.
+When a delivery is rejected by `strict`, the delivery log records the error message and the offending **class/offset**, but **not** the raw content. This avoids accidentally persisting sensitive clipboard bytes to the log.
 
 ## Configuration
 
@@ -124,7 +124,7 @@ body/clipboard length against the cap first, then hand the bytes to
 - `strict` rejects before delivery anyway, so post-check would only add a
   pointless second measurement.
 - Checking pre-sanitize keeps a single, predictable size contract across
-  `tprompt send`, `tprompt paste`, and the TUI-flow daemon job.
+  `tprompt send`, `tprompt paste`, and the TUI-flow handoff job.
 
 ## Interaction with bracketed paste
 

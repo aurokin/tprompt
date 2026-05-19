@@ -32,14 +32,14 @@ See `docs/tmux/delivery.md` for the exact tmux command construction.
 4. Apply sanitization if configured.
 5. Deliver via the tmux adapter using the selected mode.
 
-## Daemon vs direct path
+## Handoff vs direct path
 
-`tprompt paste` is **always a direct send**. It never uses the daemon queue.
+`tprompt paste` is **always a direct send**. It never writes a handoff job.
 
 | Invocation context | Path |
 |---|---|
 | `tprompt paste` from shell or a tmux `run-shell` binding | direct (synchronous) |
-| Clipboard row selected from inside `tprompt tui` | daemon — the TUI flow captures the clipboard content and submits it as a `DeliveryRequest` with `source = clipboard` |
+| Clipboard row selected from inside `tprompt tui` | handoff — the TUI flow captures the clipboard content and writes a private handoff job with `source = clipboard` |
 
 The TUI code path is in `docs/commands/tui-flow.md`; this file describes the standalone command.
 

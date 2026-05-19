@@ -1,4 +1,4 @@
-package daemon
+package delivery
 
 import (
 	"errors"
@@ -29,7 +29,7 @@ const (
 
 // Entry is the metadata-only payload accepted by Logger. The struct
 // deliberately has no Body field — sanitizer rejections record class and
-// offset in Msg, never raw content (docs/commands/daemon.md "Append-only
+// offset in Msg, never raw content (docs/commands/tui.md "Append-only
 // log").
 type Entry struct {
 	JobID    string
@@ -42,7 +42,7 @@ type Entry struct {
 
 // Logger writes append-only one-line logfmt entries to a file shared across
 // goroutines. Concurrency is mutex-guarded so entries never interleave
-// within the daemon process.
+// within the worker process.
 //
 // The log file is opened lazily on the first Log call so that a failed
 // Listen (contended socket, permissions error) doesn't leave an empty log
@@ -51,8 +51,8 @@ type Entry struct {
 //
 // If open or write fails (disk full, broken file handle, etc.) the logger
 // emits a single notice to stderr the first time and then swallows further
-// errors so the daemon keeps running. The notice makes silent log loss
-// visible to whoever is watching the daemon's terminal.
+// errors so the delivery path keeps running. The notice makes silent log loss
+// visible to whoever is watching the worker's terminal.
 type Logger struct {
 	mu       sync.Mutex
 	path     string
@@ -68,10 +68,10 @@ type Logger struct {
 // only). Caller is responsible for Close.
 func NewLogger(path string) (*Logger, error) {
 	if path == "" {
-		return nil, errors.New("daemon: log path is empty")
+		return nil, errors.New("delivery: log path is empty")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("daemon: create log dir: %w", err)
+		return nil, fmt.Errorf("delivery: create log dir: %w", err)
 	}
 	return &Logger{path: path, now: time.Now, stderr: os.Stderr}, nil
 }
@@ -100,10 +100,10 @@ func (l *Logger) ensureOpen() error {
 	if l.w != nil {
 		return nil
 	}
-	// #nosec G304 -- path is from per-user config; daemon and log are scoped to one user.
+	// #nosec G304 -- path is from per-user config; delivery log is scoped to one user.
 	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		return fmt.Errorf("daemon: open log: %w", err)
+		return fmt.Errorf("delivery: open log: %w", err)
 	}
 	l.w = f
 	l.closer = f
@@ -111,9 +111,9 @@ func (l *Logger) ensureOpen() error {
 }
 
 // Log writes one entry. Empty fields (other than time) are omitted so
-// lifecycle events like "daemon started" don't carry empty job_id/pane keys.
+// lifecycle events don't carry empty job_id/pane keys.
 // Returns the underlying open or write error, if any — callers typically
-// ignore it since the daemon must keep running on a wedged log file.
+// ignore it since the delivery path must keep running on a wedged log file.
 func (l *Logger) Log(e Entry) error {
 	line := formatLine(l.now(), e)
 	l.mu.Lock()
@@ -136,7 +136,7 @@ func (l *Logger) notifyOnce(op string, err error) {
 		return
 	}
 	_, _ = fmt.Fprintf(l.stderr,
-		"tprompt: daemon log %s failed: %v (further errors suppressed)\n", op, err)
+		"tprompt: delivery log %s failed: %v (further errors suppressed)\n", op, err)
 	l.notified = true
 }
 

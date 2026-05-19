@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/daemon"
+	"github.com/hsadler/tprompt/internal/delivery"
 )
 
 // Client accepts TUI jobs by writing them to disk and spawning a short-lived
@@ -27,13 +27,13 @@ func NewClient(cfg config.Resolved, executable, configPath string) *Client {
 	return &Client{cfg: cfg, executable: executable, configPath: configPath}
 }
 
-// Submit implements the daemon.Client Submit subset used by the TUI submitter.
-func (c *Client) Submit(req daemon.SubmitRequest) (daemon.SubmitResponse, error) {
+// Submit implements the delivery.Client Submit method used by the TUI submitter.
+func (c *Client) Submit(req delivery.SubmitRequest) (delivery.SubmitResponse, error) {
 	if err := ValidateConfig(c.cfg); err != nil {
-		return daemon.SubmitResponse{}, &daemon.IPCError{Op: "validate handoff config", Reason: err.Error(), Err: err}
+		return delivery.SubmitResponse{}, &delivery.IPCError{Op: "validate handoff config", Reason: err.Error(), Err: err}
 	}
 	if c.executable == "" {
-		return daemon.SubmitResponse{}, &daemon.IPCError{Op: "handoff", Reason: "empty executable path"}
+		return delivery.SubmitResponse{}, &delivery.IPCError{Op: "handoff", Reason: "empty executable path"}
 	}
 	job := req.Job
 	if job.JobID == "" {
@@ -42,29 +42,21 @@ func (c *Client) Submit(req daemon.SubmitRequest) (daemon.SubmitResponse, error)
 	if job.CreatedAt.IsZero() {
 		job.CreatedAt = time.Now().UTC()
 	}
-	if err := daemon.ValidateJob(job); err != nil {
-		return daemon.SubmitResponse{}, &daemon.IPCError{Op: "validate handoff job", Reason: err.Error(), Err: err}
+	if err := delivery.ValidateJob(job); err != nil {
+		return delivery.SubmitResponse{}, &delivery.IPCError{Op: "validate handoff job", Reason: err.Error(), Err: err}
 	}
 	path, err := c.writeJob(job)
 	if err != nil {
-		return daemon.SubmitResponse{}, &daemon.IPCError{Op: "write handoff job", Reason: err.Error(), Err: err}
+		return delivery.SubmitResponse{}, &delivery.IPCError{Op: "write handoff job", Reason: err.Error(), Err: err}
 	}
 	if err := c.spawn(path); err != nil {
 		_ = os.Remove(path)
-		return daemon.SubmitResponse{}, &daemon.IPCError{Op: "spawn handoff", Reason: err.Error(), Err: err}
+		return delivery.SubmitResponse{}, &delivery.IPCError{Op: "spawn handoff", Reason: err.Error(), Err: err}
 	}
-	return daemon.SubmitResponse{Accepted: true, JobID: job.JobID}, nil
+	return delivery.SubmitResponse{Accepted: true, JobID: job.JobID}, nil
 }
 
-func (c *Client) Status() (daemon.StatusResponse, error) {
-	return daemon.StatusResponse{}, &daemon.SocketUnavailableError{Reason: "handoff client has no daemon status"}
-}
-
-func (c *Client) Stop() (daemon.StopResponse, error) {
-	return daemon.StopResponse{}, &daemon.SocketUnavailableError{Reason: "handoff client has no daemon to stop"}
-}
-
-func (c *Client) writeJob(job daemon.Job) (string, error) {
+func (c *Client) writeJob(job delivery.Job) (string, error) {
 	dir := JobsDir(c.cfg)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("mkdir %s: %w", dir, err)
@@ -146,9 +138,6 @@ func nextJobID() string {
 func JobsDir(cfg config.Resolved) string {
 	if cfg.LogPath != "" {
 		return filepath.Join(filepath.Dir(cfg.LogPath), "jobs")
-	}
-	if cfg.SocketPath != "" {
-		return filepath.Join(filepath.Dir(cfg.SocketPath), "jobs")
 	}
 	return filepath.Join(os.TempDir(), "tprompt", "jobs")
 }

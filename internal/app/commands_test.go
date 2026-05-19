@@ -2,40 +2,19 @@ package app
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
-	applife "github.com/hsadler/tprompt/internal/app/lifecycle"
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/daemon"
-	dlife "github.com/hsadler/tprompt/internal/daemon/lifecycle"
+	"github.com/hsadler/tprompt/internal/delivery"
 	"github.com/hsadler/tprompt/internal/picker"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/submitter"
 	"github.com/hsadler/tprompt/internal/tmux"
 	"github.com/hsadler/tprompt/internal/tui"
 )
-
-// fakeLauncher records Start calls and returns a configured StartResult.
-// It satisfies DaemonLauncher.
-type fakeLauncher struct {
-	calls   int
-	intents []applife.StartIntent
-	onStart func() dlife.StartResult
-}
-
-func (f *fakeLauncher) Start(_ context.Context, intent applife.StartIntent) dlife.StartResult {
-	f.calls++
-	f.intents = append(f.intents, intent)
-	if f.onStart == nil {
-		return dlife.StartResult{Outcome: dlife.OutcomeStarted}
-	}
-	return f.onStart()
-}
 
 func TestZeroArgCommandsRejectExtraOperands(t *testing.T) {
 	tests := []struct {
@@ -47,9 +26,6 @@ func TestZeroArgCommandsRejectExtraOperands(t *testing.T) {
 		{name: "doctor", args: []string{"doctor", "extra"}},
 		{name: "tui", args: []string{"tui", "--target-pane", "%0", "extra"}},
 		{name: "pick", args: []string{"pick", "extra"}},
-		{name: "daemon start", args: []string{"daemon", "start", "extra"}},
-		{name: "daemon status", args: []string{"daemon", "status", "extra"}},
-		{name: "daemon stop", args: []string{"daemon", "stop", "extra"}},
 	}
 
 	for _, tt := range tests {
@@ -182,9 +158,8 @@ func workingDeps(t *testing.T, fs *fakeStore) Deps {
 				MaxPasteBytes: 1 << 20,
 			}, nil
 		},
-		LoadDaemonConfig: func(string) (config.Resolved, error) {
+		LoadHandoffConfig: func(string) (config.Resolved, error) {
 			return config.Resolved{
-				SocketPath:    "/tmp/tprompt-test.sock",
 				LogPath:       "/tmp/tprompt-test.log",
 				MaxPasteBytes: 1 << 20,
 			}, nil
@@ -201,24 +176,13 @@ func workingDeps(t *testing.T, fs *fakeStore) Deps {
 		NewPicker: func(config.Resolved) (picker.Picker, error) {
 			return nil, ErrNotImplemented
 		},
-		NewDaemonClient: func(config.Resolved) (daemon.Client, error) {
-			return nil, ErrNotImplemented
-		},
-		NewTUIClient: func(config.Resolved) (daemon.Client, error) {
-			return &fakeDaemonClient{}, nil
-		},
-		NewDaemonReadinessClient: func(config.Resolved, time.Duration) daemon.Client {
-			return &fakeDaemonClient{}
-		},
-		NewLauncher: func(config.Resolved, string) DaemonLauncher {
-			return &fakeLauncher{onStart: func() dlife.StartResult {
-				return dlife.StartResult{Outcome: dlife.OutcomeFailed, Reason: dlife.ReasonOther, Detail: ErrNotImplemented.Error()}
-			}}
+		NewTUIClient: func(config.Resolved) (delivery.Client, error) {
+			return &fakeDeliveryClient{}, nil
 		},
 		NewRenderer: func(config.Resolved, store.Store, submitter.Submitter) (tui.Renderer, error) {
 			return cancelRenderer{}, nil
 		},
-		NewSubmitter: func(config.Resolved, store.Store, daemon.Client, tmux.TargetContext) submitter.Submitter {
+		NewSubmitter: func(config.Resolved, store.Store, delivery.Client, tmux.TargetContext) submitter.Submitter {
 			return noopSubmitter{}
 		},
 	}

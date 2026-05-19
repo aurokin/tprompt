@@ -12,7 +12,7 @@ import (
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/daemon"
+	"github.com/hsadler/tprompt/internal/delivery"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
 )
@@ -27,7 +27,6 @@ func TestDoctorHealthy(t *testing.T) {
 		return config.Resolved{
 			PromptsDir:    dir,
 			ConfigPath:    "/etc/tprompt/config.toml",
-			SocketPath:    "/tmp/tprompt-test.sock",
 			ClipboardArgv: []string{"custom-paste"},
 			PickerArgv:    []string{"fzf"},
 		}, nil
@@ -82,7 +81,7 @@ func TestDoctorNoTmux(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
+		return config.Resolved{PromptsDir: dir}, nil
 	}
 	deps.LookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 
@@ -99,7 +98,7 @@ func TestDoctorNoAutoStartEnvIgnored(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
+		return config.Resolved{PromptsDir: dir}, nil
 	}
 	deps.Env = func(key string) string {
 		if key == "TPROMPT_NO_AUTO_START" {
@@ -136,9 +135,9 @@ func TestDoctorHandoffUnavailableIsWarning(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
+		return config.Resolved{PromptsDir: dir}, nil
 	}
-	deps.NewTUIClient = func(config.Resolved) (daemon.Client, error) {
+	deps.NewTUIClient = func(config.Resolved) (delivery.Client, error) {
 		return nil, errors.New("missing executable")
 	}
 
@@ -156,11 +155,6 @@ func TestDoctorHandoffDoesNotRequireSocket(t *testing.T) {
 	deps.LoadConfig = func(string) (config.Resolved, error) {
 		return config.Resolved{PromptsDir: dir}, nil
 	}
-	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
-		t.Fatal("doctor should not dial the daemon for TUI handoff readiness")
-		return nil, nil
-	}
-
 	stdout, _, err := executeRootWith(t, deps, "doctor")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -173,7 +167,7 @@ func TestDoctorPickerPresent(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock", PickerArgv: []string{"fzf"}}, nil
+		return config.Resolved{PromptsDir: dir, PickerArgv: []string{"fzf"}}, nil
 	}
 	deps.LookPath = func(name string) (string, error) {
 		if name == "fzf" {
@@ -194,7 +188,7 @@ func TestDoctorPickerMissingIsWarning(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock", PickerArgv: []string{"fzf"}}, nil
+		return config.Resolved{PromptsDir: dir, PickerArgv: []string{"fzf"}}, nil
 	}
 	deps.LookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 
@@ -213,7 +207,7 @@ func TestDoctorClipboardAutoDetectWayland(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
+		return config.Resolved{PromptsDir: dir}, nil
 	}
 	deps.Env = func(key string) string {
 		if key == "WAYLAND_DISPLAY" {
@@ -243,7 +237,7 @@ func TestDoctorClipboardAutoDetectX11(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
+		return config.Resolved{PromptsDir: dir}, nil
 	}
 	deps.Env = func(key string) string {
 		if key == "DISPLAY" {
@@ -270,7 +264,7 @@ func TestDoctorClipboardOverrideMissing(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock", ClipboardArgv: []string{"not-on-path"}}, nil
+		return config.Resolved{PromptsDir: dir, ClipboardArgv: []string{"not-on-path"}}, nil
 	}
 	deps.LookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 
@@ -289,7 +283,7 @@ func TestDoctorClipboardNoneAvailable(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
+		return config.Resolved{PromptsDir: dir}, nil
 	}
 	// No env hints, no PATH hits.
 	deps.Env = func(string) string { return "" }
@@ -343,7 +337,7 @@ func TestDoctorDiscoveryFailure(t *testing.T) {
 	fs := &fakeStore{discoverErr: dupErr}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock"}, nil
+		return config.Resolved{PromptsDir: dir}, nil
 	}
 
 	stdout, _, err := executeRootWith(t, deps, "doctor")
@@ -362,7 +356,7 @@ func TestDoctorDefaultsConfig(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: dir, SocketPath: "/tmp/tprompt-test.sock", ConfigPath: ""}, nil
+		return config.Resolved{PromptsDir: dir, ConfigPath: ""}, nil
 	}
 
 	stdout, _, err := executeRootWith(t, deps, "doctor")
@@ -382,7 +376,7 @@ func TestDoctorPromptsDirAutoCreateFails(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{SocketPath: "/tmp/tprompt-test.sock"}, nil
+		return config.Resolved{}, nil
 	}
 
 	stdout, _, err := executeRootWith(t, deps, "doctor")
@@ -404,7 +398,7 @@ func TestDoctorPromptsDirMissing(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
 	deps := workingDeps(t, fs)
 	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{PromptsDir: missingDir, SocketPath: "/tmp/tprompt-test.sock"}, nil
+		return config.Resolved{PromptsDir: missingDir}, nil
 	}
 
 	stdout, _, err := executeRootWith(t, deps, "doctor")
@@ -438,7 +432,6 @@ func TestDoctorMissingAdditionalPromptsDirIsWarning(t *testing.T) {
 		return config.Resolved{
 			PromptsDir:            primary,
 			AdditionalPromptsDirs: []string{missing},
-			SocketPath:            "/tmp/tprompt-test.sock",
 		}, nil
 	}
 
@@ -463,7 +456,6 @@ func TestDoctorAdditionalPromptsDirThatIsFileIsFailure(t *testing.T) {
 		return config.Resolved{
 			PromptsDir:            primary,
 			AdditionalPromptsDirs: []string{fileSource},
-			SocketPath:            "/tmp/tprompt-test.sock",
 		}, nil
 	}
 
@@ -477,27 +469,4 @@ func TestDoctorAdditionalPromptsDirThatIsFileIsFailure(t *testing.T) {
 	}
 	assertContains(t, stdout, "ok   prompts directory exists (scope global, "+primary+") [explicit]")
 	assertContains(t, stdout, "FAIL prompts directory missing: "+fileSource)
-}
-
-// TestDoctor_NeverInvokesLauncher locks in that `tprompt doctor` is a
-// diagnostic and must not start long-running background processes.
-func TestDoctor_NeverInvokesLauncher(t *testing.T) {
-	dir := t.TempDir()
-	fs := &fakeStore{summaries: []store.Summary{}}
-	deps := workingDeps(t, fs)
-	deps.LoadConfig = func(string) (config.Resolved, error) {
-		return config.Resolved{
-			PromptsDir:      dir,
-			SocketPath:      "/tmp/tprompt-doctor-never-listens.sock",
-			DaemonAutoStart: true,
-		}, nil
-	}
-	deps.NewLauncher = func(config.Resolved, string) DaemonLauncher {
-		t.Fatal("doctor must not invoke the lifecycle launcher")
-		return nil
-	}
-
-	_, _, _ = executeRootWith(t, deps, "doctor")
-	// What matters is that NewLauncher was never called (the t.Fatal would
-	// have fired).
 }

@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/daemon"
+	"github.com/hsadler/tprompt/internal/delivery"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/tmux"
 	"github.com/hsadler/tprompt/internal/tui"
@@ -111,7 +111,7 @@ func runTUI(deps Deps, f tuiFlags) error {
 // reader construction is deferred to the production branch inside
 // ProductionDeps.NewRenderer so stub-renderer testscripts don't
 // regress on hosts without a clipboard tool.
-func renderAndDispatchTUI(deps Deps, cfg config.Resolved, s store.Store, client daemon.Client, target tmux.TargetContext, state tui.State) error {
+func renderAndDispatchTUI(deps Deps, cfg config.Resolved, s store.Store, client delivery.Client, target tmux.TargetContext, state tui.State) error {
 	sub := deps.NewSubmitter(cfg, s, client, target)
 	renderer, err := deps.NewRenderer(cfg, s, sub)
 	if err != nil {

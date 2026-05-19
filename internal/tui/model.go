@@ -225,7 +225,7 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.Type == tea.KeyCtrlC, matchesReserved(msg, m.state.Reserved.Cancel):
 		if m.pendingSubmit {
 			// A submit is in flight; cancelling here would exit 0 and drop
-			// any error the daemon returns, silently losing the outcome.
+			// any error the handoff path returns, silently losing the outcome.
 			// Wait for submitResultMsg to decide the exit code.
 			return m, nil
 		}
@@ -296,7 +296,7 @@ func (m Model) boardSelectHighlighted() (tea.Model, tea.Cmd) {
 func (m Model) tryPromptSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Gate prompt selection while a submit is in flight. Without this a slow
 	// Submitter combined with key repeat could enqueue multiple submitCmds
-	// and produce duplicate daemon submissions from one interaction. Same
+	// and produce duplicate handoff submissions from one interaction. Same
 	// treatment for an in-flight clipboard read: a prompt keypress arriving
 	// between the read cmd and clipboardReadMsg would race the pending flow.
 	if m.pendingSubmit || m.pendingClipboard {

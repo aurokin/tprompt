@@ -19,7 +19,7 @@ type Result struct {
 	PromptID string // populated when Action == ActionPrompt
 	Scope    string // optional; disambiguates shadowed cross-tier prompts.
 	// ClipboardBody is captured by the Renderer at the moment of intent so the
-	// daemon never re-reads the clipboard. Populated when Action == ActionClipboard.
+	// handoff worker never re-reads the clipboard. Populated when Action == ActionClipboard.
 	ClipboardBody []byte
 }
 

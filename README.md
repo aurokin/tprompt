@@ -39,10 +39,6 @@ tprompt send code-review
 tprompt paste
 tprompt pick
 tprompt tui --target-pane '#{pane_id}'
-tprompt daemon start    # legacy explicit daemon path
-tprompt daemon run      # legacy foreground daemon path
-tprompt daemon status
-tprompt daemon stop
 tprompt doctor
 ```
 
@@ -55,7 +51,7 @@ set. Outside tmux, it prints help.
 - Prompt IDs are filename stems; directories organize files but do not namespace IDs.
 - Duplicate prompt IDs within a source tier are invalid; global/project collisions resolve through the documented priority policy.
 - Frontmatter is metadata only; only the markdown body is delivered.
-- Direct `send` and `paste` deliver synchronously through tmux. They never start, contact, or depend on the daemon.
+- Direct `send` and `paste` deliver synchronously through tmux. They never start, contact, or depend on a background service.
 - TUI selections are submitted to a short-lived handoff worker for verified deferred delivery. The TUI does not require a long-running daemon, does not auto-start one, and still exits before injection.
 - Default delivery mode is bracketed paste via `tmux load-buffer` and `paste-buffer -p`.
 - `type` mode is available as a fallback using `send-keys -l`.

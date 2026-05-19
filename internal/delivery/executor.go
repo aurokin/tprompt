@@ -1,4 +1,4 @@
-package daemon
+package delivery
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 )
 
 // BannerPrefix is prepended to every error surfaced via tmux display-message
-// from the daemon (docs/commands/daemon.md "Error feedback").
+// from delivery (docs/commands/tui.md "Error feedback").
 const BannerPrefix = "tprompt: "
 
 const postInjectionCaptureLines = 20
@@ -19,7 +19,7 @@ const postInjectionCaptureLines = 20
 // the tmux adapter for a single Job. It is the JobRunner the queue calls on
 // each enqueued worker. Failures surface via the logger and tmux display-
 // message; success is silent (no log, no banner) per
-// docs/commands/daemon.md.
+// docs/commands/tui.md.
 type Executor struct {
 	adapter                   tmux.Adapter
 	logger                    *Logger
@@ -31,7 +31,7 @@ var sanitizeProcess = func(mode string, body []byte) ([]byte, error) {
 	return sanitize.New(sanitize.Mode(mode)).Process(body)
 }
 
-// NewExecutor wires an executor with the daemon-wide config it needs.
+// NewExecutor wires an executor with the delivery config it needs.
 func NewExecutor(adapter tmux.Adapter, logger *Logger, maxPasteBytes int64) *Executor {
 	return &Executor{
 		adapter:       adapter,

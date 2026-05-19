@@ -19,7 +19,7 @@
 - not inside tmux when a tmux target is required
 - invalid target pane supplied
 - configured picker command missing
-- daemon socket unavailable
+- handoff worker unavailable
 - **no clipboard reader available** (no auto-detected candidate, no override)
 - **clipboard reader command fails** (non-zero exit; stderr surfaced)
 
@@ -39,7 +39,6 @@
 - verification timed out
 - tmux command failed
 - delivery mode invalid
-- **job replaced by newer job targeting the same pane** (informational; logged and surfaced via `display-message`)
 
 ### tmux error taxonomy (Phase 3)
 
@@ -68,7 +67,7 @@ delivery-layer exit 6 is the wrong bucket.
 - do not silently remap a colliding keybind
 - do not silently fall back to a random pane
 - do not silently sleep and hope TUI/focus state fixed itself
-- do not hide daemon failures behind generic "send failed" messages
+- do not hide handoff failures behind generic "send failed" messages
 - do not log raw clipboard or prompt content on sanitizer rejection
 
 ## Example good errors
@@ -91,5 +90,5 @@ Something went wrong
 ## Surfacing strategy
 
 - **CLI commands** print errors to stderr and exit non-zero (see exit-code table in `docs/commands/cli.md`).
-- **Daemon** writes to `~/.local/state/tprompt/daemon.log` and runs `tmux display-message` on the originating client for user-visible failures.
+- **Handoff worker** writes metadata-only failures to the configured delivery log and runs `tmux display-message` on the originating client for user-visible failures.
 - **TUI** shows inline errors in its footer for interactive recovery (e.g., empty clipboard), and exits non-zero for unrecoverable errors.

@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/daemon"
+	"github.com/hsadler/tprompt/internal/delivery"
 	"github.com/hsadler/tprompt/internal/tmux"
 )
 
@@ -22,32 +22,32 @@ func RunJob(ctx context.Context, cfg config.Resolved, adapter tmux.Adapter, jobP
 	if err != nil {
 		return err
 	}
-	logger, err := daemon.NewLogger(cfg.LogPath)
+	logger, err := delivery.NewLogger(cfg.LogPath)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = logger.Close() }()
 
-	executor := daemon.NewExecutor(adapter, logger, cfg.MaxPasteBytes)
+	executor := delivery.NewExecutor(adapter, logger, cfg.MaxPasteBytes)
 	executor.EnablePostInjectionVerification(cfg.PostInjectionVerification)
 	executor.Run(ctx, job)
 	_ = os.Remove(jobPath)
 	return nil
 }
 
-func readJob(path string) (daemon.Job, error) {
+func readJob(path string) (delivery.Job, error) {
 	f, err := os.Open(path) //nolint:gosec // path is provided by tprompt's own handoff client.
 	if err != nil {
-		return daemon.Job{}, fmt.Errorf("open handoff job: %w", err)
+		return delivery.Job{}, fmt.Errorf("open handoff job: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 
-	var job daemon.Job
+	var job delivery.Job
 	if err := json.NewDecoder(f).Decode(&job); err != nil {
-		return daemon.Job{}, fmt.Errorf("decode handoff job: %w", err)
+		return delivery.Job{}, fmt.Errorf("decode handoff job: %w", err)
 	}
-	if err := daemon.ValidateJob(job); err != nil {
-		return daemon.Job{}, err
+	if err := delivery.ValidateJob(job); err != nil {
+		return delivery.Job{}, err
 	}
 	return job, nil
 }

@@ -1,4 +1,4 @@
-package daemon
+package delivery
 
 import "fmt"
 
@@ -9,11 +9,11 @@ func ValidateJob(j Job) error {
 	return validateJob(j)
 }
 
-// validateJob checks wire-submitted Job fields before enqueueing so the daemon
+// validateJob checks wire-submitted Job fields before enqueueing so delivery
 // rejects malformed requests synchronously on SubmitResponse instead of
 // surfacing the failure later via tmux display-message. Clients get a clear
 // error at submit time; the banner path is reserved for failures discovered
-// during verification/delivery, when the daemon is the only actor left.
+// during verification/delivery, when the worker is the only actor left.
 func validateJob(j Job) error {
 	if j.PaneID == "" {
 		return fmt.Errorf("invalid job: pane_id is required")
