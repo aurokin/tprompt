@@ -4,7 +4,7 @@ These are examples for the implementation docs, not locked syntax.
 
 ## Tmux-popup binding concept
 
-When launched inside a tmux popup, the TUI should receive the original pane/client context so the daemon knows where to deliver after the TUI exits.
+When launched inside a tmux popup, the TUI should receive the original pane/client context so the handoff worker knows where to deliver after the TUI exits.
 
 Example shape:
 
@@ -26,7 +26,7 @@ For users who want a one-key "paste clipboard into current pane" shortcut that s
 bind-key V run-shell "tprompt paste --target-pane '#{pane_id}'"
 ```
 
-This invokes `tprompt paste` synchronously — no TUI, no daemon. The clipboard is read immediately and delivered to the current pane. If you want `--enter` to auto-submit, append the flag:
+This invokes `tprompt paste` synchronously - no TUI, no handoff. The clipboard is read immediately and delivered to the current pane. If you want `--enter` to auto-submit, append the flag:
 
 ```tmux
 bind-key V run-shell "tprompt paste --target-pane '#{pane_id}' --enter"
@@ -46,4 +46,4 @@ bind-key R run-shell "tprompt send code-review --target-pane '#{pane_id}'"
 - preserve enough original context to verify the correct target later
 - avoid relying only on "current pane at TUI close time"
 - `display-popup -E` is required so the tmux popup tears down when the wrapped command exits
-- `run-shell` bindings do **not** need the daemon — they deliver synchronously
+- `run-shell` bindings do **not** need handoff - they deliver synchronously

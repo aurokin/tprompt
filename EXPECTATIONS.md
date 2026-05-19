@@ -49,19 +49,12 @@ tracker; planned work lives in Linear.
 - The worker fails cleanly if the target pane vanishes or becomes invalid.
 - Handoff jobs are per selection; no long-running queue or daemon is required for the TUI path.
 
-## Daemon Lifecycle
+## Background Services
 
-- `tprompt daemon start` is non-blocking: it spawns a detached daemon, waits briefly for readiness, and returns. When a compatible daemon is already running it is an idempotent success.
-- `tprompt daemon run` is foreground: the daemon runs in the invoking terminal and is stopped by SIGINT/SIGTERM or `tprompt daemon stop` from another shell.
-- `tprompt daemon stop` works the same way regardless of how the daemon was started: it dials the configured socket, issues the Stop RPC, and reports success when the socket disappears. With no daemon running it prints "daemon not running" and exits successfully.
-- `tprompt daemon status` is read-only and never starts the daemon implicitly.
-- TUI flows (`tprompt tui` and bare `tprompt` dispatching into TUI inside tmux+tty) do not contact or auto-start the daemon. Deprecated `--daemon-auto-start` / `--no-daemon-auto-start` flags are accepted for compatibility but have no effect.
-- The daemon commands are retained as an explicit lifecycle surface while the TUI path uses handoff workers.
-- On macOS, `tprompt daemon start` and `tprompt daemon run` perform an executable-trust preflight against the current binary (codesign verify, ad-hoc detection, Gatekeeper assess with CLI bypass). Ad-hoc-signed, unsigned, tampered, or Gatekeeper-rejected binaries are refused before any socket is bound. The refusal message is intent-aware: a `daemon start` failure names the failed action as "detached daemon start", names the binary path and failure category, and points at `tprompt daemon run` (foreground), a signed release binary, and `scripts/sign-macos-binary.sh` for self-signing local dev builds. A `daemon run` failure names the failed action as `'tprompt daemon run'`, names the binary and category, and points at the signed-release / self-sign path (it does not advise the user to run `daemon run` again — they are already there). Both variants name the `TPROMPT_UNSAFE_TRUST_PREFLIGHT_BYPASS=1` escape hatch for local development. `tprompt daemon stop` and `tprompt daemon status` never preflight and work against any running daemon. The bypass env var must not be set in normal release operation.
-- Release signing covers `darwin/arm64` only. Operators on other macOS architectures get a self-sign path via `scripts/sign-macos-binary.sh` (or the developer escape hatch). The full kernel-panic evidence and rejected alternatives behind the macOS auto-start policy are recorded in the [macOS daemon auto-start ADR](docs/lifecycle/macos-autostart-adr.md).
-- `tprompt send`, `tprompt paste`, `tprompt tui`, and `tprompt doctor` do not start, contact, or depend on the daemon.
-- Concurrent cold starts are serialized: only one daemon process owns the configured socket at a time.
-- A "compatible daemon" is one reachable at the configured socket whose `Status` RPC succeeds. A reachable-but-broken socket is reported with a manual-recovery message rather than respawned.
+- `tprompt` has no user-facing daemon or background service.
+- `tprompt send`, `tprompt paste`, `tprompt tui`, and `tprompt doctor` do not start, contact, or depend on a daemon.
+- Deprecated `--daemon-auto-start` / `--no-daemon-auto-start` flags are accepted on `tprompt tui` for compatibility but have no effect.
+- Release signing covers the CLI binary. It is not tied to detached daemon operation.
 
 ## Delivery Behavior
 
@@ -79,7 +72,7 @@ tracker; planned work lives in Linear.
   `pbpaste`, `wl-paste`, `xclip`, or `xsel`.
 - `clipboard_read_command` overrides auto-detection.
 - Empty, non-UTF-8, and oversized clipboard content is rejected before delivery.
-- Handoff workers and the daemon never read the clipboard. Clipboard bytes are captured by the submitting process.
+- Handoff workers never read the clipboard. Clipboard bytes are captured by the submitting process.
 
 ## Sanitization
 
@@ -100,8 +93,8 @@ tracker; planned work lives in Linear.
 
 - TUI-flow correctness must not depend on fixed sleeps.
 - Target readiness is based on tmux pane and selection state.
-- Direct sends must not block on daemon state.
-- Config, prompt, tmux, handoff/daemon, and delivery failures should remain distinguishable through exit-code mapping.
+- Direct sends must not block on handoff state.
+- Config, prompt, tmux, handoff, and delivery failures should remain distinguishable through exit-code mapping.
 
 ## Behavioral Boundary
 
@@ -118,7 +111,7 @@ That boundary is intentional.
 ## Platform And Packaging
 
 - Primary platforms are Linux and macOS.
-- Packaging target is a single CLI binary; explicit daemon commands remain available in the binary.
+- Packaging target is a single CLI binary with no background daemon command surface.
 - Windows is outside the current tmux-first workflow.
 
 ## Non-Goals

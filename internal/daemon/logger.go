@@ -29,8 +29,7 @@ const (
 
 // Entry is the metadata-only payload accepted by Logger. The struct
 // deliberately has no Body field — sanitizer rejections record class and
-// offset in Msg, never raw content (docs/commands/daemon.md "Append-only
-// log").
+// offset in Msg, never raw content (docs/implementation/sanitization.md).
 type Entry struct {
 	JobID    string
 	Pane     string

@@ -120,61 +120,15 @@ KeybindResolver
 
 Pure function. Errors on duplicate / reserved / malformed `key:` values.
 
-## Daemon
+## Delivery handoff
 
 ```text
-DaemonClient
+DeliveryClient
 - Submit(job DeferredJob) -> JobSubmitResult | error
-- Status() -> DaemonStatus | error
-- Stop() -> DaemonStopResult | error
 
-DaemonServer
-- Start() -> error
-- Stop request handler triggers graceful shutdown
+HandoffWorker
+- RunJob(job_path) -> error
 ```
-
-## Daemon lifecycle launcher
-
-The launcher in `internal/app/lifecycle/` orchestrates explicit daemon
-starts (`daemon start`, foreground `daemon run` via direct exec). Three
-seams are pluggable for tests:
-
-```text
-StatusProber
-- Probe(ctx) -> (ProbeResult, error)
-- ProbeResult: ProbeOK | ProbeUnreachable | ProbeReachableBroken
-
-Spawner
-- Spawn(ctx, exec, args, logPath) -> (SpawnHandle, error)
-- SpawnHandle.PID: used by readiness loop for kill(pid, 0) liveness
-
-TrustAssessor (macOS only; no-op elsewhere)
-- Assess(intent StartIntent, exec) -> AssessResult
-- AssessResult.Allow / Reason
-```
-
-Sentinel types in `internal/daemon/lifecycle/`:
-
-```text
-StartIntent
-- IntentExplicitStart  // tprompt daemon start
-- IntentExplicitRun    // tprompt daemon run
-- IntentImplicitTUI    // legacy TUI auto-start intent; current TUI uses handoff
-
-StartResult
-- Outcome: OutcomeStarted | OutcomeAlreadyRunning | OutcomeFailed
-- Reason: StartFailureReason (closed enum)
-- Detail: human-readable, includes daemon log path on failure
-
-StartFailureReason values:
-- ReasonNone, ReasonTrustGate, ReasonSpawnFailed,
-- ReasonReadinessTimeout, ReasonChildExitedEarly,
-- ReasonStaleSocketRefused, ReasonCooldown, ReasonConfig, ReasonOther
-```
-
-The narrative for these seams (when each fires, how they compose,
-which tests cover them) lives in
-[docs/lifecycle/auto-start.md](../lifecycle/auto-start.md).
 
 ## Verification engine
 

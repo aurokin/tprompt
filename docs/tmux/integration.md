@@ -37,4 +37,4 @@ Neither mode guarantees semantic success in the target application. See `docs/tm
 
 ## Error surfacing
 
-The adapter is responsible for running `tmux display-message` when the daemon asks it to surface a failure. Message text is provided by the caller; the adapter handles the `-c <client-tty>` scoping when available.
+The adapter is responsible for running `tmux display-message` when the delivery path asks it to surface a failure. Message text is provided by the caller; the adapter handles the `-c <client-tty>` scoping when available.

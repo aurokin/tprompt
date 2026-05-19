@@ -617,8 +617,8 @@ func TestTUI_ClipboardDaemonFailureExitsExitDaemon(t *testing.T) {
 }
 
 // TestTUI_ClipboardEndToEndThroughRealSubmitter wires the real submitter.New
-// against a capturing fakeDaemonClient so the test observes the actual
-// SubmitRequest that would reach the daemon for a clipboard selection.
+// against a capturing handoff client so the test observes the actual
+// SubmitRequest for a clipboard selection.
 func TestTUI_ClipboardEndToEndThroughRealSubmitter(t *testing.T) {
 	fs := &fakeStore{}
 	rend := &recordingRenderer{result: tui.Result{

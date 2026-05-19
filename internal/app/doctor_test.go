@@ -158,7 +158,7 @@ func TestDoctorHandoffDoesNotRequireSocket(t *testing.T) {
 		return config.Resolved{PromptsDir: dir}, nil
 	}
 	deps.NewDaemonClient = func(config.Resolved) (daemon.Client, error) {
-		t.Fatal("doctor should not dial the daemon for TUI handoff readiness")
+		t.Fatal("doctor should not dial legacy IPC for TUI handoff readiness")
 		return nil, nil
 	}
 

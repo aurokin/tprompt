@@ -19,8 +19,14 @@ Frontmatter parsing and body extraction helpers.
 ### `internal/tmux`
 All tmux-facing functions and types. See `docs/tmux/delivery.md` for the command construction this module owns.
 
+### `internal/delivery`
+Shared delivery executor: verification, sanitizer enforcement, tmux injection, logging, and `display-message` error surfacing.
+
+### `internal/handoff`
+Private handoff job files and short-lived worker spawning for TUI selections.
+
 ### `internal/daemon`
-IPC server, job handling, verification loop, replace-same-target logic, `display-message` error surfacing.
+Legacy IPC runtime retained temporarily during removal. It is not part of the public command surface.
 
 ### `internal/clipboard`
 Clipboard reader: auto-detect, override, error wrapping. See `docs/storage/clipboard.md`.
@@ -75,18 +81,18 @@ Single-method service returning cleaned bytes or a rejection. One instance per c
 
 ## Concurrency guidance
 
-Daemon execution should stay simple unless the behavior contract requires more.
+TUI handoff execution should stay simple unless the behavior contract requires more.
 
 Recommended default:
 
-- single daemon process
-- jobs processed one at a time
-- same-target replacement: dropping the old pending job when a new one arrives
-- different-target jobs may run concurrently if implementation is simple; otherwise serialize
+- short-lived worker per submitted selection
+- job file written before the TUI exits
+- worker verifies the original pane context before delivery
+- no persisted queue or background process contract
 
 ## Logging guidance
 
-The daemon should emit logs that help diagnose:
+The delivery path should emit logs that help diagnose:
 
 - target pane vanished
 - TUI process did not exit / focus did not return to expected pane

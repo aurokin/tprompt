@@ -16,7 +16,7 @@ import (
 
 func TestRootCmdRegistersAllSubcommands(t *testing.T) {
 	root := NewRootCmd(fakeDeps(t))
-	want := []string{"list", "show", "send", "paste", "doctor", "tui", "pick", "daemon", "new"}
+	want := []string{"list", "show", "send", "paste", "doctor", "tui", "pick", "new"}
 	have := map[string]bool{}
 	for _, c := range root.Commands() {
 		have[c.Name()] = true
@@ -24,49 +24,6 @@ func TestRootCmdRegistersAllSubcommands(t *testing.T) {
 	for _, name := range want {
 		if !have[name] {
 			t.Errorf("missing subcommand %q", name)
-		}
-	}
-}
-
-func TestDaemonStartCommandExists(t *testing.T) {
-	root := NewRootCmd(fakeDeps(t))
-	cmd, _, err := root.Find([]string{"daemon", "start"})
-	if err != nil {
-		t.Fatalf("find daemon start: %v", err)
-	}
-	if cmd == nil || cmd.CommandPath() != "tprompt daemon start" {
-		t.Fatalf("want tprompt daemon start, got %v", cmd)
-	}
-}
-
-func TestDaemonStopCommandExists(t *testing.T) {
-	root := NewRootCmd(fakeDeps(t))
-	cmd, _, err := root.Find([]string{"daemon", "stop"})
-	if err != nil {
-		t.Fatalf("find daemon stop: %v", err)
-	}
-	if cmd == nil || cmd.CommandPath() != "tprompt daemon stop" {
-		t.Fatalf("want tprompt daemon stop, got %v", cmd)
-	}
-}
-
-func TestDaemonRunIsItsOwnSubcommand(t *testing.T) {
-	root := NewRootCmd(fakeDeps(t))
-	cmd, _, err := root.Find([]string{"daemon", "run"})
-	if err != nil {
-		t.Fatalf("find daemon run: %v", err)
-	}
-	if cmd == nil || cmd.CommandPath() != "tprompt daemon run" {
-		t.Fatalf("want tprompt daemon run, got %v", cmd)
-	}
-	// Sanity: the start command must not list "run" as an alias.
-	startCmd, _, err := root.Find([]string{"daemon", "start"})
-	if err != nil {
-		t.Fatalf("find daemon start: %v", err)
-	}
-	for _, a := range startCmd.Aliases {
-		if a == "run" {
-			t.Fatalf("daemon start still aliases %q; expected separate subcommands", a)
 		}
 	}
 }

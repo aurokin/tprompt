@@ -48,9 +48,6 @@ func TestZeroArgCommandsRejectExtraOperands(t *testing.T) {
 		{name: "doctor", args: []string{"doctor", "extra"}},
 		{name: "tui", args: []string{"tui", "--target-pane", "%0", "extra"}},
 		{name: "pick", args: []string{"pick", "extra"}},
-		{name: "daemon start", args: []string{"daemon", "start", "extra"}},
-		{name: "daemon status", args: []string{"daemon", "status", "extra"}},
-		{name: "daemon stop", args: []string{"daemon", "stop", "extra"}},
 	}
 
 	for _, tt := range tests {

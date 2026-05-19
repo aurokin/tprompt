@@ -12,9 +12,9 @@ Why:
 - low process startup latency — matters because `tprompt tui` fires from a tmux keybind into a popup; users expect instant
 - idiomatic subprocess handling (needed everywhere: tmux commands, clipboard readers)
 - mature TUI ecosystem (Bubble Tea)
-- small runtime footprint for the long-lived daemon
+- small runtime footprint and fast short-lived handoff workers
 
-Rust is explicitly rejected for v1. Equally good binary story, but the async/sync split and borrow-checker friction around the daemon's queue and target-pane state cost more than Go does, for no safety benefit that matters in a local-only CLI.
+Rust is explicitly rejected for v1. Equally good binary story, but the async/sync split and borrow-checker friction around local delivery state cost more than Go does, for no safety benefit that matters in a local-only CLI.
 
 ## Module layout
 
@@ -26,7 +26,9 @@ internal/store/       prompt discovery + ID resolution
 internal/promptmeta/  frontmatter + body extraction
 internal/keybind/     keybind resolver (pool + frontmatter merge)
 internal/tmux/        tmux command construction and verification
-internal/daemon/      IPC server, job queue, replace-same-target
+internal/delivery/    verification, logging, sanitize, and injection executor
+internal/handoff/     private job files and short-lived worker spawning
+internal/daemon/      legacy runtime retained temporarily during removal
 internal/clipboard/   clipboard reader (auto-detect + override)
 internal/sanitize/    off / safe / strict sanitizer
 internal/tui/         Bubble Tea TUI (board + search + clipboard row)
@@ -47,7 +49,7 @@ All app code is under `internal/` so downstream consumers cannot import it.
 | Test diffs | `github.com/google/go-cmp` |
 | CLI black-box tests | `github.com/rogpeppe/go-internal/testscript` |
 
-No ORM, no web framework, no logger library — stdlib `log/slog` is sufficient for daemon logs.
+No ORM, no web framework, no logger library.
 
 ## Format
 

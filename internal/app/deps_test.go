@@ -83,9 +83,9 @@ func TestParseTestRenderer_Clipboard(t *testing.T) {
 
 func TestParseTestRenderer_ClipboardSurfacesSubmitErr(t *testing.T) {
 	// `clipboard:` with empty body exercises the Submitter's EmptyClipboardError
-	// path (testscripts use this to assert the daemon error surface). The stub
+	// path. The stub
 	// Renderer now owns the Submit call, so its error must propagate out of Run.
-	boom := errors.New("daemon refused")
+	boom := errors.New("handoff refused")
 	sub := &stubRendererSubmitter{err: boom}
 	r, err := parseTestRenderer("clipboard:", sub)
 	if err != nil {

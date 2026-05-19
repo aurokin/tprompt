@@ -10,7 +10,7 @@ import (
 )
 
 // BannerPrefix is prepended to every error surfaced via tmux display-message
-// from the daemon (docs/commands/daemon.md "Error feedback").
+// from deferred delivery (docs/implementation/interfaces.md).
 const BannerPrefix = "tprompt: "
 
 const postInjectionCaptureLines = 20
@@ -18,8 +18,7 @@ const postInjectionCaptureLines = 20
 // Executor runs verification, the pre-sanitize byte cap, the sanitizer, and
 // the tmux adapter for a single Job. It is the JobRunner the queue calls on
 // each enqueued worker. Failures surface via the logger and tmux display-
-// message; success is silent (no log, no banner) per
-// docs/commands/daemon.md.
+// message; success is silent (no log, no banner) per the delivery contract.
 type Executor struct {
 	adapter                   tmux.Adapter
 	logger                    *Logger

@@ -154,7 +154,7 @@ func newSendCmd(deps Deps) *cobra.Command {
 		Use:   "send <id>",
 		Short: "Deliver a prompt into a tmux pane synchronously",
 		Long: `Send delivers a prompt body synchronously to a tmux pane. Delivery is
-direct via the tmux adapter in this process — it does not use the daemon
+direct via the tmux adapter in this process — it does not use handoff
 and is not affected by pending TUI jobs.
 
 If --target-pane is omitted, the current tmux pane is used; outside tmux
@@ -279,11 +279,11 @@ func newPasteCmd(deps Deps) *cobra.Command {
 		Use:   "paste",
 		Short: "Deliver the host clipboard into a tmux pane synchronously",
 		Long: `Paste reads the host clipboard once and delivers it synchronously to a
-tmux pane. Same-host only: the clipboard reader, daemon, and tmux pane
-all run on the same machine.
+tmux pane. Same-host only: the clipboard reader and tmux pane run on the
+same machine.
 
 If --target-pane is omitted, the current tmux pane is used. Like 'send',
-this command does not use the daemon and delivers directly. Flag set
+this command does not use handoff and delivers directly. Flag set
 mirrors 'send' for consistency.`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {

@@ -21,7 +21,7 @@ belong in Linear milestones, not in the repo.
 - [README](../README.md) - quick product overview and commands.
 - [CLI commands](commands/cli.md) - command behavior and exit codes.
 - [TUI](commands/tui.md) - built-in board, search, clipboard row, and key behavior.
-- [TUI flow](commands/tui-flow.md) - popup-to-daemon delivery sequence.
+- [TUI flow](commands/tui-flow.md) - popup-to-handoff delivery sequence.
 - [Paste command](commands/paste.md) - clipboard delivery behavior.
 - [Tmux bindings](../examples/tmux-bindings.md) - popup binding examples.
 
@@ -49,17 +49,6 @@ belong in Linear milestones, not in the repo.
 - [Tmux integration](tmux/integration.md) - environment assumptions.
 - [Error handling](implementation/error-handling.md) - tmux and delivery failure mapping.
 - [Testing harness](testing/harness.md) - fake runner and adapter test strategy.
-
-## I Want To Change The Daemon
-
-- [Daemon command](commands/daemon.md) - daemon lifecycle and operator behavior.
-- [Daemon lifecycle](lifecycle/auto-start.md) - explicit daemon launcher seams, primitives, macOS trust gate, recovery paths.
-- [macOS daemon auto-start ADR](lifecycle/macos-autostart-adr.md) - historical decision and evidence for removing implicit daemon auto-start from the TUI path.
-- [macOS release signing](lifecycle/macos-release-signing.md) - signing/notarization pipeline and the GitHub Actions secrets contract that feeds it.
-- [Data model](architecture/data-model.md) - deferred job and status shapes.
-- [Components](architecture/components.md) - package responsibilities.
-- [Interfaces](implementation/interfaces.md) - daemon client/server seams.
-- [Testing harness](testing/harness.md) - socket, queue, executor, and logging tests.
 
 ## I Want To Change Prompt Storage Or Config
 

@@ -46,8 +46,7 @@ Responsibilities:
 - inject only after verification passes
 - surface success/failure via `display-message` + append-only log
 
-The daemon package still provides an explicit lifecycle command surface, but
-the TUI path does not require or auto-start a long-running daemon.
+The TUI path does not require or auto-start a long-running daemon.
 
 ## 5. Clipboard reader
 

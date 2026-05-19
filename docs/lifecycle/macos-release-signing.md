@@ -6,15 +6,9 @@ publishing.
 
 ## Why this matters
 
-Signing is part of the explicit daemon lifecycle policy, not just release
-polish. A signed and notarized release passes the macOS trust gate (see
-[auto-start.md](auto-start.md#macos-executable-trust-preflight-explicit-path))
-for `tprompt daemon start` and `tprompt daemon run`. The current TUI path uses
-short-lived handoff workers and does not require daemon auto-start.
-
-For local development, prefer foreground `tprompt daemon run` when exercising
-daemon behavior, or use the documented developer bypass. Ad-hoc and
-locally-built binaries trip the trust gate by design.
+Signing is the release trust story for the single `tprompt` CLI binary. The
+current TUI path uses short-lived handoff workers and does not require a
+daemon, socket, or auto-start trust gate.
 
 ## Local signing
 
@@ -219,4 +213,3 @@ visible to anonymous fetchers until the operator publishes it.
 - [scripts/sign-macos-binary.sh](../../scripts/sign-macos-binary.sh) — local signing wrapper.
 - [scripts/notarize-macos-binary.sh](../../scripts/notarize-macos-binary.sh) — local notarization wrapper.
 - [.github/workflows/release.yml](../../.github/workflows/release.yml) — release pipeline.
-- [auto-start.md](auto-start.md) — daemon lifecycle and trust-gate semantics.

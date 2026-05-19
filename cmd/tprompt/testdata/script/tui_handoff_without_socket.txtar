@@ -1,5 +1,5 @@
-# `tprompt tui` no longer preflights the daemon. Deprecated daemon
-# auto-start flags are accepted for compatibility but have no effect.
+# `tprompt tui` does not preflight any daemon socket. Deprecated daemon
+# auto-start flags are accepted for compatibility and have no effect.
 
 [!exec:tmux] skip
 
@@ -19,5 +19,4 @@ exec tmux kill-server
 
 -- config.toml --
 prompts_dir = "prompts"
-socket_path = "missing/daemon.sock"
 log_path = "missing/daemon.log"

@@ -16,8 +16,8 @@ Two modes, both routed through the tmux adapter.
 Sequence:
 
 1. `tmux load-buffer -b <buffer-name> -` — feed the prompt/clipboard body via stdin. A per-invocation unique buffer name avoids collisions between concurrent deliveries. Naming scheme:
-   - daemon-delivered jobs: `tprompt-<job-id>`
-   - direct `tprompt send` / `tprompt paste` (no daemon job ID): `tprompt-send-<pid>-<unix-nanos>`
+   - handoff-delivered jobs: `tprompt-<job-id>`
+   - direct `tprompt send` / `tprompt paste` (no handoff job ID): `tprompt-send-<pid>-<unix-nanos>`
 2. `tmux paste-buffer -d -p -b <buffer-name> -t <target-pane>` — paste into the target. Flags:
    - `-p` — bracketed paste. Wraps content in `ESC[200~ … ESC[201~` so bracketed-aware apps (Claude Code, modern shells, vim insert, editors) treat the input as a paste, not typed keystrokes. Newlines inside a bracketed paste do **not** trigger Enter.
    - `-d` — delete the buffer after paste. Cleans up state.
@@ -53,7 +53,7 @@ Sequence:
 
 ## Target resolution
 
-The adapter uses `pane_id` as the authoritative `-t` delivery target. The daemon may also reconstruct a `TargetContext` from the job's optional origin metadata (`session_id`, `window_id`, `client_tty`) when verification needs broader tmux context. See `docs/architecture/data-model.md` and `docs/tmux/verification.md`.
+The adapter uses `pane_id` as the authoritative `-t` delivery target. The handoff worker may also reconstruct a `TargetContext` from the job's optional origin metadata (`session_id`, `window_id`, `client_tty`) when verification needs broader tmux context. See `docs/architecture/data-model.md` and `docs/tmux/verification.md`.
 
 ## Size cap
 
