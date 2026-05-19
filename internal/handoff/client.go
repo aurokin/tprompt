@@ -93,14 +93,14 @@ func (c *Client) spawn(jobPath string) error {
 	if c.configPath != "" {
 		args = append(args, "--config", c.configPath)
 	}
-	cmd := exec.Command(c.executable, args...)
+	cmd := exec.Command(c.executable, args...) //nolint:gosec // executable is resolved from os.Executable; job path is an internal temp file.
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	if c.cfg.LogPath != "" {
 		if err := os.MkdirAll(filepath.Dir(c.cfg.LogPath), 0o700); err != nil {
 			return fmt.Errorf("mkdir log dir: %w", err)
 		}
-		f, err := os.OpenFile(c.cfg.LogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec
+		f, err := os.OpenFile(c.cfg.LogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 		if err != nil {
 			return fmt.Errorf("open log: %w", err)
 		}
