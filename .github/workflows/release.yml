@@ -38,8 +38,8 @@ jobs:
 
       - name: Check tag matches VERSION
         # The tag's base (everything before the first `-`) must equal
-        # the VERSION file. This accepts both final tags (`v0.1.0`)
-        # and prerelease tags (`v0.1.0-rc1`, `v0.1.0-beta.2`) that
+        # the VERSION file. This accepts both final tags (`v0.2.0`)
+        # and prerelease tags (`v0.2.0-rc1`, `v0.2.0-beta.2`) that
         # share the same base; bumping VERSION is what gates a real
         # release. `${var%%-*}` strips at the first `-`, leaving
         # everything before it (or the full string if no `-`).
