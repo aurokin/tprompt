@@ -33,6 +33,25 @@ func TestRowDisplayDescriptionFallsBackToBlank(t *testing.T) {
 	}
 }
 
+func TestRowDisplayNameUsesPromptID(t *testing.T) {
+	row := Row{PromptID: "code-review"}
+
+	if got := row.DisplayName(); got != "code-review" {
+		t.Fatalf("DisplayName() = %q, want %q", got, "code-review")
+	}
+}
+
+func TestRowDisplayNameLabelsClipboardRow(t *testing.T) {
+	// The pinned clipboard row carries an empty PromptID (the sentinel that
+	// distinguishes it from prompt rows). The board still needs a legible name
+	// so users know what the row does.
+	row := Row{Key: 'p', Description: "(read on select)"}
+
+	if got := row.DisplayName(); got != "clipboard" {
+		t.Fatalf("DisplayName() = %q, want %q", got, "clipboard")
+	}
+}
+
 func TestRowSearchTextIncludesSearchableMetadata(t *testing.T) {
 	row := Row{
 		PromptID:    "code-review",

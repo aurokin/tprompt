@@ -76,6 +76,21 @@ func TestUpdate_SlashEntersSearchModeWithCatalog(t *testing.T) {
 	}
 }
 
+func TestView_SearchCatalogRendersClipboardLabel(t *testing.T) {
+	// The empty-query search catalog pins the clipboard row first; it must carry
+	// the "clipboard" name label just like the board view, since both render
+	// through renderRow → DisplayName.
+	board := []Row{{Key: '1', PromptID: "alpha"}}
+	m := NewModel(searchStateWithRows(board, nil), ModelDeps{})
+	m.width = 80
+	m = enterSearchViaSlash(t, m)
+
+	out := m.View()
+	if !strings.Contains(out, "[p]  clipboard") {
+		t.Fatalf("search catalog must label the clipboard row. Got:\n%s", out)
+	}
+}
+
 func TestUpdate_SearchLetterAppendsToQueryAndFilters(t *testing.T) {
 	board := []Row{
 		{Key: '1', PromptID: "apple"},

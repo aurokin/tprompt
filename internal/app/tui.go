@@ -135,10 +135,11 @@ func renderAndDispatchTUI(deps Deps, cfg config.Resolved, s store.Store, client 
 }
 
 // buildTUIState assembles the State the Renderer sees: pinned clipboard row,
-// alphabetically-sorted board rows, overflow rows, and the reserved-key map.
+// board rows (explicit keybinds first, then auto-assigned, each alphabetical
+// by ID), overflow rows, and the reserved-key map.
 func buildTUIState(summaries []store.Summary, cfg config.Resolved) tui.State {
 	reserved := reservedKeys(cfg)
-	var board, overflow []tui.Row
+	var explicit, auto, overflow []tui.Row
 	for _, sum := range summaries {
 		row := tui.Row{
 			PromptID:    sum.ID,
@@ -150,22 +151,28 @@ func buildTUIState(summaries []store.Summary, cfg config.Resolved) tui.State {
 		}
 		if sum.Key != "" && !sum.Shadowed {
 			row.Key = []rune(sum.Key)[0]
-			board = append(board, row)
+			if sum.KeySource == store.KeySourceAuto {
+				auto = append(auto, row)
+			} else {
+				explicit = append(explicit, row)
+			}
 			continue
 		}
 		overflow = append(overflow, row)
 	}
 	// store.List() already returns summaries sorted by ID; the split preserves
-	// that order for both slices.
+	// that order within each group. Explicitly keybound prompts render above
+	// auto-assigned ones so user-chosen shortcuts stay at the top of the board.
 
-	rows := make([]tui.Row, 0, len(board)+1)
+	rows := make([]tui.Row, 0, len(explicit)+len(auto)+1)
 	if clipKey, ok := clipboardKey(reserved); ok {
 		rows = append(rows, tui.Row{
 			Key:         clipKey,
 			Description: "(read on select)",
 		})
 	}
-	rows = append(rows, board...)
+	rows = append(rows, explicit...)
+	rows = append(rows, auto...)
 
 	return tui.State{
 		Rows:               rows,

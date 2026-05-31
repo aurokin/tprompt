@@ -20,14 +20,14 @@ Example:
 
 ```
 [P]  clipboard            (read on select)
+[c]  code-merge           Merge review prompt
+[q]  quick-hack           Short quick prompt
 [1]  code-review          Review for correctness, risk, and missing tests
 [2]  commit               Generate a conventional commit message
 [3]  deploy-checklist     Preflight checks before prod push
-[q]  quick-hack           Short quick prompt
-[c]  code-merge           Merge review prompt
 ```
 
-When the clipboard action is bound to a printable reserved key, the clipboard row is **first** and pinned. It has no prompt id; it may render a short hint such as `(read on select)`. If the clipboard reserved key is disabled or symbolic, the board omits the pinned clipboard row, but clipboard remains reachable from the empty-query search catalog.
+When the clipboard action is bound to a printable reserved key, the clipboard row is **first** and pinned. It has no real prompt id, but it is labeled `clipboard` in the id column and renders a short hint such as `(read on select)` in the description column. If the clipboard reserved key is disabled or symbolic, the board omits the pinned clipboard row, but clipboard remains reachable from the empty-query search catalog.
 
 ## Reserved keys
 
@@ -48,6 +48,8 @@ Keys are assigned to prompts in two stages:
 2. **Auto-assigned from the pool** `1 2 3 4 5 q e r f g t z x c` (in that order) for prompts that did not declare `key:`. Assignment scan order is **alphabetical by prompt `id`**.
 
 Matching is **case-insensitive** — `c` and `C` are the same key.
+
+**Board display order.** Explicitly keybound prompts (stage 1) render at the top of the board, above auto-assigned prompts (stage 2). Within each group, rows stay alphabetical by prompt `id`. This keeps user-chosen shortcuts pinned to the top regardless of where their ids fall alphabetically. (Assignment *scan* order remains alphabetical by `id` across all unbound prompts — see DECISIONS §17.)
 
 Overflow: once the auto-assign pool is exhausted and frontmatter keys are satisfied, remaining prompts are **not shown on the board**. They are reachable only via `/`-search.
 

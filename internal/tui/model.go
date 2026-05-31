@@ -672,7 +672,7 @@ var selectedStyle = lipgloss.NewStyle().Reverse(true)
 
 func renderRow(row Row, idWidth, descWidth int) string {
 	key := "[" + displayKey(row.Key) + "]"
-	id := padRight(row.PromptID, idWidth)
+	id := padRight(row.DisplayName(), idWidth)
 	desc := truncateToWidth(row.DisplayDescription(), descWidth)
 	return fmt.Sprintf("%s  %s  %s", key, id, desc)
 }
@@ -680,7 +680,7 @@ func renderRow(row Row, idWidth, descWidth int) string {
 func maxIDWidth(rows []Row) int {
 	max := 0
 	for _, r := range rows {
-		if w := lipgloss.Width(r.PromptID); w > max {
+		if w := lipgloss.Width(r.DisplayName()); w > max {
 			max = w
 		}
 	}

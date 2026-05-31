@@ -39,7 +39,8 @@ tracker; planned work lives in Linear.
 ## TUI Delivery Behavior
 
 - The TUI is built in; it is separate from the external `pick` command.
-- The board shows single-key prompt shortcuts plus a pinned clipboard row when enabled.
+- The board shows single-key prompt shortcuts plus a pinned clipboard row when enabled. The clipboard row is labeled `clipboard` in the id column.
+- Explicitly keybound prompts render above auto-assigned ones on the board; each group stays alphabetical by id.
 - A row is delivered either by pressing its single-key shortcut, or by moving the cursor with `↑`/`↓` and pressing the **Select** key (default `Enter`). Both paths submit through the same flow.
 - `/` enters fuzzy search over prompt ID, title, description, and tags.
 - Overflow prompts are not shown on the board but are reachable through search.

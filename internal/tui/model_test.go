@@ -276,6 +276,18 @@ func TestView_EmptyStoreOmitsDisabledCancelHint(t *testing.T) {
 	}
 }
 
+func TestView_ClipboardRowRendersNameLabel(t *testing.T) {
+	// The pinned clipboard row has an empty PromptID; the board must still
+	// label it "clipboard" so its purpose is legible.
+	m := NewModel(sampleState(), ModelDeps{})
+	m.width = 80
+
+	out := m.View()
+	if !strings.Contains(out, "[p]  clipboard") {
+		t.Fatalf("board must label the clipboard row. Got:\n%s", out)
+	}
+}
+
 func TestView_NonEmptyShowsBoardFooter(t *testing.T) {
 	m := NewModel(sampleState(), ModelDeps{})
 	m.width = 80

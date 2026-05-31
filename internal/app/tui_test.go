@@ -179,6 +179,44 @@ func TestTUI_BuildsStateFromStore(t *testing.T) {
 	}
 }
 
+func TestTUI_AutoKeyedPromptsSortBelowExplicit(t *testing.T) {
+	// store.List() returns summaries sorted by ID; buildTUIState must then push
+	// auto-assigned keybinds below explicitly declared ones so the user's chosen
+	// shortcuts stay at the top of the board. "auto-aaa" sorts first by ID but,
+	// being auto-keyed, must render after the explicitly-keybound "explicit-zzz".
+	fs := &fakeStore{
+		summaries: []store.Summary{
+			{ID: "auto-aaa", Key: "1", KeySource: store.KeySourceAuto},
+			{ID: "auto-bbb", Key: "2", KeySource: store.KeySourceAuto},
+			{ID: "explicit-mmm", Key: "m", KeySource: store.KeySourceExplicit},
+			{ID: "explicit-zzz", Key: "z", KeySource: store.KeySourceExplicit},
+		},
+	}
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, fs, rend)
+
+	_, _, err := executeRootWith(t, deps, "tui", "--target-pane", "%0")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+
+	// Clipboard pinned first, then explicit-key rows (alphabetical), then
+	// auto-key rows (alphabetical).
+	var gotIDs []string
+	for _, row := range rend.state.Rows {
+		gotIDs = append(gotIDs, row.PromptID)
+	}
+	wantIDs := []string{"", "explicit-mmm", "explicit-zzz", "auto-aaa", "auto-bbb"}
+	if len(gotIDs) != len(wantIDs) {
+		t.Fatalf("board rows = %v, want %v", gotIDs, wantIDs)
+	}
+	for i, want := range wantIDs {
+		if gotIDs[i] != want {
+			t.Fatalf("row[%d] id = %q, want %q (full order %v)", i, gotIDs[i], want, gotIDs)
+		}
+	}
+}
+
 func TestTUI_StateKeepsShadowedPromptsSearchOnly(t *testing.T) {
 	fs := &fakeStore{
 		summaries: []store.Summary{

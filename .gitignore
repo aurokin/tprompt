@@ -8,3 +8,4 @@ scripts/test/.runtime/
 coverage.txt
 .idea/
 .vscode/
+.claude/scheduled_tasks.lock

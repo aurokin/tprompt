@@ -60,6 +60,17 @@ type Row struct {
 	Shadowed    bool
 }
 
+// DisplayName returns the text shown in the board's name (id) column. Prompt
+// rows show their id; the pinned clipboard row — identified by an empty
+// PromptID, the same sentinel used everywhere else — shows the fixed
+// "clipboard" label so its purpose is legible on the board and in search.
+func (r Row) DisplayName() string {
+	if r.PromptID == "" {
+		return "clipboard"
+	}
+	return r.PromptID
+}
+
 // DisplayDescription returns the text shown in the board's description column.
 func (r Row) DisplayDescription() string {
 	if r.Description != "" {
