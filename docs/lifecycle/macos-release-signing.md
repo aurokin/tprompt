@@ -140,7 +140,7 @@ to the repo.
 For macOS releases on a `v*` tag push, `.github/workflows/release.yml`:
 
 1. **Verify**: asserts the tag base (everything before the first `-`,
-   so `v0.2.0-rc1` → `0.2.0`) matches the `VERSION` file.
+   so `v0.2.1-rc1` → `0.2.1`) matches the `VERSION` file.
 2. **Build matrix** in parallel on native runners
    (`darwin/arm64`, `linux/amd64`, `linux/arm64`), injecting the
    version via `-ldflags -X` and stripping debug info.
@@ -191,7 +191,7 @@ uses [ubi](https://github.com/houseabsolute/ubi) under the hood):
 mise use -g ubi:aurokin/tprompt@latest
 ```
 
-Or pin a specific version (e.g. `mise use -g ubi:aurokin/tprompt@v0.2.0`).
+Or pin a specific version (e.g. `mise use -g ubi:aurokin/tprompt@v0.2.1`).
 
 Or download a tarball from the GitHub Releases page and verify the
 SHA256:
