@@ -78,10 +78,25 @@ func RunCLI(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	cmd.SetErr(stderr)
 	cmd.SetArgs(dispatchArgs(cmd, args, deps.Env, stdinIsTTY))
 
-	err := cmd.Execute()
+	executedCmd, err := cmd.ExecuteC()
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "tprompt - error: %s\n", err.Error())
-		return ExitCode(err)
+		code := ExitCode(err)
+		// Flag/arg parse errors print only the one-line error (SilenceUsage
+		// suppresses cobra's usage block). Add a one-line --help pointer so
+		// the user can recover without dumping full usage. Require BOTH the
+		// usage exit code AND a cobra-usage string match: a typed error that
+		// ExitCode classifies as prompt/clipboard/etc. (code != ExitUsage)
+		// must not get a misleading flag-help pointer even if its message
+		// coincidentally matches a broad isCobraUsageError pattern.
+		if code == ExitUsage && isCobraUsageError(err) {
+			path := "tprompt"
+			if executedCmd != nil {
+				path = executedCmd.CommandPath()
+			}
+			_, _ = fmt.Fprintf(stderr, "run '%s --help' for usage.\n", path)
+		}
+		return code
 	}
 	return ExitOK
 }
