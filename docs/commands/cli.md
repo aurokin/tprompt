@@ -182,6 +182,28 @@ warn picker command: fzf not found on $PATH (tprompt pick unavailable)
 ok   TUI handoff ready (/home/user/.local/state/tprompt/jobs)
 ```
 
+### `tprompt init`
+
+Prints the tmux configuration needed to launch the popup workflow. It never edits
+your tmux config or touches tmux — it only prints, so you stay in control of your
+files. The printed binding references the canonical `tprompt` command on `$PATH` and
+omits `--config` (see DECISIONS.md §30); a user with a non-default config adds
+`--config` to the printed line themselves.
+
+By default it prints the popup binding plus the two steps to install it.
+
+Flags:
+
+- `--more` — print the full setup menu: the popup binding, the direct paste/send
+  bindings, key customization, and a `tprompt doctor` verification step.
+- `--snippet` — print only the raw binding line, e.g. to append to a config file.
+  Mutually exclusive with `--more`.
+- `--key <letter|digit>` — tmux key to bind the popup to (default `P`). Must be a
+  single ASCII letter or digit; any other value is a usage error (exit 2).
+
+Takes no positional arguments. See `examples/tmux-bindings.md` for the same bindings
+documented for reference.
+
 ## Cancel semantics
 
 When the user cancels an interactive flow (TUI `Esc`, `pick` external cancel), the command exits with **status 0**. Cancellation is a valid outcome, not an error. Scripts should not treat it as a failure.

@@ -1,145 +1,135 @@
+<p align="center">
+  <img src="assets/tprompt-logo.png" alt="tprompt logo" width="480">
+</p>
+<p align="center"><em>A tmux-first CLI for injecting markdown-backed prompts into a target tmux pane.</em></p>
+
 # tprompt
 
-`tprompt` is a tmux-first CLI for injecting markdown-backed prompts into a
-target tmux pane as though the user typed or pasted them.
+`tprompt` keeps your prompts as markdown files and injects the one you pick into a
+target tmux pane — as though you typed or pasted it. The main workflow runs in a tmux
+popup: open the popup, pick a prompt (or the clipboard), and the text lands in the
+pane you started from.
 
-The core workflow is built for tmux popups:
-
-1. Open `tprompt` in a popup.
-2. Select a prompt or the clipboard row.
-3. Let the TUI exit.
-4. A short-lived handoff worker waits until the original target pane is active again.
-5. The selected content is injected into that pane.
-
-That deferred handoff avoids sleep-based popup timing and keeps delivery tied
-to tmux state.
-
-## Quickstart
-
-```bash
-tprompt new code-review              # scaffold ~/.config/tprompt/prompts/code-review.md
-$EDITOR "$(tprompt show code-review | head -1 | cut -d' ' -f2)"  # or just open it
-tprompt list                         # confirm it loads with a board key
-tprompt send code-review --target-pane '#{pane_id}'
-```
-
-`tprompt new` auto-creates the default global prompts directory on first use,
-so a fresh install needs no hand-edited config to start writing prompts. Pass
-`--project` to scaffold a per-repo overlay at `<gitroot>/tprompt/<id>.md`
-instead.
-
-## Core Commands
-
-```bash
-tprompt new code-review
-tprompt new project-only --project
-tprompt list
-tprompt show code-review
-tprompt send code-review
-tprompt paste
-tprompt pick
-tprompt tui --target-pane '#{pane_id}'
-tprompt doctor
-tprompt init
-```
-
-Bare `tprompt` dispatches to `tprompt tui` when stdin is a tty and `$TMUX` is
-set. Outside tmux, it prints help.
-
-To wire the popup workflow into tmux, run `tprompt init` — it prints the exact
-binding to add to your tmux config (it never edits the config itself). See
-[examples/tmux-bindings.md](examples/tmux-bindings.md) for the full set.
-
-## Current Contract
-
-- Prompt source of truth is markdown files loaded from global prompt sources and an optional project overlay.
-- Prompt IDs are filename stems; directories organize files but do not namespace IDs.
-- Duplicate prompt IDs within a source tier are invalid; global/project collisions resolve through the documented priority policy.
-- Frontmatter is metadata only; only the markdown body is delivered.
-- Direct `send` and `paste` deliver synchronously through tmux. They never start, contact, or depend on a background service.
-- TUI selections are submitted to a short-lived handoff worker for verified deferred delivery. The TUI does not require a long-running daemon, does not auto-start one, and still exits before injection.
-- Default delivery mode is bracketed paste via `tmux load-buffer` and `paste-buffer -p`.
-- `type` mode is available as a fallback using `send-keys -l`.
-- `--enter` is opt-in and sends Enter outside the paste wrapper.
-- Clipboard reads are same-host only.
-- Sanitization defaults to `safe`; `off` and `strict` are explicit config/flag choices.
-- Deferred-job failures are surfaced through `tmux display-message` and the configured log.
-
-For the full contract, read [EXPECTATIONS.md](EXPECTATIONS.md).
-
-## Documentation Map
-
-Start with [docs/README.md](docs/README.md). It is the progressive-disclosure
-entrypoint for users, maintainers, and implementation agents.
-
-High-value references:
-
-- [AGENTS.md](AGENTS.md) - agent / contributor entry point (also linked as CLAUDE.md).
-- [DECISIONS.md](DECISIONS.md) - locked product and engineering decisions.
-- [EXPECTATIONS.md](EXPECTATIONS.md) - user-visible behavior contract.
-- [docs/architecture/overview.md](docs/architecture/overview.md) - system shape and data flow.
-- [docs/commands/cli.md](docs/commands/cli.md) - command behavior and exit codes.
-- [docs/implementation/interfaces.md](docs/implementation/interfaces.md) - subsystem seams.
-- [docs/testing/harness.md](docs/testing/harness.md) - proof surfaces and test strategy.
-- [examples/tmux-bindings.md](examples/tmux-bindings.md) - tmux popup binding examples.
-
-Execution tracking lives in Linear. Repo docs are durable harness engineering
-material: behavior contracts, invariants, seams, failure semantics, and proof
-surfaces. Do not keep temporary PRDs or issue breakdowns in the repo after they
-are uploaded to Linear.
+**Requirements:** a working `tmux` install on Linux or macOS. Windows is outside the
+tmux-first workflow.
 
 ## Install
 
-Tagged releases ship signed and notarized macOS Apple Silicon binaries
-plus Linux x86_64 / arm64 tarballs. Install via [mise](https://mise.jdx.dev/)
-(uses [ubi](https://github.com/houseabsolute/ubi)):
+Tagged releases ship signed, notarized macOS Apple Silicon binaries plus Linux
+x86_64 / arm64 tarballs. Install via [mise](https://mise.jdx.dev/) (uses
+[ubi](https://github.com/houseabsolute/ubi)):
 
 ```bash
 mise use -g ubi:aurokin/tprompt@latest
 ```
 
 Or grab a tarball from the [GitHub Releases page](https://github.com/aurokin/tprompt/releases)
-and verify with `shasum -a 256 -c SHA256SUMS` (macOS) or `sha256sum --check SHA256SUMS` (Linux). The macOS binary is
-signed and notarized; see [docs/lifecycle/macos-release-signing.md](docs/lifecycle/macos-release-signing.md)
-for the details.
+and verify it with `shasum -a 256 -c SHA256SUMS` (macOS) or `sha256sum --check SHA256SUMS`
+(Linux). See [docs/lifecycle/macos-release-signing.md](docs/lifecycle/macos-release-signing.md)
+for signing details, or [Building from source](#building-from-source) for a dev build.
 
-For a from-source dev build, follow `Tool Bootstrap` and `make build` below.
-
-## Tool Bootstrap
-
-This repo includes a project-local `mise.toml` for the pinned Go toolchain and
-CLI tooling used by the health gate:
+## Quickstart
 
 ```bash
-mise install
+# 1. Scaffold a prompt — prints the absolute path of the new file.
+tprompt new code-review
+
+# 2. Open it in your editor (paste the path from step 1, or extract it):
+$EDITOR "$(tprompt show code-review | sed -n 's/^Source: //p')"
+
+# 3. Confirm it's discovered.
+tprompt list
+
+# 4. Send it to your current pane to test directly.
+tprompt send code-review
 ```
 
-That installs:
+`tprompt new` auto-creates the default global prompts directory on first use, so a
+fresh install needs no hand-edited config. Pass `--project` to scaffold a per-repo
+overlay at `<gitroot>/tprompt/<id>.md` instead.
 
-- `go 1.26.3`
-- `golangci-lint v2.1.6`
-- `gofumpt v0.7.0`
-- `goimports v0.26.0`
+### Wire up the popup
 
-`make tools` remains available as an alternative bootstrap path.
-
-## Health Gate
+The popup workflow is the point of `tprompt`. Run `tprompt init` to print the exact
+tmux binding — it only prints, and never edits your config:
 
 ```bash
-make check
+tprompt init            # popup binding + install steps
+tprompt init --snippet  # just the binding line, to append to a config file
+tprompt init --more     # also the direct paste/send bindings
 ```
 
-`make check` runs format checking, linting, and the race-enabled test target
-defined in the project `Makefile`. Testscripts execute real `tmux`; see
-[docs/testing/harness.md](docs/testing/harness.md) before running broad test
+The binding it prints looks like:
+
+```tmux
+bind-key P display-popup -E "tprompt tui --target-pane '#{pane_id}' --client-tty '#{client_tty}' --session-id '#{session_id}'"
+```
+
+After you add it and reload tmux, press **prefix + P**: the prompt board opens in a
+popup, you press a prompt's key (or move with `↑`/`↓` and press `Enter`), the popup
+closes, and the prompt is injected into the pane you launched it from. See
+[examples/tmux-bindings.md](examples/tmux-bindings.md) for the full set, including the
+direct paste and send bindings.
+
+## Core Commands
+
+```bash
+tprompt new code-review              # scaffold a global prompt
+tprompt new project-only --project   # scaffold a per-repo overlay prompt
+tprompt list                         # list prompts and their board keys
+tprompt show code-review             # print a resolved prompt + metadata
+tprompt send code-review             # deliver a prompt to a tmux pane
+tprompt paste                        # deliver the clipboard to a tmux pane
+tprompt pick                         # choose a prompt via your external picker (fzf)
+tprompt tui                          # launch the built-in board
+tprompt doctor                       # check environment and config
+tprompt init                         # print the tmux popup binding
+```
+
+Bare `tprompt` dispatches to `tprompt tui` when stdin is a tty and `$TMUX` is set;
+outside tmux it prints help. Full behavior and exit codes:
+[docs/commands/cli.md](docs/commands/cli.md).
+
+## How delivery works
+
+When you pick a row in the TUI, it writes your selection to a private handoff job,
+spawns a short-lived worker, and exits. The worker waits until the target pane is
+actually ready — real tmux state, not a fixed sleep — then injects. Direct `send`
+and `paste` skip the handoff entirely and deliver synchronously. Nothing runs as a
+daemon. For the full data flow, see
+[docs/architecture/overview.md](docs/architecture/overview.md).
+
+## What tprompt guarantees
+
+Prompts are plain markdown (frontmatter is metadata; only the body is delivered).
+Delivery defaults to bracketed paste, sanitization defaults to `safe`, and `tprompt`
+guarantees *verified tmux-targeted delivery* — not that the receiving application
+interprets the text as you intended (a shell will; Vim in normal mode may not). The
+authoritative contract is [EXPECTATIONS.md](EXPECTATIONS.md).
+
+`tprompt` is intentionally narrow: no templating, no prompt composition, no cross-host
+clipboard sync, no GUI. See [EXPECTATIONS.md](EXPECTATIONS.md#non-goals) and
+[docs/roadmap/future-phases.md](docs/roadmap/future-phases.md) for what is deliberately
+out of scope.
+
+## Documentation
+
+Start at [docs/README.md](docs/README.md) — the progressive-disclosure entrypoint that
+routes "I want to change X" to the narrowest doc. Top-level references:
+
+- [EXPECTATIONS.md](EXPECTATIONS.md) — user-visible behavior contract.
+- [DECISIONS.md](DECISIONS.md) — locked product and engineering decisions.
+- [AGENTS.md](AGENTS.md) — contributor and agent entrypoint (also linked as CLAUDE.md).
+
+## Building from source
+
+```bash
+mise install   # pinned Go toolchain + lint/format tooling (see mise.toml)
+make build     # version-stamped binary at bin/tprompt
+make check     # format check + lint + race-enabled tests (the health gate)
+```
+
+For a quick compile check, `go build ./cmd/tprompt`. For the full contributor workflow,
+toolchain, and contracts, start at [AGENTS.md](AGENTS.md). Testscripts execute real
+`tmux`; see [docs/testing/harness.md](docs/testing/harness.md) before running broad test
 targets in a shell with tmux state that matters.
-
-## Out Of Scope
-
-- Prompt templating variables.
-- Cross-host clipboard sync.
-- Remote targets or distributed daemon behavior.
-- Application-specific semantic confirmation.
-- Modifier-key combos for TUI prompt keybinds.
-- Live clipboard preview inside the TUI.
-- GUI or web UI.
