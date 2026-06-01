@@ -10,6 +10,11 @@ target tmux pane — as though you typed or pasted it. The main workflow runs in
 popup: open the popup, pick a prompt (or the clipboard), and the text lands in the
 pane you started from.
 
+<p align="center">
+  <img src="assets/tprompt-board.png" alt="The tprompt prompt board running in a tmux popup" width="800">
+</p>
+<p align="center"><em>The prompt board (<code>tprompt tui</code>): pick a prompt by key or arrows, and it injects into the pane you launched from.</em></p>
+
 **Requirements:** a working `tmux` install on Linux or macOS. Windows is outside the
 tmux-first workflow.
 
