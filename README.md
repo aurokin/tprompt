@@ -1,19 +1,39 @@
 <p align="center">
   <img src="assets/tprompt-logo.png" alt="tprompt logo" width="480">
 </p>
-<p align="center"><em>A tmux-first CLI for injecting markdown-backed prompts into a target tmux pane.</em></p>
+<p align="center"><em>A tmux-first prompt library that follows you into any pane — every coding agent, REPL, and shell, not locked inside one tool's slash commands.</em></p>
 
 # tprompt
 
-`tprompt` keeps your prompts as markdown files and injects the one you pick into a
-target tmux pane — as though you typed or pasted it. The main workflow runs in a tmux
-popup: open the popup, pick a prompt (or the clipboard), and the text lands in the
-pane you started from.
+Coding agents lock their saved prompts inside their own slash commands. `tprompt`
+keeps yours as plain markdown files and injects the one you pick into whatever is
+running in your tmux pane — Claude Code, Codex, aider, a Python REPL, or a bare shell —
+as though you typed or pasted it. Author a prompt once; reach for it in any tool, in any
+terminal emulator that runs tmux. The main workflow runs in a tmux popup: open the
+popup, pick a prompt (or the clipboard), and the text lands in the pane you started
+from.
 
 <p align="center">
   <img src="assets/tprompt-board.png" alt="The tprompt prompt board running in a tmux popup" width="800">
 </p>
 <p align="center"><em>The prompt board (<code>tprompt tui</code>): pick a prompt by key or arrows, and it injects into the pane you launched from.</em></p>
+
+## Why not just use slash commands or skills?
+
+Saved prompts in a coding agent live inside that one agent. Skills go a step further:
+they're designed for the *agent* to invoke on its own. `tprompt` is deliberately the
+other way around — a prompt is delivered only when *you* choose it, verbatim, into
+whatever is in the pane. Some agents let you gate a command to user-only invocation, but
+not all do, and none of them carry that library over to the next tool you open.
+`tprompt` gives you one user-driven prompt board that behaves identically across every
+agent, REPL, and shell.
+
+Because it rides tmux, it rides your remote sessions too: `tprompt` runs on the host
+where tmux runs and reads prompts from that host. SSH into a box, attach to tmux, and
+your prompt board is right there — the same "reconnect from any client" persistence you
+already expect from tmux, now covering your prompts. (Delivery is verified tmux-targeted
+paste; the receiving app still decides how to interpret the text — see
+[What tprompt guarantees](#what-tprompt-guarantees).)
 
 **Requirements:** a working `tmux` install on Linux or macOS. Windows is outside the
 tmux-first workflow.
