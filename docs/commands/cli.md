@@ -18,6 +18,11 @@ frontmatter values are tolerated at load time (see
 `docs/storage/prompt-store.md`), so a freshly scaffolded file loads cleanly
 without further edits.
 
+stdout is exactly the created path (for scripting). When stderr is a
+terminal, an additional hint is printed to stderr pointing at the new file so
+the author remembers to add a body to the otherwise-empty scaffold; piped or
+non-tty runs emit nothing on stderr.
+
 Flags:
 
 - `--project` — scaffold into `<gitroot>/tprompt/` instead of the primary
