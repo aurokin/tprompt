@@ -91,7 +91,7 @@ Triggered by `/`. All prompts (including overflow and shadowed prompts) are sear
 
 The TUI renders a single-line footer showing context-sensitive hints:
 
-- board view: `[/ search]  [Enter select]  [Esc cancel]`, or `[/ search (N more)]  [Enter select]  [Esc cancel]` when overflow exists
+- board view: `press a row's [key] to select  [/ search]  [Enter select]  [Esc cancel]`, or with `[/ search (N more)]` when overflow exists. The leading `press a row's [key] to select` legend is width-aware: it is dropped (functional hints kept) when the full line would exceed the terminal width, so the footer stays one line.
 - search view: `/query    [Esc exit search]  [Enter select]  [N matches]`
 - error view: `clipboard is empty — choose another option  [Esc cancel]`
 
