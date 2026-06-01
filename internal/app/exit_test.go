@@ -95,6 +95,13 @@ func TestExitCodeInvalidNewID(t *testing.T) {
 	}
 }
 
+func TestExitCodeInvalidKey(t *testing.T) {
+	err := &InvalidKeyError{Key: "#"}
+	if got := ExitCode(err); got != ExitUsage {
+		t.Fatalf("ExitCode(InvalidKeyError) = %d, want %d", got, ExitUsage)
+	}
+}
+
 func TestExitCodePromptFileExists(t *testing.T) {
 	err := &PromptFileExistsError{Path: "/prompts/existing.md"}
 	if got := ExitCode(err); got != ExitPrompt {
@@ -140,6 +147,7 @@ func TestExitCodeCobraUsageErrors(t *testing.T) {
 		"bad flag syntax: --=x",
 		`invalid argument "abc" for "--count" flag: strconv.ParseInt: parsing "abc": invalid syntax`,
 		"accepts 1 arg(s), received 0",
+		"if any flags in the group [more snippet] are set none of the others can be; [more snippet] were all set",
 	}
 	for _, msg := range cases {
 		t.Run(msg, func(t *testing.T) {

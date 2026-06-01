@@ -1,0 +1,9 @@
+# `tprompt init --snippet` prints ONLY the raw binding line, so it is safe to
+# redirect into a config file. None of the prose from the default output leaks.
+
+tprompt init --snippet
+stdout '^bind-key P display-popup -E "tprompt tui --target-pane'
+! stdout 'tmux setup'
+! stdout 'tmux source-file'
+! stdout 'init --more'
+! stderr .

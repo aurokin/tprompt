@@ -63,6 +63,7 @@ tmux (or without a tty), bare 'tprompt' prints this help.`,
 		newHandoffCmd(deps),
 		newPickCmd(deps),
 		newNewCmd(deps),
+		newInitCmd(deps),
 	)
 
 	return root

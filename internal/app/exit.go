@@ -44,6 +44,11 @@ func ExitCode(err error) int {
 		return ExitUsage
 	}
 
+	var invalidKey *InvalidKeyError
+	if errors.As(err, &invalidKey) {
+		return ExitUsage
+	}
+
 	var missingDir *store.PromptsDirMissingError
 	if errors.As(err, &missingDir) {
 		return ExitUsage
@@ -195,6 +200,9 @@ func isCobraUsageError(err error) bool {
 	case strings.Contains(msg, "arg(s), received"):
 		return true
 	case strings.Contains(msg, "accepts "):
+		return true
+	case strings.Contains(msg, "none of the others can be"):
+		// cobra MarkFlagsMutuallyExclusive violation, e.g. `init --more --snippet`.
 		return true
 	}
 	return false

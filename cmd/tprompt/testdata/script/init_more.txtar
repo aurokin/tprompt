@@ -1,0 +1,15 @@
+# `tprompt init --more` prints the full menu: the popup binding plus the direct
+# run-shell paste/send bindings, the -E rationale, and the doctor pointer.
+
+tprompt init --more
+stdout 'bind-key P display-popup -E'
+stdout 'run-shell "tprompt paste --target-pane'
+# The direct-send example puts flags before the id and uses -- as an end-of-flags
+# marker, so a prompt id starting with '-' is still parsed as the positional id.
+stdout 'run-shell "tprompt send --target-pane'
+stdout ' -- '
+stdout 'PROMPT_ID'
+stdout 'The -E flag is required'
+stdout 'Append --enter to the paste binding'
+stdout 'tprompt doctor'
+! stderr .

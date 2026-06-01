@@ -40,10 +40,15 @@ tprompt paste
 tprompt pick
 tprompt tui --target-pane '#{pane_id}'
 tprompt doctor
+tprompt init
 ```
 
 Bare `tprompt` dispatches to `tprompt tui` when stdin is a tty and `$TMUX` is
 set. Outside tmux, it prints help.
+
+To wire the popup workflow into tmux, run `tprompt init` — it prints the exact
+binding to add to your tmux config (it never edits the config itself). See
+[examples/tmux-bindings.md](examples/tmux-bindings.md) for the full set.
 
 ## Current Contract
 

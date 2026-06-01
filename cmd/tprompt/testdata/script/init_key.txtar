@@ -1,0 +1,6 @@
+# `--key` rewrites the bound key in the generated binding.
+
+tprompt init --key C --snippet
+stdout '^bind-key C display-popup'
+! stdout 'bind-key P'
+! stderr .

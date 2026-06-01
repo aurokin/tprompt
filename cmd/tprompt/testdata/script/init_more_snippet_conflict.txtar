@@ -1,0 +1,6 @@
+# --more and --snippet are mutually exclusive; passing both fails before any
+# binding is printed.
+
+! tprompt init --more --snippet
+stderr 'tprompt - error:'
+! stdout 'bind-key'
