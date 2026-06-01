@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -80,6 +81,34 @@ func TestNew_HappyPathWritesScaffoldTemplate(t *testing.T) {
 	}
 	if string(body) != scaffoldTemplate {
 		t.Errorf("scaffolded body mismatch\n--- got ---\n%s--- want ---\n%s", body, scaffoldTemplate)
+	}
+}
+
+func TestNew_PrintsAddBodyHintWhenStderrIsTTY(t *testing.T) {
+	dir := t.TempDir()
+	deps := newCmdDeps(t, dir)
+
+	orig := stderrIsTTY
+	stderrIsTTY = func(io.Writer) bool { return true }
+	t.Cleanup(func() { stderrIsTTY = orig })
+
+	stdout, stderr, err := executeRootWith(t, deps, "new", "code-review")
+	if err != nil {
+		t.Fatalf("executeRootWith: %v", err)
+	}
+
+	// stdout stays exactly the created path (scripting contract).
+	abs, err := filepath.Abs(filepath.Join(dir, "code-review.md"))
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	if got := strings.TrimRight(stdout, "\n"); got != abs {
+		t.Errorf("stdout = %q, want %q (hint must not pollute stdout)", got, abs)
+	}
+	// The hint is emitted on stderr and points at the created file's path
+	// (self-contained, so it survives stdout redirection).
+	if !strings.Contains(stderr, "add your prompt body") || !strings.Contains(stderr, abs) {
+		t.Errorf("stderr = %q, want add-a-body hint naming the created path %q", stderr, abs)
 	}
 }
 

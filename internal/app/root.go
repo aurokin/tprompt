@@ -22,6 +22,17 @@ var stdinIsTTY = func() bool {
 	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
+// stderrIsTTY reports whether the given writer is a terminal. It inspects the
+// writer itself (rather than the global os.Stderr) so unit tests that inject a
+// *bytes.Buffer deterministically get false regardless of the test runner's
+// real stderr. Package-level so the "interactive" branch can be swapped on in
+// tests. Used to tty-gate human-only hints that must not pollute piped stdout
+// or the golden testscripts' empty-stderr assertions.
+var stderrIsTTY = func(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
+}
+
 // NewRootCmd builds the root cobra command with all subcommands registered.
 func NewRootCmd(deps Deps) *cobra.Command {
 	root := &cobra.Command{

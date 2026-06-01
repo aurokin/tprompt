@@ -128,6 +128,16 @@ func runNew(deps Deps, id string, flags newFlags) error {
 		return err
 	}
 	_, _ = fmt.Fprintln(deps.Stdout, target)
+	// The scaffold body is empty, so a freshly-created prompt delivers nothing
+	// until the author fills it in. Nudge them, pointing at the absolute file
+	// path (not a reconstructed `show <id>` command, which would not preserve
+	// --config, could resolve to a shadowing prompt under --project, and would
+	// need shell-quoting for unusual ids). tty-gated to stderr: stdout stays
+	// exactly the path for scripting, and piped/non-tty runs (including the
+	// golden testscripts asserting empty stderr) emit nothing.
+	if stderrIsTTY(deps.Stderr) {
+		_, _ = fmt.Fprintf(deps.Stderr, "now add your prompt body to %s\n", target)
+	}
 	return nil
 }
 
