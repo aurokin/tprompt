@@ -17,9 +17,6 @@ func newHandoffCmd(deps Deps) *cobra.Command {
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			if jobPath == "" {
-				return fmt.Errorf("handoff: --job is required")
-			}
 			cfg, err := deps.LoadHandoffConfig(*deps.ConfigPath)
 			if err != nil {
 				return err
@@ -32,5 +29,8 @@ func newHandoffCmd(deps Deps) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&jobPath, "job", "", "handoff job file")
+	if err := cmd.MarkFlagRequired("job"); err != nil {
+		panic(fmt.Sprintf("handoff: mark --job required: %v", err))
+	}
 	return cmd
 }

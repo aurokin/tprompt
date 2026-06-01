@@ -139,6 +139,7 @@ func TestExitCodeCobraUsageErrors(t *testing.T) {
 	// fails this test loudly rather than silently degrading exit code 2 → 1.
 	cases := []string{
 		`required flag(s) "target-pane" not set`,
+		`required flag(s) "job" not set`,
 		"unknown flag: --nope",
 		"unknown shorthand flag: 'x' in -x",
 		`unknown command "bogus" for "tprompt"`,
