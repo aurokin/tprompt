@@ -298,6 +298,34 @@ func TestView_NonEmptyShowsBoardFooter(t *testing.T) {
 	}
 }
 
+func TestView_BoardFooterShowsKeyLegend(t *testing.T) {
+	m := NewModel(sampleState(), ModelDeps{})
+	m.width = 80
+
+	out := m.View()
+	if !strings.Contains(out, "press a row's [key] to select") {
+		t.Fatalf("board footer must show the [key] legend (AUR-449). Got:\n%s", out)
+	}
+	// The legend leads the line but must not displace the existing hints.
+	if !strings.Contains(out, "[/ search]") || !strings.Contains(out, "[Esc cancel]") {
+		t.Fatalf("legend must not displace existing footer hints. Got:\n%s", out)
+	}
+}
+
+func TestView_BoardFooterLegendDroppedWhenNarrow(t *testing.T) {
+	m := NewModel(sampleState(), ModelDeps{})
+	m.width = 40 // legend + hints would exceed one footer line at this width
+
+	out := m.View()
+	if strings.Contains(out, "press a row's [key]") {
+		t.Fatalf("legend must be dropped when it would overflow the footer line. Got:\n%s", out)
+	}
+	// The functional hints must survive when the legend is dropped.
+	if !strings.Contains(out, "[Esc cancel]") {
+		t.Fatalf("functional hints must survive when legend is dropped. Got:\n%s", out)
+	}
+}
+
 func TestView_NonEmptyFooterUsesResolvedReservedKeys(t *testing.T) {
 	state := sampleState()
 	state.Reserved.Search = ReservedBinding{Symbolic: "Tab"}

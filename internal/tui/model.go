@@ -743,7 +743,41 @@ func (m Model) footerHints() string {
 	if cancel := footerHint(m.state.Reserved.Cancel, "cancel"); cancel != "" {
 		parts = append(parts, cancel)
 	}
-	return strings.Join(parts, "  ")
+	hints := strings.Join(parts, "  ")
+	return m.withKeyLegend(hints)
+}
+
+// withKeyLegend prepends a legend telling users each board row's bracketed
+// [key] (e.g. `[c]`) is pressable — the primary, otherwise-undiscoverable
+// selection mechanism (AUR-449). The legend is only added when the whole
+// footer line still fits the current width: rowsPerFrame reserves exactly one
+// footer line (footerLines = 1), so a wrapped footer would push the bottom
+// board row out of view. Under width pressure (narrow terminal, large overflow
+// `(N more)` suffix, or a long inline error) the legend is dropped — never the
+// functional hints.
+func (m Model) withKeyLegend(hints string) string {
+	const legend = "press a row's [key] to select"
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	// Model the exact rendered footer width: footer() prepends the inline
+	// error with a two-space separator when present, and the legend is joined
+	// to the hints with two spaces only when hints are non-empty.
+	full := lipgloss.Width(legend)
+	if hints != "" {
+		full += 2 + lipgloss.Width(hints)
+	}
+	if m.inlineError != "" {
+		full += lipgloss.Width(m.inlineError) + 2
+	}
+	if full > width {
+		return hints
+	}
+	if hints == "" {
+		return legend
+	}
+	return legend + "  " + hints
 }
 
 // boardSearchHint returns the `[/ search]` hint with ` (N more)` suffixed
