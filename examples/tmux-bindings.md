@@ -1,6 +1,15 @@
 # Example tmux Bindings
 
-These are examples for the implementation docs, not locked syntax.
+`tprompt init` prints these bindings generated from the binary itself, so they
+always match the current flags — run it for copy-paste-ready setup:
+
+```bash
+tprompt init            # popup binding + install steps
+tprompt init --more     # also the direct paste/send bindings below
+tprompt init --snippet  # just the binding line, e.g. to append to a config file
+```
+
+This page documents the same bindings for reference.
 
 ## Tmux-popup binding concept
 
@@ -37,12 +46,11 @@ bind-key V run-shell "tprompt paste --target-pane '#{pane_id}' --enter"
 For users who want a specific prompt bound to a key outside the TUI:
 
 ```tmux
-bind-key R run-shell "tprompt send code-review --target-pane '#{pane_id}'"
+bind-key R run-shell "tprompt send --target-pane '#{pane_id}' -- 'code-review'"
 ```
 
 ## Notes
 
-- exact flags may change during implementation
 - preserve enough original context to verify the correct target later
 - avoid relying only on "current pane at TUI close time"
 - `display-popup -E` is required so the tmux popup tears down when the wrapped command exits

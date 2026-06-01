@@ -13,6 +13,15 @@ import (
 	"github.com/hsadler/tprompt/internal/tui"
 )
 
+// Flag names for the tui command. Shared as constants so `tprompt init` can
+// build the popup binding from the same flag names this command registers,
+// keeping the printed binding from drifting away from the real flags.
+const (
+	flagTargetPane = "target-pane"
+	flagClientTTY  = "client-tty"
+	flagSessionID  = "session-id"
+)
+
 // tuiFlags captures the --target-pane / --client-tty / --session-id inputs.
 // Deprecated daemon auto-start flags are still accepted for compatibility but
 // no longer affect execution.
@@ -46,12 +55,12 @@ from a tmux popup binding that passes the originating context, e.g.:
 			return runTUI(deps, f)
 		},
 	}
-	cmd.Flags().StringVar(&f.targetPane, "target-pane", "", "tmux pane ID to deliver into (required)")
-	cmd.Flags().StringVar(&f.clientTTY, "client-tty", "", "originating tmux client TTY for failure banners")
-	cmd.Flags().StringVar(&f.sessionID, "session-id", "", "originating tmux session ID for delivery context")
+	cmd.Flags().StringVar(&f.targetPane, flagTargetPane, "", "tmux pane ID to deliver into (required)")
+	cmd.Flags().StringVar(&f.clientTTY, flagClientTTY, "", "originating tmux client TTY for failure banners")
+	cmd.Flags().StringVar(&f.sessionID, flagSessionID, "", "originating tmux session ID for delivery context")
 	cmd.Flags().BoolVar(&f.daemonAutoStart, "daemon-auto-start", true, "deprecated; TUI no longer uses a daemon")
 	cmd.Flags().BoolVar(&f.noDaemonAutoStart, "no-daemon-auto-start", false, "deprecated; TUI no longer uses a daemon")
-	if err := cmd.MarkFlagRequired("target-pane"); err != nil {
+	if err := cmd.MarkFlagRequired(flagTargetPane); err != nil {
 		panic(fmt.Sprintf("tui: mark --target-pane required: %v", err))
 	}
 	cmd.PreRun = func(c *cobra.Command, _ []string) {

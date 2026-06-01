@@ -1,0 +1,10 @@
+# `tprompt init` prints the canonical popup binding plus the two install steps,
+# and points at --more / --snippet. No config or prompts dir required.
+
+tprompt init
+stdout 'bind-key P display-popup -E'
+stdout 'tprompt tui --target-pane'
+stdout 'tmux source-file'
+stdout 'tprompt init --more'
+stdout 'tprompt init --snippet'
+! stderr .

@@ -16,7 +16,7 @@ import (
 
 func TestRootCmdRegistersAllSubcommands(t *testing.T) {
 	root := NewRootCmd(fakeDeps(t))
-	want := []string{"list", "show", "send", "paste", "doctor", "tui", "pick", "new"}
+	want := []string{"list", "show", "send", "paste", "doctor", "tui", "pick", "new", "init"}
 	have := map[string]bool{}
 	for _, c := range root.Commands() {
 		have[c.Name()] = true

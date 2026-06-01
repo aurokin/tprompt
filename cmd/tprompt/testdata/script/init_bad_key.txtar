@@ -1,0 +1,17 @@
+# `--key` must be a single letter or digit. Other printable runes (empty, '#',
+# space, quotes) are usage errors so the generated binding can never be a line
+# tmux misparses. The error is a flag error, so it must not carry the config
+# file's "config:" prefix.
+
+! tprompt init --key ''
+stderr 'tprompt - error:'
+stderr 'invalid --key'
+stderr 'single letter or digit'
+! stderr 'config:'
+! stdout .
+
+! tprompt init --key '#'
+stderr 'invalid --key'
+stderr 'single letter or digit'
+! stderr 'config:'
+! stdout .
