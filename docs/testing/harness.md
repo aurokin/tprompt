@@ -194,6 +194,8 @@ Assert:
 - prompt keypresses submit the correct prompt
 - clipboard keypress reads and validates clipboard content asynchronously
 - inline errors persist or clear according to user-visible action rules
+- a set `State.Banner` renders as a header line in both board and search modes
+  and reserves matching viewport height; no banner leaves viewport math unchanged
 
 ### CLI And App Layer
 
@@ -210,6 +212,9 @@ Assert:
 - cancellation exits with status 0
 - direct sends do not require handoff state
 - TUI preflight checks happen in the documented order
+- `tui` without `--target-pane` enters direct mode only when `$TMUX_PANE` is
+  confirmed in `tmux list-panes -a` (resolved before the config/store
+  pre-flight); otherwise it exits with a usage error pointing at `tprompt init`
 
 ## Optional Live Tmux Checks
 
