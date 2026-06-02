@@ -12,7 +12,9 @@ The core workflow is built for tmux popups:
 5. The selected content is injected into that pane.
 
 That deferred handoff avoids sleep-based popup timing and keeps delivery tied
-to tmux state.
+to tmux state. Nothing is injected while the popup is still open — the worker
+waits until it closes and the target pane is active again, so the brief pause
+before the prompt lands is expected, not a failure.
 
 ## Quickstart
 
@@ -20,8 +22,12 @@ to tmux state.
 tprompt new code-review              # scaffold ~/.config/tprompt/prompts/code-review.md
 $EDITOR "$(tprompt show code-review | head -1 | cut -d' ' -f2)"  # or just open it
 tprompt list                         # confirm it loads with a board key
-tprompt send code-review --target-pane '#{pane_id}'
+tprompt send code-review --target-pane "$TMUX_PANE"  # $TMUX_PANE = your current pane inside tmux
 ```
+
+The shell example uses `$TMUX_PANE` because your shell expands it to the current
+pane. In a tmux *binding*, use the literal `#{pane_id}` instead — tmux expands
+that at trigger time. See [examples/tmux-bindings.md](examples/tmux-bindings.md).
 
 `tprompt new` auto-creates the default global prompts directory on first use,
 so a fresh install needs no hand-edited config to start writing prompts. Pass
@@ -38,7 +44,7 @@ tprompt show code-review
 tprompt send code-review
 tprompt paste
 tprompt pick
-tprompt tui --target-pane '#{pane_id}'
+tprompt tui                          # or --target-pane <id>; from a tmux binding pass '#{pane_id}'
 tprompt doctor
 tprompt init
 ```
@@ -90,9 +96,27 @@ are uploaded to Linear.
 
 ## Install
 
-Tagged releases ship signed and notarized macOS Apple Silicon binaries
-plus Linux x86_64 / arm64 tarballs. Install via [mise](https://mise.jdx.dev/)
-(uses [ubi](https://github.com/houseabsolute/ubi)):
+### Requirements
+
+- **tmux** is required — `tprompt` delivers into tmux panes by shelling out to `tmux`.
+- **Clipboard** (for `tprompt paste` and the TUI clipboard row): macOS has
+  `pbpaste` built in; on Linux install one of `wl-paste` (Wayland), `xclip`, or
+  `xsel`. `send`-only workflows need no clipboard tool.
+
+### Platforms
+
+| Platform | How to install |
+|---|---|
+| macOS Apple Silicon (arm64) | prebuilt signed + notarized binary |
+| Linux x86_64 / arm64 | prebuilt tarball |
+| macOS Intel (amd64) | build from source — no prebuilt binary yet |
+| Windows | out of scope |
+
+### Prebuilt binaries
+
+Tagged releases ship signed and notarized macOS Apple Silicon binaries plus
+Linux x86_64 / arm64 tarballs. Install via [mise](https://mise.jdx.dev/) (uses
+[ubi](https://github.com/houseabsolute/ubi)):
 
 ```bash
 mise use -g ubi:aurokin/tprompt@latest
@@ -103,7 +127,18 @@ and verify with `shasum -a 256 -c SHA256SUMS` (macOS) or `sha256sum --check SHA2
 signed and notarized; see [docs/lifecycle/macos-release-signing.md](docs/lifecycle/macos-release-signing.md)
 for the details.
 
-For a from-source dev build, follow `Tool Bootstrap` and `make build` below.
+> **Note:** releases publish from drafts, so right after a tag push `@latest`
+> can briefly resolve to the previous version (or nothing, for a first release)
+> until the operator publishes the draft. If an install can't find the version,
+> wait for the release to go public.
+
+### From source
+
+```bash
+go install github.com/hsadler/tprompt/cmd/tprompt@latest
+```
+
+For a dev build instead, follow `Tool Bootstrap` and `make build` below.
 
 ## Tool Bootstrap
 
