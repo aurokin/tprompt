@@ -40,8 +40,8 @@ tmux-first workflow.
 
 ## Install
 
-Tagged releases ship signed, notarized macOS Apple Silicon binaries plus Linux
-x86_64 / arm64 tarballs.
+Tagged releases ship signed, notarized macOS (Apple Silicon and Intel) binaries
+plus Linux x86_64 / arm64 tarballs.
 
 With [Homebrew](https://brew.sh/) (taps
 [`aurokin/homebrew-tap`](https://github.com/aurokin/homebrew-tap) and installs

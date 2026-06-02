@@ -10,6 +10,8 @@ Default dispatch: when stdin is a tty **and** `$TMUX` is set, the invocation is 
 
 Because rewriting happens before flag parsing, `tui`'s required `--target-pane` still fires — bare `tprompt` with no flags inside tmux+tty errors clearly with exit 2. This is intentional: see DECISIONS.md §30 and `examples/tmux-bindings.md`.
 
+`tprompt --version` (or the `-v` shorthand) prints the build-stamped version and exits 0 — release builds report the release tag (e.g. `0.3.0`), unstamped dev builds report `dev`. Inside tmux+tty the version flags are recognized before the default-`tui` rewrite, so they behave the same in and out of a popup.
+
 ### `tprompt new <id>`
 
 Scaffolds a new prompt markdown file with every supported frontmatter field
