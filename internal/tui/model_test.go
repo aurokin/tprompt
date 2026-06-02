@@ -239,6 +239,32 @@ func TestRowsPerFrame_BannerReservesHeaderLines(t *testing.T) {
 	}
 }
 
+func TestView_BannerHeaderDoesNotOverflowViewport(t *testing.T) {
+	// Regression guard for the banner header-height accounting. View() renders
+	// renderBanner() + "\n" + body; the "\n" is a line separator, not an extra
+	// line, so total height == Height(banner) + Height(body). headerLines()
+	// returns Height(banner), which is exactly what rowsPerFrame() reserves, so
+	// the rendered view fits within m.height and the bottom row/footer is never
+	// pushed off-screen. sampleState has 4 rows; at height 5 with a one-line
+	// banner, rowsPerFrame is 3 (overflow), the worst case for an off-by-one.
+	state := sampleState()
+	state.Banner = "No popup detected — delivering to the current pane."
+	m := NewModel(state, ModelDeps{})
+	const termHeight = 5
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: termHeight})
+	m = next.(Model)
+
+	lines := strings.Count(m.View(), "\n") + 1
+	if lines > termHeight {
+		t.Fatalf("View rendered %d lines, exceeds terminal height %d — banner header is off by one", lines, termHeight)
+	}
+	// And it should fill the frame exactly (header + rowsPerFrame rows + footer).
+	if want := m.headerLines() + m.rowsPerFrame() + 1; lines != want {
+		t.Fatalf("View rendered %d lines, want %d (header %d + rows %d + footer 1)",
+			lines, want, m.headerLines(), m.rowsPerFrame())
+	}
+}
+
 func TestView_EmptyStoreShowsClipboardHint(t *testing.T) {
 	state := State{
 		Rows: []Row{{Key: 'p', Description: "(read on select)"}},
