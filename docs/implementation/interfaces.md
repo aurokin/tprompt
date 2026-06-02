@@ -24,6 +24,13 @@ TmuxAdapter
 - DisplayMessage(target MessageTarget, message string) -> error
 ```
 
+The shared `TmuxAdapter` interface stays lean. A read-only query needed by a
+single consumer (e.g. `ListKeys` for `doctor`'s popup-binding check) is
+implemented on the concrete `*tmux.Exec` and consumed through a narrow
+consumer-side interface recovered by type assertion — rather than widening
+`TmuxAdapter` and forcing every fake (paste/send/handoff/tmux/delivery tests) to
+grow a method only that one check uses.
+
 ## Clipboard reader
 
 ```text

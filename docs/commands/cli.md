@@ -174,17 +174,22 @@ Checks, in order:
    frontmatter, or duplicate/reserved/malformed `key:` values; reports the
    discovered prompt count on success.
 5. **inside tmux** — `warn` when `$TMUX` is unset.
-6. **clipboard reader** — `warn` when no reader is auto-detected and no
+6. **tmux popup binding** — only when inside tmux: parses `tmux list-keys` and
+   reports `ok` when a key binding's command contains `tprompt`, else `warn ...
+   run 'tprompt init'`. Detection is heuristic (any tprompt-invoking binding
+   counts). Skipped outside tmux, and never a `FAIL` — a missing binding is a
+   nudge, not a blocker. Adapter/query failures degrade to a soft `warn`.
+7. **clipboard reader** — `warn` when no reader is auto-detected and no
    override is configured, or when a configured override is missing on
    `$PATH`. `tprompt send`-only workflows do not need a reader.
-7. **picker command** — `warn` when `picker_command` is empty or its binary is
+8. **picker command** — `warn` when `picker_command` is empty or its binary is
    not on `$PATH`. Only `tprompt pick` needs this.
-8. **TUI handoff ready** — `warn` when the handoff worker cannot be
+9. **TUI handoff ready** — `warn` when the handoff worker cannot be
    constructed. Direct `send`/`paste` are unaffected.
 
-Only the first three checks affect the exit code. Tmux, clipboard, picker, and
-handoff-readiness failures are reported as warnings so a user who only runs
-`tprompt send` is not blocked by missing optional tooling.
+Only the first three checks affect the exit code. Tmux, popup-binding,
+clipboard, picker, and handoff-readiness failures are reported as warnings so a
+user who only runs `tprompt send` is not blocked by missing optional tooling.
 
 Example output:
 
@@ -195,6 +200,7 @@ ok   prompts directory exists (scope global, /home/user/.config/tprompt/prompts)
 ok   project overlay: no project overlay
 ok   4 prompts discovered
 ok   inside tmux
+warn no tmux key binding runs tprompt (run 'tprompt init' to wire the popup)
 ok   clipboard reader: pbpaste (auto-detected, darwin)
 warn picker command: fzf not found on $PATH (tprompt pick unavailable)
 ok   TUI handoff ready (/home/user/.local/state/tprompt/jobs)
