@@ -69,6 +69,16 @@ jobs:
           - os: darwin
             arch: arm64
             runner: macos-14
+          # Intel macOS is cross-compiled on the arm64 macos-14 runner with
+          # CGO disabled (tprompt has no cgo dependencies, so the amd64 build
+          # is pure Go). codesign/notarytool operate on the Mach-O bytes and
+          # sign foreign-arch binaries fine, so the shared darwin sign +
+          # notarize + verify steps below cover this target unchanged. Validate
+          # via workflow_dispatch before tagging if the toolchain changes.
+          - os: darwin
+            arch: amd64
+            runner: macos-14
+            cgo: '0'
           - os: linux
             arch: amd64
             runner: ubuntu-latest
@@ -97,7 +107,16 @@ jobs:
           CGO_ENABLED: ${{ matrix.cgo || '1' }}
         run: |
           mkdir -p "dist/tprompt-${{ matrix.os }}-${{ matrix.arch }}"
-          version=$(cat VERSION)
+          # On a tag push, stamp the exact tag (e.g. 0.2.1-rc1) so `tprompt
+          # --version` distinguishes a prerelease build from the final release;
+          # the verify job already guarantees the tag base matches VERSION. On
+          # workflow_dispatch the ref is a branch (artifacts are never
+          # published), so fall back to the VERSION file.
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(cat VERSION)"
+          fi
           go build -trimpath \
             -ldflags "-s -w -X github.com/hsadler/tprompt/internal/app.appVersion=$version" \
             -o "dist/tprompt-${{ matrix.os }}-${{ matrix.arch }}/tprompt" \
@@ -323,7 +342,6 @@ jobs:
             ### Targets
 
             - `tprompt-darwin-arm64.tar.gz` — macOS Apple Silicon (signed + notarized)
+            - `tprompt-darwin-amd64.tar.gz` — macOS Intel (signed + notarized)
             - `tprompt-linux-amd64.tar.gz` — Linux x86_64
             - `tprompt-linux-arm64.tar.gz` — Linux ARM64
-
-            macOS Intel users: build from source until a future release adds an `amd64` target.

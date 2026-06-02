@@ -68,8 +68,8 @@ real failure.
 ## GitHub Actions secrets
 
 The release workflow (`.github/workflows/release.yml`) signs and
-notarizes only the `darwin/arm64` artifact. Configure these
-repository secrets:
+notarizes the `darwin/arm64` and `darwin/amd64` artifacts. Configure
+these repository secrets:
 
 - `APPLE_DEVELOPER_IDENTITY` — signing identity name, e.g.
   `Developer ID Application: Hunter Sadler (79S467K965)`.
@@ -141,9 +141,10 @@ For macOS releases on a `v*` tag push, `.github/workflows/release.yml`:
 
 1. **Verify**: asserts the tag base (everything before the first `-`,
    so `v0.2.1-rc1` → `0.2.1`) matches the `VERSION` file.
-2. **Build matrix** in parallel on native runners
-   (`darwin/arm64`, `linux/amd64`, `linux/arm64`), injecting the
-   version via `-ldflags -X` and stripping debug info.
+2. **Build matrix** in parallel (`darwin/arm64` and `darwin/amd64`
+   on `macos-14` — `amd64` cross-compiled with CGO disabled — plus
+   `linux/amd64` and `linux/arm64` on native Linux runners),
+   injecting the version via `-ldflags -X` and stripping debug info.
 3. **macOS-only**: imports the Developer ID certificate into a
    temporary keychain, signs via `scripts/sign-macos-binary.sh`,
    stores `tprompt-notary` credentials scoped to that keychain, and
@@ -162,8 +163,10 @@ For macOS releases on a `v*` tag push, `.github/workflows/release.yml`:
    notarization run can't auto-publish a half-broken release.
 
 Linux artifacts are unsigned and pass through without any Apple
-steps. Intel macOS users build from source until a future release
-adds a `darwin/amd64` matrix row.
+steps. Both macOS artifacts are signed and notarized: `darwin/arm64`
+builds natively on `macos-14`, and `darwin/amd64` cross-compiles on
+the same arm64 runner (CGO disabled), then signs and notarizes
+through the shared darwin steps.
 
 ### Testing the workflow before tagging
 
