@@ -1,0 +1,11 @@
+# --version prints the build-stamped version and exits 0. Unstamped test
+# builds report "dev"; release builds inject the real version via ldflags.
+
+tprompt --version
+stdout 'tprompt version'
+! stderr .
+
+# The short form is wired too.
+tprompt -v
+stdout 'tprompt version'
+! stderr .

@@ -68,8 +68,8 @@ real failure.
 ## GitHub Actions secrets
 
 The release workflow (`.github/workflows/release.yml`) signs and
-notarizes only the `darwin/arm64` artifact. Configure these
-repository secrets:
+notarizes the `darwin/arm64` and `darwin/amd64` artifacts. Configure
+these repository secrets:
 
 - `APPLE_DEVELOPER_IDENTITY` — signing identity name, e.g.
   `Developer ID Application: Hunter Sadler (79S467K965)`.
@@ -141,9 +141,10 @@ For macOS releases on a `v*` tag push, `.github/workflows/release.yml`:
 
 1. **Verify**: asserts the tag base (everything before the first `-`,
    so `v0.2.1-rc1` → `0.2.1`) matches the `VERSION` file.
-2. **Build matrix** in parallel on native runners
-   (`darwin/arm64`, `linux/amd64`, `linux/arm64`), injecting the
-   version via `-ldflags -X` and stripping debug info.
+2. **Build matrix** in parallel (`darwin/arm64` and `darwin/amd64`
+   on `macos-14` — `amd64` cross-compiled with CGO disabled — plus
+   `linux/amd64` and `linux/arm64` on native Linux runners),
+   injecting the version via `-ldflags -X` and stripping debug info.
 3. **macOS-only**: imports the Developer ID certificate into a
    temporary keychain, signs via `scripts/sign-macos-binary.sh`,
    stores `tprompt-notary` credentials scoped to that keychain, and
@@ -162,8 +163,10 @@ For macOS releases on a `v*` tag push, `.github/workflows/release.yml`:
    notarization run can't auto-publish a half-broken release.
 
 Linux artifacts are unsigned and pass through without any Apple
-steps. Intel macOS users build from source until a future release
-adds a `darwin/amd64` matrix row.
+steps. Both macOS artifacts are signed and notarized: `darwin/arm64`
+builds natively on `macos-14`, and `darwin/amd64` cross-compiles on
+the same arm64 runner (CGO disabled), then signs and notarizes
+through the shared darwin steps.
 
 ### Testing the workflow before tagging
 
@@ -182,9 +185,32 @@ When the second run completes, `softprops/action-gh-release`
 overwrites the draft's assets — the second run wins, which is the
 correct semantics for a force-pushed tag re-release.
 
+### Homebrew formula bump
+
+Publishing a release (un-drafting it) triggers
+[`.github/workflows/bump-homebrew.yml`](../../.github/workflows/bump-homebrew.yml),
+which regenerates `Formula/tprompt.rb` in
+[`aurokin/homebrew-tap`](https://github.com/aurokin/homebrew-tap) from the
+release's `SHA256SUMS` asset and pushes it. It runs on `release: published`
+(not tag push) because draft assets are auth-gated until the operator
+publishes. It is gated to stable releases only — it skips any release marked
+prerelease or whose tag contains a `-` (e.g. `v0.3.0-rc1`). The cross-repo push
+uses the `HOMEBREW_TAP_TOKEN` secret: a fine-grained PAT scoped to the tap repo
+with `Contents: write`.
+
 ## Install path
 
-Tagged releases are installable via [mise](https://mise.jdx.dev/) (which
+Via [Homebrew](https://brew.sh/) — taps `aurokin/homebrew-tap` and pulls in
+`tmux` as a dependency:
+
+```sh
+brew install aurokin/tap/tprompt
+```
+
+The tap's formula is regenerated on each published release by the
+[Homebrew formula bump](#homebrew-formula-bump) workflow.
+
+Or via [mise](https://mise.jdx.dev/) (which
 uses [ubi](https://github.com/houseabsolute/ubi) under the hood):
 
 ```sh

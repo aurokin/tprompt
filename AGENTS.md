@@ -8,7 +8,8 @@ Go module project (`go.mod`). Pinned via `mise.toml`: Go 1.26.3, `golangci-lint 
 
 | Task | Command |
 |------|---------|
-| Build | `go build ./cmd/tprompt` |
+| Build (quick compile) | `go build ./cmd/tprompt` |
+| Build (release-stamped) | `make build` → writes `bin/tprompt` |
 | Test (one package) | `go test ./internal/<pkg>/` |
 | Test (one func) | `go test -run TestName ./internal/<pkg>/` |
 | Lint (one package) | `golangci-lint run ./internal/<pkg>/...` |
@@ -34,17 +35,15 @@ Testscripts in `cmd/tprompt/testdata/script/*.txtar` exec real `tmux`. Confirm w
 
 - Pick up a Linear issue (project Tprompt, team Aurokin). Branch name is the lowercase issue identifier (e.g., `aur-160`). Do not append the issue title slug.
 - One vertical slice per PR; tests accompany code.
-- Open PR → comment `@codex please review` → address findings → merge with merge commit, delete remote branch.
 - After merging, mark the Linear issue Done.
 - Planning artifacts (PRDs, issue breakdowns) live in the Linear milestone description, not in the repo.
 - Durable repo docs are contracts, decisions, architecture, interfaces, and proof surfaces. Keep them progressively disclosed from `README.md` → `docs/README.md` → narrow subsystem docs.
 
 ## Git safety
 
-- Never force-push to `master`.
+- Never force-push to `main`.
 - Never run `git reset --hard`, `git checkout --`, `git restore .`, or `git clean -f` without explicit user approval.
 - Create new commits rather than amending published commits.
-- Confirm with the user before pushing or opening PRs.
 
 ## Where to look next
 

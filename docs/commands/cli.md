@@ -10,6 +10,8 @@ Default dispatch: when stdin is a tty **and** `$TMUX` is set, the invocation is 
 
 Without `--target-pane`, `tui` enters **direct mode**: it delivers to the current pane and shows a banner nudging popup setup — but only when it can confirm the pane is not a popup (`$TMUX_PANE` resolves and appears in `tmux list-panes -a`). Inside a popup, or on any ambiguity, it exits 2 with a usage error pointing at `tprompt init`. The canonical popup binding passes `#{pane_id}` explicitly and bypasses direct mode. See DECISIONS.md §30 and `examples/tmux-bindings.md`.
 
+`tprompt --version` (or the `-v` shorthand) prints the build-stamped version and exits 0 — release builds report the release tag (e.g. `0.3.0`), unstamped dev builds report `dev`. Inside tmux+tty the version flags are recognized before the default-`tui` rewrite, so they behave the same in and out of a popup.
+
 ### `tprompt new <id>`
 
 Scaffolds a new prompt markdown file with every supported frontmatter field
@@ -205,6 +207,28 @@ ok   clipboard reader: pbpaste (auto-detected, darwin)
 warn picker command: fzf not found on $PATH (tprompt pick unavailable)
 ok   TUI handoff ready (/home/user/.local/state/tprompt/jobs)
 ```
+
+### `tprompt init`
+
+Prints the tmux configuration needed to launch the popup workflow. It never edits
+your tmux config or touches tmux — it only prints, so you stay in control of your
+files. The printed binding references the canonical `tprompt` command on `$PATH` and
+omits `--config` (see DECISIONS.md §30); a user with a non-default config adds
+`--config` to the printed line themselves.
+
+By default it prints the popup binding plus the two steps to install it.
+
+Flags:
+
+- `--more` — print the full setup menu: the popup binding, the direct paste/send
+  bindings, key customization, and a `tprompt doctor` verification step.
+- `--snippet` — print only the raw binding line, e.g. to append to a config file.
+  Mutually exclusive with `--more`.
+- `--key <letter|digit>` — tmux key to bind the popup to (default `P`). Must be a
+  single ASCII letter or digit; any other value is a usage error (exit 2).
+
+Takes no positional arguments. See `examples/tmux-bindings.md` for the same bindings
+documented for reference.
 
 ## Cancel semantics
 

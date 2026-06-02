@@ -41,8 +41,12 @@ var streamIsTTY = func(v any) bool {
 // NewRootCmd builds the root cobra command with all subcommands registered.
 func NewRootCmd(deps Deps) *cobra.Command {
 	root := &cobra.Command{
-		Use:   "tprompt",
-		Short: "Deliver markdown prompts into tmux panes",
+		Use: "tprompt",
+		// Cobra registers both --version and the -v shorthand from this field
+		// (InitDefaultVersionFlag binds -v because it is free at root). Both
+		// forms are exercised by cmd/tprompt/testdata/script/version_flag.txtar.
+		Version: appVersion,
+		Short:   "Deliver markdown prompts into tmux panes",
 		Long: `tprompt delivers markdown prompts into tmux panes. Pick a workflow:
 
   new <id>    Scaffold a new prompt file globally or with --project.
@@ -125,11 +129,18 @@ func dispatchArgs(root *cobra.Command, args []string, env func(string) string, s
 	if env("TMUX") == "" || !stdinTTY() {
 		return args
 	}
-	// Preserve root help output for explicit help flags. Matching on the
-	// literal string "help" is unsafe — it can appear as a flag value such
-	// as `--config help` — so rely on Find for the help-subcommand case.
+	// Preserve root help/version output for those explicit flags. Matching on
+	// the literal string "help" is unsafe — it can appear as a flag value such
+	// as `--config help` — so rely on Find for the help-subcommand case. The
+	// version flags must short-circuit too: otherwise a bare `tprompt
+	// --version` inside tmux+tty would be rewritten to `tui --version`, which
+	// `tui` rejects as an unknown flag. `-v` is the shorthand cobra binds for
+	// --version (InitDefaultVersionFlag, since -v is otherwise free at root —
+	// verified by version_flag.txtar). We match the canonical bare forms only,
+	// mirroring the --help/-h handling above; degenerate spellings such as
+	// `--version=true` are intentionally not special-cased.
 	for _, a := range args {
-		if a == "--help" || a == "-h" {
+		if a == "--help" || a == "-h" || a == "--version" || a == "-v" {
 			return args
 		}
 	}
