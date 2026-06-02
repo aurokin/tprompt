@@ -393,6 +393,12 @@ func findOtherMatchInTree(root, id, target string) (string, error) {
 		if d.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}
+		// path (from an absolute root) and target are both absolute — target is
+		// pre-absolutized by the caller at new.go:119 — so this is an
+		// absolute-vs-absolute comparison. A relative prompts_dir does NOT leave
+		// target relative here, so the target file is never misclassified as an
+		// "other" collision; new_force_overwrite.txtar covers that exact case
+		// (relative prompts_dir + --force overwrite).
 		if strings.TrimSuffix(d.Name(), ".md") == id && path != target {
 			other = path
 			return filepath.SkipAll
