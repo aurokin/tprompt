@@ -46,14 +46,19 @@ func TestDoctorHealthy(t *testing.T) {
 		}
 		return "", exec.ErrNotFound
 	}
+	// $TMUX is set above, so checkPopupBinding runs; give it an adapter whose
+	// list-keys output contains a tprompt binding so the healthy path reports ok.
+	deps.NewTmux = func() (tmux.Adapter, error) {
+		return &fakeAdapter{listKeys: "bind-key -T prefix g run-shell \"tprompt tui\""}, nil
+	}
 	stdout, _, err := executeRootWith(t, deps, "doctor")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	if len(lines) != 9 {
-		t.Fatalf("want 9 lines, got %d:\n%s", len(lines), stdout)
+	if len(lines) != 10 {
+		t.Fatalf("want 10 lines, got %d:\n%s", len(lines), stdout)
 	}
 	assertPrefix(t, lines[0], "ok")
 	assertContains(t, lines[0], "config loaded")
@@ -69,11 +74,13 @@ func TestDoctorHealthy(t *testing.T) {
 	assertPrefix(t, lines[5], "ok")
 	assertContains(t, lines[5], "inside tmux")
 	assertPrefix(t, lines[6], "ok")
-	assertContains(t, lines[6], "clipboard reader: custom-paste (override)")
+	assertContains(t, lines[6], "tmux key binding runs tprompt")
 	assertPrefix(t, lines[7], "ok")
-	assertContains(t, lines[7], "picker command: fzf")
+	assertContains(t, lines[7], "clipboard reader: custom-paste (override)")
 	assertPrefix(t, lines[8], "ok")
-	assertContains(t, lines[8], "TUI handoff ready")
+	assertContains(t, lines[8], "picker command: fzf")
+	assertPrefix(t, lines[9], "ok")
+	assertContains(t, lines[9], "TUI handoff ready")
 }
 
 func TestDoctorNoTmux(t *testing.T) {
@@ -91,6 +98,79 @@ func TestDoctorNoTmux(t *testing.T) {
 	}
 
 	assertContains(t, stdout, "warn not inside tmux")
+	// Outside tmux the binding check is skipped entirely (list-keys needs a
+	// running server); it must not emit any binding line.
+	if strings.Contains(stdout, "key binding runs tprompt") {
+		t.Errorf("binding check should be skipped outside tmux, got:\n%s", stdout)
+	}
+}
+
+// doctorInTmuxDeps builds doctor Deps with $TMUX set and a healthy store, so
+// checkPopupBinding runs. The caller supplies the tmux adapter.
+func doctorInTmuxDeps(t *testing.T, adapter tmux.Adapter, adapterErr error) Deps {
+	t.Helper()
+	dir := t.TempDir()
+	deps := workingDeps(t, &fakeStore{summaries: []store.Summary{{ID: "a"}}})
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{PromptsDir: dir}, nil
+	}
+	deps.Env = func(key string) string {
+		if key == "TMUX" {
+			return "/tmp/tmux-0/default,1,0"
+		}
+		return ""
+	}
+	deps.LookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	deps.NewTmux = func() (tmux.Adapter, error) { return adapter, adapterErr }
+	return deps
+}
+
+func TestDoctorPopupBindingMissingWarns(t *testing.T) {
+	// list-keys output with no tprompt-invoking binding.
+	deps := doctorInTmuxDeps(t, &fakeAdapter{listKeys: "bind-key -T prefix c new-window\nbind-key -T prefix d detach-client\n"}, nil)
+
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err != nil {
+		t.Fatalf("binding check must not affect exit code: %v", err)
+	}
+	assertContains(t, stdout, "warn no tmux key binding runs tprompt")
+	assertContains(t, stdout, "tprompt init")
+	// The binding check is independent of the $TMUX presence check.
+	assertContains(t, stdout, "ok   inside tmux")
+}
+
+func TestDoctorPopupBindingPresentOK(t *testing.T) {
+	deps := doctorInTmuxDeps(t, &fakeAdapter{listKeys: "bind-key -T prefix g run-shell \"tprompt tui\"\n"}, nil)
+
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertContains(t, stdout, "ok   tmux key binding runs tprompt")
+	if strings.Contains(stdout, "no tmux key binding") {
+		t.Errorf("present binding should report ok, got:\n%s", stdout)
+	}
+}
+
+func TestDoctorPopupBindingErrorsWarnSoftly(t *testing.T) {
+	cases := []struct {
+		name    string
+		adapter tmux.Adapter
+		err     error
+	}{
+		{name: "adapter construction fails", adapter: nil, err: ErrNotImplemented},
+		{name: "list-keys query fails", adapter: &fakeAdapter{listKeysErr: ErrNotImplemented}, err: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps := doctorInTmuxDeps(t, tc.adapter, tc.err)
+			stdout, _, err := executeRootWith(t, deps, "doctor")
+			if err != nil {
+				t.Fatalf("binding-check failure must not affect exit code: %v", err)
+			}
+			assertContains(t, stdout, "warn could not check tmux key bindings")
+		})
+	}
 }
 
 func TestDoctorNoAutoStartEnvIgnored(t *testing.T) {

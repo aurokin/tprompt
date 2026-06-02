@@ -1,0 +1,26 @@
+# Real tmux end-to-end: doctor detects a key binding that invokes tprompt by
+# parsing `tmux list-keys`. doctor runs INSIDE a private, config-less server
+# (`-f /dev/null`) so tmux sets $TMUX itself (a hand-forged $TMUX is ignored by
+# tmux when its pid field is stale). The only binding whose command contains
+# "tprompt" is the one added here, so the assertion is deterministic.
+
+[!exec:tmux] skip
+
+env TMUX_TMPDIR=$SHORT_TMPDIR
+mkdir prompts
+
+exec tmux -L tpd -f /dev/null new-session -d -s s
+exec tmux -L tpd bind-key g run-shell 'tprompt tui'
+
+# Run doctor in a window of that server (so $TMUX points at it), capture output,
+# then signal completion so the assertion runs only after doctor has finished.
+exec tmux -L tpd new-window -t s 'tprompt doctor --config config.toml >out.txt 2>&1; tmux -L tpd wait-for -S doctordone'
+exec tmux -L tpd wait-for doctordone
+
+grep 'ok   inside tmux' out.txt
+grep 'ok   tmux key binding runs tprompt' out.txt
+
+exec tmux -L tpd kill-server
+
+-- config.toml --
+prompts_dir = "prompts"

@@ -313,6 +313,32 @@ func TestExec_CurrentContextEnvError(t *testing.T) {
 	}
 }
 
+func TestExec_ListKeys(t *testing.T) {
+	want := "bind-key -T prefix g run-shell \"tprompt tui\"\n"
+	fr := &fakeRunner{stdoutOn: map[string][]byte{"list-keys": []byte(want)}}
+	e := newTestExec(fr)
+	out, err := e.ListKeys(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if out != want {
+		t.Fatalf("out = %q, want %q", out, want)
+	}
+	if len(fr.calls) != 1 || fr.calls[0].Argv[0] != "list-keys" {
+		t.Fatalf("expected a single list-keys call, got %+v", fr.calls)
+	}
+}
+
+func TestExec_ListKeysEnvError(t *testing.T) {
+	fr := &fakeRunner{errOn: map[string]error{"list-keys": errors.New("no server running")}}
+	e := newTestExec(fr)
+	_, err := e.ListKeys(context.Background())
+	var envErr *EnvError
+	if !errors.As(err, &envErr) {
+		t.Fatalf("want EnvError, got %T: %v", err, err)
+	}
+}
+
 func TestExec_IsTargetSelectedUsesOriginatingClientContext(t *testing.T) {
 	fr := &fakeRunner{stdoutOn: map[string][]byte{
 		"display-message": []byte("$1|@2|%3\n"),

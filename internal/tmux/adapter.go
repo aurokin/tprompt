@@ -62,6 +62,21 @@ func (e *Exec) CurrentContext() (TargetContext, error) {
 	}, nil
 }
 
+// ListKeys returns the raw output of `tmux list-keys`. doctor uses it to detect
+// whether any key binding invokes tprompt. It is deliberately NOT part of the
+// Adapter interface: doctor consumes it through a narrow consumer-side
+// interface and recovers it by type assertion, so the many Adapter fakes need
+// not grow a method only one read-only check uses.
+func (e *Exec) ListKeys(parent context.Context) (string, error) {
+	ctx, cancel := e.timedCtx(parent)
+	defer cancel()
+	out, err := e.runner.Run(ctx, []string{"list-keys"}, nil)
+	if err != nil {
+		return "", &EnvError{Reason: runnerMessage(err)}
+	}
+	return string(out), nil
+}
+
 func (e *Exec) PaneExists(parent context.Context, paneID string) (bool, error) {
 	// tmux display-message with a bogus -t can exit 0 with empty stdout on some
 	// versions, so treat empty output as "does not exist." Only swallow runner

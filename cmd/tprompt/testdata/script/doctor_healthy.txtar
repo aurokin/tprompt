@@ -7,6 +7,9 @@ stdout 'ok   prompts directory exists \(scope global, .*prompts\) \[explicit\]'
 stdout 'ok   2 prompts discovered'
 stdout 'warn not inside tmux'
 stdout 'clipboard reader'
+# Outside tmux the popup-binding check is skipped (list-keys needs a server),
+# so it must not emit any binding line.
+! stdout 'key binding runs tprompt'
 ! stderr .
 
 -- config.toml --
