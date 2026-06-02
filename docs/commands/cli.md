@@ -8,7 +8,7 @@ This file describes the current command surface.
 
 Default dispatch: when stdin is a tty **and** `$TMUX` is set, the invocation is rewritten to `tprompt tui` before cobra parses flags, so a tmux binding can use `tprompt --target-pane '#{pane_id}' ...` instead of `tprompt tui --target-pane '#{pane_id}' ...`. Outside tmux (or without a tty), bare `tprompt` prints help.
 
-Because rewriting happens before flag parsing, `tui`'s required `--target-pane` still fires — bare `tprompt` with no flags inside tmux+tty errors clearly with exit 2. This is intentional: see DECISIONS.md §30 and `examples/tmux-bindings.md`.
+Without `--target-pane`, `tui` enters **direct mode**: it delivers to the current pane and shows a banner nudging popup setup — but only when it can confirm the pane is not a popup (`$TMUX_PANE` resolves and appears in `tmux list-panes -a`). Inside a popup, or on any ambiguity, it exits 2 with a usage error pointing at `tprompt init`. The canonical popup binding passes `#{pane_id}` explicitly and bypasses direct mode. See DECISIONS.md §30 and `examples/tmux-bindings.md`.
 
 ### `tprompt new <id>`
 
@@ -157,7 +157,7 @@ This is distinct from the built-in TUI, which is not configurable. `pick` is a s
 
 ### `tprompt tui`
 
-Launches the built-in interactive TUI, which submits a delivery job to a short-lived handoff worker for deferred injection into the target pane. Typically invoked from a tmux popup, but works in any terminal context. See `docs/commands/tui-flow.md` for the end-to-end flow and `docs/commands/tui.md` for the TUI details.
+Launches the built-in interactive TUI, which submits a delivery job to a short-lived handoff worker for deferred injection into the target pane. Typically invoked from a tmux popup, but works in any terminal context. Pass `--target-pane` to name the destination; omit it to fall back to direct mode against the current pane (subject to the popup-safety rule in the no-subcommand section above). See `docs/commands/tui-flow.md` for the end-to-end flow and `docs/commands/tui.md` for the TUI details.
 
 ### `tprompt doctor`
 
