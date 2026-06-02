@@ -185,9 +185,32 @@ When the second run completes, `softprops/action-gh-release`
 overwrites the draft's assets — the second run wins, which is the
 correct semantics for a force-pushed tag re-release.
 
+### Homebrew formula bump
+
+Publishing a release (un-drafting it) triggers
+[`.github/workflows/bump-homebrew.yml`](../../.github/workflows/bump-homebrew.yml),
+which regenerates `Formula/tprompt.rb` in
+[`aurokin/homebrew-tap`](https://github.com/aurokin/homebrew-tap) from the
+release's `SHA256SUMS` asset and pushes it. It runs on `release: published`
+(not tag push) because draft assets are auth-gated until the operator
+publishes. It is gated to stable releases only — it skips any release marked
+prerelease or whose tag contains a `-` (e.g. `v0.3.0-rc1`). The cross-repo push
+uses the `HOMEBREW_TAP_TOKEN` secret: a fine-grained PAT scoped to the tap repo
+with `Contents: write`.
+
 ## Install path
 
-Tagged releases are installable via [mise](https://mise.jdx.dev/) (which
+Via [Homebrew](https://brew.sh/) — taps `aurokin/homebrew-tap` and pulls in
+`tmux` as a dependency:
+
+```sh
+brew install aurokin/tap/tprompt
+```
+
+The tap's formula is regenerated on each published release by the
+[Homebrew formula bump](#homebrew-formula-bump) workflow.
+
+Or via [mise](https://mise.jdx.dev/) (which
 uses [ubi](https://github.com/houseabsolute/ubi) under the hood):
 
 ```sh

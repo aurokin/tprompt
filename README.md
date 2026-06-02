@@ -41,8 +41,17 @@ tmux-first workflow.
 ## Install
 
 Tagged releases ship signed, notarized macOS Apple Silicon binaries plus Linux
-x86_64 / arm64 tarballs. Install via [mise](https://mise.jdx.dev/) (uses
-[ubi](https://github.com/houseabsolute/ubi)):
+x86_64 / arm64 tarballs.
+
+With [Homebrew](https://brew.sh/) (taps
+[`aurokin/homebrew-tap`](https://github.com/aurokin/homebrew-tap) and installs
+`tmux` as a dependency):
+
+```bash
+brew install aurokin/tap/tprompt
+```
+
+Or with [mise](https://mise.jdx.dev/) (uses [ubi](https://github.com/houseabsolute/ubi)):
 
 ```bash
 mise use -g ubi:aurokin/tprompt@latest
