@@ -49,6 +49,11 @@ func ExitCode(err error) int {
 		return ExitUsage
 	}
 
+	var directModeErr directModeUnavailableError
+	if errors.As(err, &directModeErr) {
+		return ExitUsage
+	}
+
 	var missingDir *store.PromptsDirMissingError
 	if errors.As(err, &missingDir) {
 		return ExitUsage

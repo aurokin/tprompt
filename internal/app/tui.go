@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -44,25 +46,28 @@ Selections spawn a short-lived handoff worker, which waits until this
 TUI process exits and then injects into the target pane. This is
 distinct from 'send' and 'paste', which deliver synchronously.
 
---target-pane is required so the handoff worker knows where to deliver.
-The target pane must still exist when the worker injects. Typically invoked
-from a tmux popup binding that passes the originating context, e.g.:
+Pass --target-pane so the handoff worker knows where to deliver; the target
+pane must still exist when the worker injects. Typically invoked from a tmux
+popup binding that passes the originating context, e.g.:
 
   tprompt tui --target-pane '#{pane_id}' --client-tty '#{client_tty}' \
-    --session-id '#{session_id}'`,
+    --session-id '#{session_id}'
+
+Without --target-pane, the TUI falls back to direct mode and delivers to the
+current pane — but only when it can confirm the pane is not a popup. If it
+cannot (inside a popup, or any ambiguity) it exits with a usage error pointing
+at 'tprompt init'.`,
 		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			return runTUI(deps, f)
 		},
 	}
-	cmd.Flags().StringVar(&f.targetPane, flagTargetPane, "", "tmux pane ID to deliver into (required)")
+	cmd.Flags().StringVar(&f.targetPane, flagTargetPane, "",
+		"tmux pane ID to deliver into; omit to deliver to the current pane (direct mode, requires a non-popup pane)")
 	cmd.Flags().StringVar(&f.clientTTY, flagClientTTY, "", "originating tmux client TTY for failure banners")
 	cmd.Flags().StringVar(&f.sessionID, flagSessionID, "", "originating tmux session ID for delivery context")
 	cmd.Flags().BoolVar(&f.daemonAutoStart, "daemon-auto-start", true, "deprecated; TUI no longer uses a daemon")
 	cmd.Flags().BoolVar(&f.noDaemonAutoStart, "no-daemon-auto-start", false, "deprecated; TUI no longer uses a daemon")
-	if err := cmd.MarkFlagRequired(flagTargetPane); err != nil {
-		panic(fmt.Sprintf("tui: mark --target-pane required: %v", err))
-	}
 	cmd.PreRun = func(c *cobra.Command, _ []string) {
 		f.daemonAutoStartSet = c.Flags().Changed("daemon-auto-start")
 	}
@@ -70,8 +75,28 @@ from a tmux popup binding that passes the originating context, e.g.:
 }
 
 func runTUI(deps Deps, f tuiFlags) error {
-	// Pre-flight chain: config → store → pane. Each step short-circuits
-	// on error so the user sees the most-fundamental broken layer first.
+	// Resolve the delivery target first. With --target-pane this is a pure flag
+	// mapping that makes no tmux calls; without it, direct mode probes tmux to
+	// confirm a non-popup origin pane. Doing this before the config/store/
+	// handoff pre-flight means an unresolvable target (e.g. bare `tprompt` in a
+	// popup, or `tprompt tui` outside tmux) reports the actionable
+	// directModeUnavailable usage error pointing at `tprompt init`, instead of
+	// being masked by an unrelated config/handoff failure — matching the
+	// pre-AUR-446 required-flag timing. NewTmux is a cheap, infallible
+	// construct, so this does not change error ordering for the explicit
+	// --target-pane path (a broken config still surfaces first there).
+	adapter, err := deps.NewTmux()
+	if err != nil {
+		return err
+	}
+	target, banner, err := resolveTUITarget(deps, adapter, f)
+	if err != nil {
+		return err
+	}
+
+	// Pre-flight chain: config → store → handoff client. Each step
+	// short-circuits on error so the user sees the most-fundamental broken
+	// layer first.
 	cfg, err := deps.LoadConfig(*deps.ConfigPath)
 	if err != nil {
 		return err
@@ -91,11 +116,6 @@ func runTUI(deps Deps, f tuiFlags) error {
 		return err
 	}
 
-	adapter, err := deps.NewTmux()
-	if err != nil {
-		return err
-	}
-	target := buildTUITarget(f)
 	exists, err := adapter.PaneExists(context.Background(), target.PaneID)
 	if err != nil {
 		return err
@@ -105,6 +125,7 @@ func runTUI(deps Deps, f tuiFlags) error {
 	}
 
 	state := buildTUIState(summaries, cfg)
+	state.Banner = banner
 	return renderAndDispatchTUI(deps, cfg, s, client, target, state)
 }
 
@@ -228,4 +249,68 @@ func buildTUITarget(f tuiFlags) tmux.TargetContext {
 		ClientTTY: f.clientTTY,
 		Session:   f.sessionID,
 	}
+}
+
+// directModeBanner nudges the user toward the optimal popup flow when the TUI
+// runs in direct mode (delivering straight to the current pane).
+const directModeBanner = "No popup detected — delivering to the current pane. Set up the popup binding for the full flow: tprompt init"
+
+// directModeUnavailableError is returned when the TUI runs without
+// --target-pane and direct mode cannot be confirmed safe: $TMUX_PANE is unset,
+// not present in `tmux list-panes -a` (e.g. a popup or nested/control-mode
+// pane), or the query failed. It maps to ExitUsage. The message is
+// self-contained (points at `tprompt init`) because, unlike a cobra
+// required-flag error, it does not get RunCLI's `--help` pointer line.
+type directModeUnavailableError struct{}
+
+func (directModeUnavailableError) Error() string {
+	return "no target pane: run 'tprompt init' to set up the tmux popup binding, or pass --target-pane <pane-id>"
+}
+
+// paneLister is the narrow consumer-side view of *tmux.Exec.ListPanes that
+// direct-mode resolution needs. Kept off the tmux.Adapter interface (like
+// bindingLister for doctor) so the Adapter fakes need not grow a method only
+// this path uses; recovered from the adapter by type assertion.
+type paneLister interface {
+	ListPanes(ctx context.Context) ([]string, error)
+}
+
+// resolveTUITarget picks the delivery target and any header banner for the TUI.
+//
+// With an explicit --target-pane (the canonical popup binding path) it maps the
+// flags straight through with no banner, so that path carries zero new risk.
+//
+// Without one, it attempts direct mode: deliver to the current pane, but ONLY
+// when it can confirm the pane is not a popup. Inside a `display-popup -E`
+// popup, $TMUX_PANE is the popup's own pane, not the origin (DECISIONS §30), so
+// direct mode requires $TMUX_PANE to resolve AND to appear in
+// `tmux list-panes -a`. On ANY uncertainty (unset env, an adapter without the
+// query, a query error, pane absent, or a failing context probe) it returns
+// directModeUnavailableError (exit 2). Direct mode is opt-in-by-confidence,
+// never a guess.
+func resolveTUITarget(deps Deps, adapter tmux.Adapter, f tuiFlags) (tmux.TargetContext, string, error) {
+	if f.targetPane != "" {
+		return buildTUITarget(f), "", nil
+	}
+	paneID := strings.TrimSpace(deps.Env("TMUX_PANE"))
+	if paneID == "" {
+		return tmux.TargetContext{}, "", directModeUnavailableError{}
+	}
+	lister, ok := adapter.(paneLister)
+	if !ok {
+		return tmux.TargetContext{}, "", directModeUnavailableError{}
+	}
+	panes, err := lister.ListPanes(context.Background())
+	if err != nil || !slices.Contains(panes, paneID) {
+		return tmux.TargetContext{}, "", directModeUnavailableError{}
+	}
+	cur, err := adapter.CurrentContext()
+	if err != nil {
+		return tmux.TargetContext{}, "", directModeUnavailableError{}
+	}
+	// Trust $TMUX_PANE as the origin pane and take session/window/client-tty
+	// from the current context. Outside a popup these agree; pinning PaneID
+	// makes the intent explicit.
+	cur.PaneID = paneID
+	return cur, directModeBanner, nil
 }

@@ -77,6 +77,29 @@ func (e *Exec) ListKeys(parent context.Context) (string, error) {
 	return string(out), nil
 }
 
+// ListPanes returns every pane id known to the server (`tmux list-panes -a`).
+// Direct mode (bare `tprompt` with no --target-pane) uses it to confirm
+// $TMUX_PANE is a real, non-popup pane before targeting it: a popup pane is
+// absent from list-panes -a. Like ListKeys it is deliberately NOT part of the
+// Adapter interface — the one consumer recovers it through a narrow
+// consumer-side interface by type assertion, so the many Adapter fakes need not
+// grow a method only this path uses.
+func (e *Exec) ListPanes(parent context.Context) ([]string, error) {
+	ctx, cancel := e.timedCtx(parent)
+	defer cancel()
+	out, err := e.runner.Run(ctx, []string{"list-panes", "-a", "-F", "#{pane_id}"}, nil)
+	if err != nil {
+		return nil, &EnvError{Reason: runnerMessage(err)}
+	}
+	var panes []string
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			panes = append(panes, line)
+		}
+	}
+	return panes, nil
+}
+
 func (e *Exec) PaneExists(parent context.Context, paneID string) (bool, error) {
 	// tmux display-message with a bogus -t can exit 0 with empty stdout on some
 	// versions, so treat empty output as "does not exist." Only swallow runner

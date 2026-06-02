@@ -186,6 +186,59 @@ func TestUpdate_WindowSizeMsgStoresDimensions(t *testing.T) {
 	}
 }
 
+func TestView_BannerRendersAsHeaderInBoardMode(t *testing.T) {
+	state := sampleState()
+	state.Banner = "No popup detected — delivering to the current pane."
+	m := NewModel(state, ModelDeps{})
+	m.width = 80
+	m.height = 20
+	if !strings.Contains(m.View(), "No popup detected") {
+		t.Fatalf("board view should contain the banner, got:\n%s", m.View())
+	}
+}
+
+func TestView_BannerAlsoShownInSearchMode(t *testing.T) {
+	state := sampleState()
+	state.Banner = "No popup detected — delivering to the current pane."
+	m := NewModel(state, ModelDeps{})
+	m.width = 80
+	m.height = 20
+	m = m.enterSearch()
+	if !strings.Contains(m.View(), "No popup detected") {
+		t.Fatalf("search view should also contain the banner, got:\n%s", m.View())
+	}
+}
+
+func TestView_NoBannerRendersNoHeader(t *testing.T) {
+	m := NewModel(sampleState(), ModelDeps{}) // sampleState has no Banner
+	if m.headerLines() != 0 {
+		t.Fatalf("headerLines = %d, want 0 with no banner", m.headerLines())
+	}
+}
+
+func TestRowsPerFrame_BannerReservesHeaderLines(t *testing.T) {
+	// No banner: headerLines is 0 → rowsPerFrame = height - footer(1).
+	noBanner := NewModel(sampleState(), ModelDeps{})
+	noBanner.width = 80
+	noBanner.height = 10
+	if got := noBanner.rowsPerFrame(); got != 9 {
+		t.Fatalf("no-banner rowsPerFrame = %d, want 9", got)
+	}
+	// A set banner reserves header lines on top of the footer, so the bottom
+	// board row is not pushed off-screen by the prepended banner.
+	state := sampleState()
+	state.Banner = "short banner"
+	withBanner := NewModel(state, ModelDeps{})
+	withBanner.width = 80
+	withBanner.height = 10
+	if withBanner.headerLines() < 1 {
+		t.Fatalf("a set banner must reserve at least one header line, got %d", withBanner.headerLines())
+	}
+	if got, want := withBanner.rowsPerFrame(), 10-withBanner.headerLines()-1; got != want {
+		t.Fatalf("with-banner rowsPerFrame = %d, want %d", got, want)
+	}
+}
+
 func TestView_EmptyStoreShowsClipboardHint(t *testing.T) {
 	state := State{
 		Rows: []Row{{Key: 'p', Description: "(read on select)"}},

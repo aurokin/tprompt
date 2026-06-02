@@ -102,6 +102,12 @@ func TestExitCodeInvalidKey(t *testing.T) {
 	}
 }
 
+func TestExitCodeDirectModeUnavailable(t *testing.T) {
+	if got := ExitCode(directModeUnavailableError{}); got != ExitUsage {
+		t.Fatalf("ExitCode(directModeUnavailableError) = %d, want %d", got, ExitUsage)
+	}
+}
+
 func TestExitCodePromptFileExists(t *testing.T) {
 	err := &PromptFileExistsError{Path: "/prompts/existing.md"}
 	if got := ExitCode(err); got != ExitPrompt {

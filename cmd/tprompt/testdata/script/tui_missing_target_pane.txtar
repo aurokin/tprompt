@@ -1,7 +1,12 @@
-# `tprompt tui` without --target-pane exits 2 with a usage error on stderr.
+# `tprompt tui` without --target-pane and with no confirmable origin pane
+# (outside tmux, so $TMUX_PANE is unset) exits 2 with a usage error pointing at
+# `tprompt init`. AUR-446's direct mode resolves the target before the config/
+# store pre-flight, so this fails fast with the actionable nudge even though the
+# prompts directory in config.toml does not exist here.
 
 ! tprompt tui --config config.toml
 stderr 'target-pane'
+stderr 'tprompt init'
 
 -- config.toml --
 prompts_dir = "prompts"

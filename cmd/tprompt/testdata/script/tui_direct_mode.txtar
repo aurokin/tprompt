@@ -1,0 +1,31 @@
+# Real tmux end-to-end: `tprompt tui` with no --target-pane enters direct mode
+# when run inside a real (non-popup) pane. tmux sets $TMUX_PANE to that pane and
+# the pane appears in `tmux list-panes -a`, so the safety gate passes: the TUI
+# runs (cancel stub) and exits 0 cleanly instead of returning the
+# directModeUnavailable usage error that points at `tprompt init`.
+#
+# tprompt runs INSIDE a private, config-less server (`-f /dev/null`) so tmux
+# sets $TMUX/$TMUX_PANE itself (a hand-forged $TMUX_PANE is ignored). The popup
+# refuse-branch is covered by Go unit tests (a popup pane needs an interactive
+# display-popup that testscript cannot drive).
+
+[!exec:tmux] skip
+
+env TMUX_TMPDIR=$SHORT_TMPDIR
+mkdir prompts
+
+exec tmux -L tpd -f /dev/null new-session -d -s s
+
+# Run tui (no --target-pane) in a window of that server, capture exit code and
+# output, then signal completion so the assertions run after tui has exited.
+exec tmux -L tpd new-window -t s 'TPROMPT_TEST_RENDERER=cancel tprompt tui --config config.toml >out.txt 2>&1; echo rc=$? >>out.txt; tmux -L tpd wait-for -S tuidone'
+exec tmux -L tpd wait-for tuidone
+
+grep 'rc=0' out.txt
+! grep 'tprompt init' out.txt
+
+exec tmux -L tpd kill-server
+
+-- config.toml --
+prompts_dir = "prompts"
+log_path = "missing/delivery.log"
