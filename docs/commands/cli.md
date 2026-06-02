@@ -29,6 +29,18 @@ Flags:
   global prompts directory. Outside any git tree the command fails with a
   clear `no project root found` error so users do not accidentally create a
   stray `tprompt/` folder somewhere unexpected.
+- `--force` — overwrite the target file if it already exists, instead of
+  refusing. Only the exact file `new` would write is overwritten (atomically,
+  via a temp file + rename, so a failed write never loses the original); a
+  same-id prompt in a subdirectory or another source is a duplicate `--force`
+  cannot resolve in place, so the command still refuses those. A `--force`
+  create of a not-yet-existing id behaves like a normal create.
+- `--edit` — open the created file in `$EDITOR` after scaffolding. `$EDITOR` is
+  run as a shell command (a path containing spaces must be quoted, as with
+  git). A clean no-op when `$EDITOR` is unset or stdin/stdout is not a tty, so
+  piped and scripted runs are unaffected. Editing is best-effort: a failing
+  editor is reported on stderr but does not fail the command, since the file
+  was already created.
 
 ID validation (rejected up front, exit 2):
 
@@ -49,7 +61,8 @@ Behavior:
 - Refuses to overwrite if any markdown file under the resolved tier already
   has the same filename stem — even nested in a subdirectory, since
   directories do not namespace IDs. Exits non-zero (exit 3) and names the
-  conflicting path.
+  conflicting path. `--force` overwrites the exact target file; a same-id file
+  at a different path is still refused.
 
 ### `tprompt list`
 
