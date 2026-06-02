@@ -16,20 +16,25 @@ import (
 // wired to their subsystem.
 var ErrNotImplemented = errors.New("not implemented")
 
-// stdinIsTTY reports whether stdin is a terminal. Package-level so tests can
-// swap it without relying on the test runner's stdin.
+// stdinIsTTY reports whether the process stdin is a terminal. Used by the bare
+// `tprompt` → `tui` dispatch (dispatchArgs), which decides before command
+// streams are threaded. Package-level so tests can swap it.
 var stdinIsTTY = func() bool {
 	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
-// stderrIsTTY reports whether the given writer is a terminal. It inspects the
-// writer itself (rather than the global os.Stderr) so unit tests that inject a
-// *bytes.Buffer deterministically get false regardless of the test runner's
-// real stderr. Package-level so the "interactive" branch can be swapped on in
-// tests. Used to tty-gate human-only hints that must not pollute piped stdout
-// or the golden testscripts' empty-stderr assertions.
-var stderrIsTTY = func(w io.Writer) bool {
-	f, ok := w.(*os.File)
+// streamIsTTY reports whether a command stream (one of Deps.Stdin/Stdout/Stderr)
+// is backed by a terminal. It inspects the injected stream itself rather than
+// the process-global FD, so behavior keys off the command's *logical* I/O: a
+// caller that redirects RunCLI's streams gets the documented no-op even with a
+// tty attached to the process, and unit tests that inject a *bytes.Buffer
+// deterministically get false. tty-gated, human-facing behavior — the add-a-
+// body hint and the `new --edit` editor launch — uses this so it never pollutes
+// piped stdout or the golden testscripts' empty-stderr assertions. Accepts any
+// so it serves both io.Reader (stdin) and io.Writer (stdout/stderr); package-
+// level so tests can swap it.
+var streamIsTTY = func(v any) bool {
+	f, ok := v.(*os.File)
 	return ok && term.IsTerminal(int(f.Fd()))
 }
 

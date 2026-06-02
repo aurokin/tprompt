@@ -1,0 +1,31 @@
+# `tprompt new <id> --force` overwrites an existing prompt file instead of
+# refusing, resetting it to a fresh scaffold. stdout stays the created path and
+# the body becomes the template; the result still loads cleanly.
+
+mkdir prompts
+cp existing.md prompts/code-review.md
+
+tprompt new code-review --force --config config.toml
+stdout 'prompts/code-review\.md$'
+! stderr .
+
+cmp prompts/code-review.md want.md
+
+tprompt show code-review --config config.toml
+stdout 'ID: code-review'
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- existing.md --
+# stale body
+
+-- want.md --
+---
+title:
+description:
+tags: []
+key:
+mode:
+enter:
+---

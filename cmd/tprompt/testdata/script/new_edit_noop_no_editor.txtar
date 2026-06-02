@@ -1,0 +1,27 @@
+# `tprompt new --edit` is a clean no-op when stdin is not a tty (piped/CI).
+# Even with $EDITOR set, no editor is launched: the command exits 0, prints the
+# created path, and writes the scaffold normally. $EDITOR points at a binary
+# that would fail if ever executed, so a passing run proves the launch was
+# skipped rather than merely succeeding.
+
+mkdir prompts
+env EDITOR=tprompt-no-such-editor
+
+tprompt new code-review --edit --config config.toml
+stdout 'prompts/code-review\.md$'
+! stderr .
+
+cmp prompts/code-review.md want.md
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- want.md --
+---
+title:
+description:
+tags: []
+key:
+mode:
+enter:
+---
