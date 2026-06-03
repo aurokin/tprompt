@@ -117,14 +117,11 @@ type Model struct {
 	index               *SearchIndex
 }
 
-// headerLines and footerLines are the fixed chrome subtracted from terminal
-// height to compute rowsPerFrame. No header is rendered yet; the footer is a
-// single hint/error line composed by m.footer(). Future slices that grow the
-// chrome (e.g. a multi-line search query line) should update these.
-const (
-	headerLines = 0
-	footerLines = 1
-)
+// footerLines is the fixed chrome subtracted from terminal height to compute
+// rowsPerFrame: a single hint/error line composed by m.footer(). The header is
+// dynamic (see m.headerLines) because the optional direct-mode banner occupies
+// lines only when State.Banner is set.
+const footerLines = 1
 
 // NewModel constructs a Model seeded with the rendered state and deps.
 func NewModel(state State, deps ModelDeps) Model {
@@ -148,11 +145,39 @@ func (m Model) Init() tea.Cmd { return nil }
 // View treats that as "render all rows" so tests without a terminal still
 // see everything.
 func (m Model) rowsPerFrame() int {
-	rpf := m.height - headerLines - footerLines
+	rpf := m.height - m.headerLines() - footerLines
 	if rpf <= 0 {
 		return 0
 	}
 	return rpf
+}
+
+// headerLines is the height of the rendered header chrome. It is zero in the
+// common case (no banner) so existing viewport math is unchanged; when
+// State.Banner is set it equals the banner block's wrapped height so
+// rowsPerFrame reserves exactly the lines View prepends, keeping the bottom
+// board row on screen.
+func (m Model) headerLines() int {
+	if m.state.Banner == "" {
+		return 0
+	}
+	return lipgloss.Height(m.renderBanner())
+}
+
+// renderBanner wraps the direct-mode banner to the current view width. A long
+// banner wraps across lines; headerLines counts those lines so the viewport
+// accounting stays exact at any width.
+func (m Model) renderBanner() string {
+	return bannerStyle.Width(m.viewWidth()).Render(m.state.Banner)
+}
+
+// viewWidth is the effective render width: the terminal width once known, or an
+// 80-column default before the first WindowSizeMsg (so headless tests render).
+func (m Model) viewWidth() int {
+	if m.width <= 0 {
+		return 80
+	}
+	return m.width
 }
 
 // clampScrollOffset returns the scrollOffset that keeps cursor visible in the
@@ -571,16 +596,22 @@ func (m Model) searchAppendRune(r rune) Model {
 	return m
 }
 
-// View renders the mode-appropriate body and footer hint.
+// View renders the optional header banner, the mode-appropriate body, and the
+// footer hint. The banner is prepended in View (not the per-mode helpers) so it
+// shows in both board and search modes and so its height matches what
+// headerLines reserves in rowsPerFrame.
 func (m Model) View() string {
-	width := m.width
-	if width <= 0 {
-		width = 80
-	}
+	width := m.viewWidth()
+	var body string
 	if m.mode == modeSearch {
-		return m.viewSearch(width)
+		body = m.viewSearch(width)
+	} else {
+		body = m.viewBoard(width)
 	}
-	return m.viewBoard(width)
+	if m.state.Banner == "" {
+		return body
+	}
+	return m.renderBanner() + "\n" + body
 }
 
 func (m Model) viewBoard(width int) string {
@@ -670,6 +701,10 @@ func (m Model) visibleRowRange() (int, int) {
 
 var selectedStyle = lipgloss.NewStyle().Reverse(true)
 
+// bannerStyle renders the direct-mode header banner faint so it reads as a
+// nudge rather than a selectable board row.
+var bannerStyle = lipgloss.NewStyle().Faint(true)
+
 func renderRow(row Row, idWidth, descWidth int) string {
 	key := "[" + displayKey(row.Key) + "]"
 	id := padRight(row.DisplayName(), idWidth)
@@ -743,7 +778,41 @@ func (m Model) footerHints() string {
 	if cancel := footerHint(m.state.Reserved.Cancel, "cancel"); cancel != "" {
 		parts = append(parts, cancel)
 	}
-	return strings.Join(parts, "  ")
+	hints := strings.Join(parts, "  ")
+	return m.withKeyLegend(hints)
+}
+
+// withKeyLegend prepends a legend telling users each board row's bracketed
+// [key] (e.g. `[c]`) is pressable — the primary, otherwise-undiscoverable
+// selection mechanism (AUR-449). The legend is only added when the whole
+// footer line still fits the current width: rowsPerFrame reserves exactly one
+// footer line (footerLines = 1), so a wrapped footer would push the bottom
+// board row out of view. Under width pressure (narrow terminal, large overflow
+// `(N more)` suffix, or a long inline error) the legend is dropped — never the
+// functional hints.
+func (m Model) withKeyLegend(hints string) string {
+	const legend = "press a row's [key] to select"
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	// Model the exact rendered footer width: footer() prepends the inline
+	// error with a two-space separator when present, and the legend is joined
+	// to the hints with two spaces only when hints are non-empty.
+	full := lipgloss.Width(legend)
+	if hints != "" {
+		full += 2 + lipgloss.Width(hints)
+	}
+	if m.inlineError != "" {
+		full += lipgloss.Width(m.inlineError) + 2
+	}
+	if full > width {
+		return hints
+	}
+	if hints == "" {
+		return legend
+	}
+	return legend + "  " + hints
 }
 
 // boardSearchHint returns the `[/ search]` hint with ` (N more)` suffixed

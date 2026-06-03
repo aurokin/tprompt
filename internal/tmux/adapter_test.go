@@ -313,6 +313,79 @@ func TestExec_CurrentContextEnvError(t *testing.T) {
 	}
 }
 
+func TestExec_ListKeys(t *testing.T) {
+	want := "bind-key -T prefix g run-shell \"tprompt tui\"\n"
+	fr := &fakeRunner{stdoutOn: map[string][]byte{"list-keys": []byte(want)}}
+	e := newTestExec(fr)
+	out, err := e.ListKeys(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if out != want {
+		t.Fatalf("out = %q, want %q", out, want)
+	}
+	if len(fr.calls) != 1 || fr.calls[0].Argv[0] != "list-keys" {
+		t.Fatalf("expected a single list-keys call, got %+v", fr.calls)
+	}
+}
+
+func TestExec_ListKeysEnvError(t *testing.T) {
+	fr := &fakeRunner{errOn: map[string]error{"list-keys": errors.New("no server running")}}
+	e := newTestExec(fr)
+	_, err := e.ListKeys(context.Background())
+	var envErr *EnvError
+	if !errors.As(err, &envErr) {
+		t.Fatalf("want EnvError, got %T: %v", err, err)
+	}
+}
+
+func TestExec_ListPanes(t *testing.T) {
+	fr := &fakeRunner{stdoutOn: map[string][]byte{"list-panes": []byte("%0\n%1\n%2\n")}}
+	e := newTestExec(fr)
+	panes, err := e.ListPanes(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	want := []string{"%0", "%1", "%2"}
+	if len(panes) != len(want) {
+		t.Fatalf("panes = %v, want %v", panes, want)
+	}
+	for i, p := range want {
+		if panes[i] != p {
+			t.Fatalf("panes[%d] = %q, want %q", i, panes[i], p)
+		}
+	}
+	if len(fr.calls) != 1 || fr.calls[0].Argv[0] != "list-panes" {
+		t.Fatalf("expected a single list-panes call, got %+v", fr.calls)
+	}
+	// -a so the query spans every session/window, not just the current one.
+	if got := strings.Join(fr.calls[0].Argv, " "); got != "list-panes -a -F #{pane_id}" {
+		t.Fatalf("argv = %q", got)
+	}
+}
+
+func TestExec_ListPanesSkipsBlankLines(t *testing.T) {
+	fr := &fakeRunner{stdoutOn: map[string][]byte{"list-panes": []byte("%0\n\n%1\n")}}
+	e := newTestExec(fr)
+	panes, err := e.ListPanes(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(panes) != 2 || panes[0] != "%0" || panes[1] != "%1" {
+		t.Fatalf("panes = %v, want [%%0 %%1]", panes)
+	}
+}
+
+func TestExec_ListPanesEnvError(t *testing.T) {
+	fr := &fakeRunner{errOn: map[string]error{"list-panes": errors.New("no server running")}}
+	e := newTestExec(fr)
+	_, err := e.ListPanes(context.Background())
+	var envErr *EnvError
+	if !errors.As(err, &envErr) {
+		t.Fatalf("want EnvError, got %T: %v", err, err)
+	}
+}
+
 func TestExec_IsTargetSelectedUsesOriginatingClientContext(t *testing.T) {
 	fr := &fakeRunner{stdoutOn: map[string][]byte{
 		"display-message": []byte("$1|@2|%3\n"),

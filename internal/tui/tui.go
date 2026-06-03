@@ -30,6 +30,10 @@ type State struct {
 	Overflow           []Row
 	Reserved           ReservedKeys
 	ClipboardAvailable bool
+	// Banner, when non-empty, is rendered as a header line above the board and
+	// search views. Direct mode (bare `tprompt` delivering to the current pane)
+	// sets it to nudge popup setup; the canonical popup flow leaves it empty.
+	Banner string
 }
 
 // ReservedBinding is a resolved reserved-key role: either a printable rune, a

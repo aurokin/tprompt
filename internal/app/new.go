@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -60,7 +61,7 @@ func (e *PromptFileExistsError) Error() string {
 }
 
 func newNewCmd(deps Deps) *cobra.Command {
-	var project bool
+	var project, edit, force bool
 	cmd := &cobra.Command{
 		Use:   "new <id>",
 		Short: "Scaffold a new prompt file",
@@ -73,24 +74,34 @@ separators, leading dots, empty ids, ids ending in .md, or ids with
 non-printable characters are rejected up front.
 
 If the target file already exists, new refuses to overwrite it and exits
-non-zero. The parent directory is auto-created on first use when it is
-the default global path. With --project, <gitroot>/tprompt is auto-created.
-Explicit prompts_dir paths must already exist.
+non-zero; pass --force to overwrite intentionally. The parent directory is
+auto-created on first use when it is the default global path. With --project,
+<gitroot>/tprompt is auto-created. Explicit prompts_dir paths must already
+exist.
+
+With --edit, the new file is opened in $EDITOR after creation. This is a
+clean no-op when $EDITOR is unset or stdin/stdout is not a tty, and editing is
+best-effort: a failing editor is reported but does not fail the command, since
+the file was already created.
 
 The scaffolded file stubs every supported frontmatter field with an empty
 value so authors can see the schema without consulting docs. Empty
 frontmatter values are ignored at load.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return runNew(deps, args[0], newFlags{project: project})
+			return runNew(deps, args[0], newFlags{project: project, edit: edit, force: force})
 		},
 	}
 	cmd.Flags().BoolVar(&project, "project", false, "write to <gitroot>/tprompt instead of the global prompts directory")
+	cmd.Flags().BoolVar(&edit, "edit", false, "open the new file in $EDITOR after creating it (no-op when $EDITOR is unset or stdin/stdout is not a tty)")
+	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing prompt file instead of refusing")
 	return cmd
 }
 
 type newFlags struct {
 	project bool
+	edit    bool
+	force   bool
 }
 
 func runNew(deps Deps, id string, flags newFlags) error {
@@ -115,20 +126,117 @@ func runNew(deps Deps, id string, flags newFlags) error {
 	if err := ensureScaffoldDir(source.Path, source.AutoCreateOnAccess); err != nil {
 		return err
 	}
-	// Prompt ids are filename stems and the store walks subdirectories, so
-	// any existing `<id>.md` anywhere under source.Path collides — not just
-	// the exact target. Scan first so the user sees a clear error instead
-	// of a silently-broken store on the next list/show.
-	if existing, err := findPromptByIDInSources(collisionSources, source.Scope, id); err != nil {
-		return err
-	} else if existing != "" {
-		return &PromptFileExistsError{ID: id, Path: existing}
+	// Determine collision state. Prompt ids are filename stems and the store
+	// walks subdirectories (and additional sources), so a same-id `.md` anywhere
+	// in this scope collides — not just the exact target.
+	//
+	// The exact target is checked directly (a stat, not a walk) so an unreadable
+	// sibling subtree can never mask an already-taken target: this preserves the
+	// original "first collision wins" error semantics (PromptFileExistsError,
+	// exit 3) instead of leaking a filesystem walk error. A same-id file at any
+	// OTHER path in scope (subdirectory or another source) is a duplicate that
+	// --force cannot overwrite in place, so it refuses even with --force; a
+	// plain create refuses on any collision.
+	targetExisted := pathExists(target)
+	if targetExisted && !flags.force {
+		return &PromptFileExistsError{ID: id, Path: target}
 	}
-	if err := writeScaffold(id, target); err != nil {
+	other, err := findOtherPromptMatch(collisionSources, source.Scope, id, target)
+	if err != nil {
 		return err
 	}
+	if other != "" {
+		return &PromptFileExistsError{ID: id, Path: other}
+	}
+	// Overwrite (atomic rename) only when the target actually existed and
+	// --force was given. A fresh create still goes through the O_EXCL path even
+	// under --force, so a concurrent creator racing in between the scan and the
+	// write is refused rather than silently clobbered.
+	if err := writeScaffold(id, target, flags.force && targetExisted); err != nil {
+		return err
+	}
+	return announceNewFile(deps, target, flags.edit)
+}
+
+// pathExists reports whether p names an existing filesystem entry. Lstat (not
+// Stat) so a symlink counts as present and is compared/replaced as the link
+// itself rather than followed.
+func pathExists(p string) bool {
+	_, err := os.Lstat(p)
+	return err == nil
+}
+
+// announceNewFile prints the created path on stdout (the scripting contract)
+// and then, depending on flags and terminal context, either opens the file in
+// $EDITOR or prints the add-a-body hint on stderr — never both.
+func announceNewFile(deps Deps, target string, edit bool) error {
 	_, _ = fmt.Fprintln(deps.Stdout, target)
+
+	// With --edit, open the scaffold in $EDITOR; a started editor session makes
+	// the add-a-body hint redundant. launchEditor is a clean no-op (returns
+	// false) when $EDITOR is unset or stdin/stdout is not a tty, in which case
+	// the hint below still fires. Editing is best-effort and never aborts `new`
+	// (the file is already created), so launchEditor returns no error.
+	if edit && launchEditor(deps, target) {
+		return nil
+	}
+
+	// The scaffold body is empty, so a freshly-created prompt delivers nothing
+	// until the author fills it in. Nudge them, pointing at the absolute file
+	// path (not a reconstructed `show <id>` command, which would not preserve
+	// --config, could resolve to a shadowing prompt under --project, and would
+	// need shell-quoting for unusual ids). tty-gated to stderr: stdout stays
+	// exactly the path for scripting, and piped/non-tty runs (including the
+	// golden testscripts asserting empty stderr) emit nothing.
+	if streamIsTTY(deps.Stderr) {
+		_, _ = fmt.Fprintf(deps.Stderr, "now add your prompt body to %s\n", target)
+	}
 	return nil
+}
+
+// launchEditor opens target in the user's $EDITOR, reporting whether an editor
+// session was started (true) so the caller can suppress the add-a-body hint. It
+// is a clean no-op (false) when $EDITOR is unset, or when the command's stdin
+// or stdout is not a tty. The tty gate keys off the injected Deps streams (not
+// the process globals) and the editor inherits those same streams, so a caller
+// that redirects RunCLI's I/O gets a consistent no-op rather than an editor
+// leaking onto the real terminal and scribbling into a stdout the scripting
+// contract reserves for the created path.
+//
+// Editing is best-effort: a non-zero editor exit or an unstartable $EDITOR is
+// reported to stderr but never returned as an error, since `new`'s deliverable
+// (the created file) already succeeded.
+func launchEditor(deps Deps, target string) bool {
+	editor := strings.TrimSpace(deps.Env("EDITOR"))
+	if editor == "" || !streamIsTTY(deps.Stdin) || !streamIsTTY(deps.Stdout) {
+		return false
+	}
+	// Run through `sh -c` so $EDITOR is parsed with full shell quoting — values
+	// like `emacsclient -c -a ""` or a quoted path containing spaces work, and
+	// there is no naive strings.Fields split to mishandle them or panic on a
+	// whitespace-only value. `"$@"` passes the validated scaffold path as the
+	// sole positional argument; the editor inherits the command's stdio so it
+	// can drive the terminal.
+	//
+	// $EDITOR is treated as a shell command line, matching the universal
+	// convention (git, less, the freedesktop spec): an executable path that
+	// contains spaces must be quoted in $EDITOR itself (e.g.
+	// EDITOR='"/Applications/Visual Studio Code.app/.../code" --wait'). This is
+	// deliberate — field-splitting the raw value instead would break editors
+	// that carry quoted arguments, which is the opposite (and more common)
+	// failure. Not a bug; do not "fix" by switching to strings.Fields.
+	//
+	// G204: the command is the user's own $EDITOR and the argument is a
+	// validated path in the user's own prompt store — the user explicitly
+	// asking to open their own file in their own editor, not remote input.
+	ed := exec.Command("sh", "-c", editor+` "$@"`, "sh", target) //nolint:gosec
+	ed.Stdin = deps.Stdin
+	ed.Stdout = deps.Stdout
+	ed.Stderr = deps.Stderr
+	if err := ed.Run(); err != nil {
+		_, _ = fmt.Fprintf(deps.Stderr, "tprompt: editor exited with error: %v\n", err)
+	}
+	return true
 }
 
 func scaffoldTargetSources(cfg config.Resolved, flags newFlags) (promptsource.Source, []promptsource.Source, error) {
@@ -210,7 +318,13 @@ func validatePromptSources(sources []promptsource.Source, targetPath string) err
 	return nil
 }
 
-func findPromptByIDInSources(sources []promptsource.Source, scope promptsource.Scope, id string) (string, error) {
+// findOtherPromptMatch returns the path of the first markdown file in the given
+// scope whose filename stem matches id but whose path is not the exact target,
+// or "" if none. It is the duplicate-ID guard: such a file is a collision that
+// --force cannot overwrite in place. The first match short-circuits the walk,
+// both bounding the work and keeping a later unreadable subtree from masking an
+// already-found collision.
+func findOtherPromptMatch(sources []promptsource.Source, scope promptsource.Scope, id, target string) (string, error) {
 	for _, source := range sources {
 		if source.Scope != scope {
 			continue
@@ -220,12 +334,19 @@ func findPromptByIDInSources(sources []promptsource.Source, scope promptsource.S
 		} else if !ok {
 			continue
 		}
-		existing, err := findPromptByID(source.Path, id)
+		// Absolutize the walk root once so matches compare to the absolute
+		// target by string, without a per-entry filepath.Abs that could fail
+		// mid-walk and misclassify the target itself as a collision.
+		root, err := filepath.Abs(source.Path)
+		if err != nil {
+			return "", fmt.Errorf("resolve prompts source path %s: %w", source.Path, err)
+		}
+		other, err := findOtherMatchInTree(root, id, target)
 		if err != nil {
 			return "", err
 		}
-		if existing != "" {
-			return existing, nil
+		if other != "" {
+			return other, nil
 		}
 	}
 	return "", nil
@@ -251,12 +372,14 @@ func promptSourceExists(source promptsource.Source) (bool, error) {
 	return true, nil
 }
 
-// findPromptByID walks root looking for any markdown file whose filename
-// stem matches id, mirroring the discovery rules in internal/store
-// (skip hidden basenames, only `.md` files). Returns the first match or
-// the empty string if none. Walk errors propagate.
-func findPromptByID(root, id string) (string, error) {
-	var found string
+// findOtherMatchInTree walks root (which must be absolute) for the first
+// markdown file whose filename stem matches id at a path other than target,
+// mirroring the store's discovery rules (skip hidden basenames, only `.md`
+// files). It stops at that first match. Comparison is by path, not inode: the
+// duplicate-ID contract is about distinct files at distinct paths, so a
+// hard-linked same-id file is still a collision. Walk errors propagate.
+func findOtherMatchInTree(root, id, target string) (string, error) {
+	var other string
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -270,8 +393,14 @@ func findPromptByID(root, id string) (string, error) {
 		if d.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}
-		if strings.TrimSuffix(d.Name(), ".md") == id {
-			found = path
+		// path (from an absolute root) and target are both absolute — target is
+		// pre-absolutized by the caller at new.go:119 — so this is an
+		// absolute-vs-absolute comparison. A relative prompts_dir does NOT leave
+		// target relative here, so the target file is never misclassified as an
+		// "other" collision; new_force_overwrite.txtar covers that exact case
+		// (relative prompts_dir + --force overwrite).
+		if strings.TrimSuffix(d.Name(), ".md") == id && path != target {
+			other = path
 			return filepath.SkipAll
 		}
 		return nil
@@ -279,13 +408,19 @@ func findPromptByID(root, id string) (string, error) {
 	if walkErr != nil {
 		return "", walkErr
 	}
-	return found, nil
+	return other, nil
 }
 
-// writeScaffold creates target with the scaffold template, refusing to
-// overwrite. O_EXCL closes the TOCTOU window between findPromptByID and the
-// write so a concurrent author cannot lose work.
-func writeScaffold(id, target string) error {
+// writeScaffold creates target with the scaffold template. When overwrite is
+// false it refuses to clobber an existing file: O_EXCL closes the TOCTOU window
+// between the collision scan and the write so a concurrent author cannot lose
+// work. When overwrite is true (the caller confirmed the target already existed
+// and --force was given) it replaces the target atomically (see
+// overwriteScaffold).
+func writeScaffold(id, target string, overwrite bool) error {
+	if overwrite {
+		return overwriteScaffold(target)
+	}
 	// G304: target is composed from the resolved primary prompts directory
 	// and a validated id (validateNewID rejects path separators, .md
 	// suffix, non-printable runes, empty input), so this is a bounded write
@@ -304,5 +439,39 @@ func writeScaffold(id, target string) error {
 	if closeErr := f.Close(); closeErr != nil {
 		return fmt.Errorf("close prompt file %s: %w", target, closeErr)
 	}
+	return nil
+}
+
+// overwriteScaffold replaces target with a fresh scaffold atomically: write the
+// template to a temp file in the same directory, then rename it over target.
+// The original prompt is never unlinked before the new content is durable, so a
+// mid-write failure cannot lose it; and rename replaces a symlinked target
+// entry without following it, so --force cannot clobber a file outside the
+// store the way a truncating open would. The temp name is hidden (leading dot)
+// so the store walk ignores any leftover from an interrupted run.
+func overwriteScaffold(target string) error {
+	dir := filepath.Dir(target)
+	tmp, err := os.CreateTemp(dir, ".tprompt-new-*")
+	if err != nil {
+		return fmt.Errorf("create temp prompt file in %s: %w", dir, err)
+	}
+	tmpName := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write([]byte(scaffoldTemplate)); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp prompt file %s: %w", tmpName, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp prompt file %s: %w", tmpName, err)
+	}
+	if err := os.Rename(tmpName, target); err != nil {
+		return fmt.Errorf("replace prompt file %s: %w", target, err)
+	}
+	committed = true
 	return nil
 }

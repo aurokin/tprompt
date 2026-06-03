@@ -1,10 +1,12 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/hsadler/tprompt/internal/clipboard"
 	"github.com/hsadler/tprompt/internal/config"
@@ -29,6 +31,7 @@ func runDoctor(deps Deps) error {
 	}
 
 	checkTmux(w, env)
+	checkPopupBinding(w, deps, env)
 	if cfgErr == nil {
 		// Clipboard check needs a loaded cfg; earlier prompt/discovery failures
 		// don't affect it.
@@ -165,6 +168,49 @@ func checkTmux(w io.Writer, env func(string) string) {
 	} else {
 		printWarn(w, "not inside tmux")
 	}
+}
+
+// bindingLister is the narrow slice of the tmux adapter that checkPopupBinding
+// needs. Defined consumer-side (not on tmux.Adapter) and recovered by type
+// assertion so adding the list-keys query does not force every Adapter fake to
+// implement it.
+type bindingLister interface {
+	ListKeys(ctx context.Context) (string, error)
+}
+
+// checkPopupBinding warns when no tmux key binding invokes tprompt — the single
+// thing most newcomers miss, on which doctor previously gave false confidence.
+// Warn-only (never FAIL), like the other optional checks, so it does not affect
+// the exit code. Gated on being inside tmux: `list-keys` needs a running
+// server, and checkTmux already reports the not-inside-tmux case, so probing
+// outside tmux would only produce a noisy spurious warning.
+func checkPopupBinding(w io.Writer, deps Deps, env func(string) string) {
+	if env("TMUX") == "" {
+		return
+	}
+	adapter, err := deps.NewTmux()
+	if err != nil || adapter == nil {
+		printWarn(w, "could not check tmux key bindings (tmux adapter unavailable)")
+		return
+	}
+	lister, ok := adapter.(bindingLister)
+	if !ok {
+		printWarn(w, "could not check tmux key bindings (list-keys unsupported)")
+		return
+	}
+	out, err := lister.ListKeys(context.Background())
+	if err != nil {
+		printWarn(w, fmt.Sprintf("could not check tmux key bindings: %v", err))
+		return
+	}
+	// Heuristic per the issue: a binding whose command string contains
+	// "tprompt". Deliberately broad (any tprompt-invoking binding counts) and
+	// warn-only, so a false positive is harmless and a miss only nudges setup.
+	if strings.Contains(out, "tprompt") {
+		printOK(w, "tmux key binding runs tprompt")
+		return
+	}
+	printWarn(w, "no tmux key binding runs tprompt (run 'tprompt init' to wire the popup)")
 }
 
 func checkClipboard(w io.Writer, env func(string) string, lookPath func(string) (string, error), cfg config.Resolved) {

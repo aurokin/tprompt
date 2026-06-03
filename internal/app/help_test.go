@@ -89,7 +89,10 @@ func TestSubcommandHelpText(t *testing.T) {
 	}
 }
 
-func TestTUIRequiredTargetPaneFlagSurfaced(t *testing.T) {
+func TestTUITargetPaneFlagDocumentsDirectMode(t *testing.T) {
+	// --target-pane is no longer a hard-required flag (AUR-446): omitting it
+	// enters direct mode against the current pane. The usage text should say so
+	// rather than advertise "required".
 	root := NewRootCmd(fakeDeps(t))
 	cmd, _, err := root.Find([]string{"tui"})
 	if err != nil {
@@ -99,8 +102,8 @@ func TestTUIRequiredTargetPaneFlagSurfaced(t *testing.T) {
 	if flag == nil {
 		t.Fatal("--target-pane flag missing")
 	}
-	if !strings.Contains(strings.ToLower(flag.Usage), "required") {
-		t.Errorf("--target-pane usage should advertise required, got %q", flag.Usage)
+	if !strings.Contains(strings.ToLower(flag.Usage), "current pane") {
+		t.Errorf("--target-pane usage should describe the direct-mode fallback, got %q", flag.Usage)
 	}
 }
 

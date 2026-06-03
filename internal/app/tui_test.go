@@ -91,23 +91,127 @@ func tuiDeps(t *testing.T, fs *fakeStore, rend tui.Renderer, cfgOverride ...func
 	return deps
 }
 
-func TestTUI_MissingTargetPaneExitsUsage(t *testing.T) {
+func TestTUI_MissingTargetPaneNoOriginPaneExitsUsage(t *testing.T) {
+	// No --target-pane and $TMUX_PANE unset (the default fake Env): direct mode
+	// cannot confirm an origin pane, so runTUI returns directModeUnavailableError
+	// (exit 2) pointing at `tprompt init` instead of running the renderer.
 	fs := &fakeStore{}
 	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
 	deps := tuiDeps(t, fs, rend)
 
 	_, _, err := executeRootWith(t, deps, "tui")
 	if err == nil {
-		t.Fatal("want error for missing --target-pane")
+		t.Fatal("want error when no target pane can be confirmed")
 	}
-	if !strings.Contains(err.Error(), "target-pane") {
-		t.Fatalf("want required-flag error mentioning target-pane, got %v", err)
+	var dm directModeUnavailableError
+	if !errors.As(err, &dm) {
+		t.Fatalf("want directModeUnavailableError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "target-pane") || !strings.Contains(err.Error(), "tprompt init") {
+		t.Fatalf("error should mention --target-pane and 'tprompt init', got %v", err)
 	}
 	if ExitCode(err) != ExitUsage {
 		t.Fatalf("want ExitUsage, got %d", ExitCode(err))
 	}
 	if rend.called {
-		t.Fatal("renderer must not run when required flag is missing")
+		t.Fatal("renderer must not run when direct mode is unavailable")
+	}
+}
+
+func TestTUI_DirectModeDeliversToCurrentPane(t *testing.T) {
+	// $TMUX_PANE resolves AND appears in `list-panes -a` → direct mode: the
+	// renderer runs, the banner is set, and delivery targets the confirmed pane.
+	fs := &fakeStore{}
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	rec := &recordingSubmitter{}
+	deps := tuiDeps(t, fs, rend)
+	deps.Env = func(k string) string {
+		if k == "TMUX_PANE" {
+			return "%4"
+		}
+		return ""
+	}
+	deps.NewTmux = func() (tmux.Adapter, error) {
+		return &fakeAdapter{
+			paneExists:     true,
+			listPanes:      []string{"%0", "%4", "%7"},
+			currentContext: tmux.TargetContext{Session: "$1", Window: "@2", PaneID: "%4", ClientTTY: "/dev/pts/3"},
+		}, nil
+	}
+	deps.NewSubmitter = func(_ config.Resolved, _ store.Store, _ delivery.Client, target tmux.TargetContext) submitter.Submitter {
+		rec.target = target
+		return rec
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui")
+	if err != nil {
+		t.Fatalf("direct mode should succeed, got %v", err)
+	}
+	if !rend.called {
+		t.Fatal("renderer should run in direct mode")
+	}
+	if rend.state.Banner != directModeBanner {
+		t.Fatalf("State.Banner = %q, want direct-mode banner", rend.state.Banner)
+	}
+	if rec.target.PaneID != "%4" {
+		t.Fatalf("target PaneID = %q, want %%4 (from $TMUX_PANE)", rec.target.PaneID)
+	}
+	if rec.target.ClientTTY != "/dev/pts/3" || rec.target.Session != "$1" {
+		t.Fatalf("target should carry CurrentContext session/tty, got %+v", rec.target)
+	}
+}
+
+func TestTUI_DirectModeUnavailableWhenPaneNotListed(t *testing.T) {
+	// $TMUX_PANE is set but absent from `list-panes -a` — the popup case. Direct
+	// mode must refuse rather than deliver to the wrong (popup) pane.
+	fs := &fakeStore{}
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, fs, rend)
+	deps.Env = func(k string) string {
+		if k == "TMUX_PANE" {
+			return "%99"
+		}
+		return ""
+	}
+	deps.NewTmux = func() (tmux.Adapter, error) {
+		return &fakeAdapter{paneExists: true, listPanes: []string{"%0", "%1"}}, nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui")
+	var dm directModeUnavailableError
+	if !errors.As(err, &dm) {
+		t.Fatalf("want directModeUnavailableError, got %T: %v", err, err)
+	}
+	if ExitCode(err) != ExitUsage {
+		t.Fatalf("want ExitUsage, got %d", ExitCode(err))
+	}
+	if rend.called {
+		t.Fatal("renderer must not run when the pane is not a confirmed origin pane")
+	}
+}
+
+func TestTUI_DirectModeUnavailableWhenListPanesErrors(t *testing.T) {
+	// A failed `list-panes` query is treated as uncertainty → refuse direct mode.
+	fs := &fakeStore{}
+	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
+	deps := tuiDeps(t, fs, rend)
+	deps.Env = func(k string) string {
+		if k == "TMUX_PANE" {
+			return "%4"
+		}
+		return ""
+	}
+	deps.NewTmux = func() (tmux.Adapter, error) {
+		return &fakeAdapter{paneExists: true, listPanesErr: &tmux.EnvError{Reason: "no server running"}}, nil
+	}
+
+	_, _, err := executeRootWith(t, deps, "tui")
+	var dm directModeUnavailableError
+	if !errors.As(err, &dm) {
+		t.Fatalf("want directModeUnavailableError, got %T: %v", err, err)
+	}
+	if rend.called {
+		t.Fatal("renderer must not run when the pane query fails")
 	}
 }
 
@@ -334,9 +438,10 @@ func TestTUI_RendererErrorPropagates(t *testing.T) {
 	}
 }
 
-func TestTUI_BareDispatchInTmuxTTYHitsRequiredFlagCheck(t *testing.T) {
-	// Mirrors what RunCLI does: dispatchArgs rewrites bare args to [tui] when
-	// in tmux+tty; cobra then errors on --target-pane before the renderer runs.
+func TestTUI_BareDispatchInTmuxTTYWithoutOriginPaneExitsUsage(t *testing.T) {
+	// Mirrors what RunCLI does: dispatchArgs rewrites bare args to [tui] when in
+	// tmux+tty. With $TMUX set but $TMUX_PANE unset, direct mode cannot confirm
+	// an origin pane, so runTUI exits usage (exit 2) before the renderer runs.
 	rend := &recordingRenderer{result: tui.Result{Action: tui.ActionCancel}}
 	deps := tuiDeps(t, &fakeStore{}, rend)
 	deps.Env = func(k string) string {
@@ -354,13 +459,17 @@ func TestTUI_BareDispatchInTmuxTTYHitsRequiredFlagCheck(t *testing.T) {
 
 	err := root.Execute()
 	if err == nil {
-		t.Fatal("want required-flag error from bare dispatch, got nil")
+		t.Fatal("want direct-mode-unavailable error from bare dispatch, got nil")
+	}
+	var dm directModeUnavailableError
+	if !errors.As(err, &dm) {
+		t.Fatalf("want directModeUnavailableError, got %T: %v", err, err)
 	}
 	if ExitCode(err) != ExitUsage {
 		t.Fatalf("want ExitUsage, got %d (err=%v)", ExitCode(err), err)
 	}
 	if rend.called {
-		t.Fatal("renderer must not run when required flag is missing")
+		t.Fatal("renderer must not run when direct mode is unavailable")
 	}
 }
 

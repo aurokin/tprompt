@@ -22,6 +22,10 @@ type fakeAdapter struct {
 	typeCalls         []typeCall
 	pasteErr          error
 	typeErr           error
+	listKeys          string
+	listKeysErr       error
+	listPanes         []string
+	listPanesErr      error
 }
 
 type pasteCall struct {
@@ -61,6 +65,19 @@ func (f *fakeAdapter) Type(_ context.Context, t tmux.TargetContext, body string,
 }
 
 func (f *fakeAdapter) DisplayMessage(tmux.MessageTarget, string) error { return nil }
+
+// ListKeys satisfies the doctor-side bindingLister interface (not part of
+// tmux.Adapter); checkPopupBinding recovers it by type assertion.
+func (f *fakeAdapter) ListKeys(context.Context) (string, error) {
+	return f.listKeys, f.listKeysErr
+}
+
+// ListPanes satisfies the TUI-side paneLister interface (not part of
+// tmux.Adapter); resolveTUITarget recovers it by type assertion to confirm a
+// non-popup origin pane before entering direct mode.
+func (f *fakeAdapter) ListPanes(context.Context) ([]string, error) {
+	return f.listPanes, f.listPanesErr
+}
 
 func sendDeps(t *testing.T, prompt store.Prompt, adapter *fakeAdapter, cfgOverride ...func(*config.Resolved)) Deps {
 	t.Helper()

@@ -186,6 +186,85 @@ func TestUpdate_WindowSizeMsgStoresDimensions(t *testing.T) {
 	}
 }
 
+func TestView_BannerRendersAsHeaderInBoardMode(t *testing.T) {
+	state := sampleState()
+	state.Banner = "No popup detected — delivering to the current pane."
+	m := NewModel(state, ModelDeps{})
+	m.width = 80
+	m.height = 20
+	if !strings.Contains(m.View(), "No popup detected") {
+		t.Fatalf("board view should contain the banner, got:\n%s", m.View())
+	}
+}
+
+func TestView_BannerAlsoShownInSearchMode(t *testing.T) {
+	state := sampleState()
+	state.Banner = "No popup detected — delivering to the current pane."
+	m := NewModel(state, ModelDeps{})
+	m.width = 80
+	m.height = 20
+	m = m.enterSearch()
+	if !strings.Contains(m.View(), "No popup detected") {
+		t.Fatalf("search view should also contain the banner, got:\n%s", m.View())
+	}
+}
+
+func TestView_NoBannerRendersNoHeader(t *testing.T) {
+	m := NewModel(sampleState(), ModelDeps{}) // sampleState has no Banner
+	if m.headerLines() != 0 {
+		t.Fatalf("headerLines = %d, want 0 with no banner", m.headerLines())
+	}
+}
+
+func TestRowsPerFrame_BannerReservesHeaderLines(t *testing.T) {
+	// No banner: headerLines is 0 → rowsPerFrame = height - footer(1).
+	noBanner := NewModel(sampleState(), ModelDeps{})
+	noBanner.width = 80
+	noBanner.height = 10
+	if got := noBanner.rowsPerFrame(); got != 9 {
+		t.Fatalf("no-banner rowsPerFrame = %d, want 9", got)
+	}
+	// A set banner reserves header lines on top of the footer, so the bottom
+	// board row is not pushed off-screen by the prepended banner.
+	state := sampleState()
+	state.Banner = "short banner"
+	withBanner := NewModel(state, ModelDeps{})
+	withBanner.width = 80
+	withBanner.height = 10
+	if withBanner.headerLines() < 1 {
+		t.Fatalf("a set banner must reserve at least one header line, got %d", withBanner.headerLines())
+	}
+	if got, want := withBanner.rowsPerFrame(), 10-withBanner.headerLines()-1; got != want {
+		t.Fatalf("with-banner rowsPerFrame = %d, want %d", got, want)
+	}
+}
+
+func TestView_BannerHeaderDoesNotOverflowViewport(t *testing.T) {
+	// Regression guard for the banner header-height accounting. View() renders
+	// renderBanner() + "\n" + body; the "\n" is a line separator, not an extra
+	// line, so total height == Height(banner) + Height(body). headerLines()
+	// returns Height(banner), which is exactly what rowsPerFrame() reserves, so
+	// the rendered view fits within m.height and the bottom row/footer is never
+	// pushed off-screen. sampleState has 4 rows; at height 5 with a one-line
+	// banner, rowsPerFrame is 3 (overflow), the worst case for an off-by-one.
+	state := sampleState()
+	state.Banner = "No popup detected — delivering to the current pane."
+	m := NewModel(state, ModelDeps{})
+	const termHeight = 5
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: termHeight})
+	m = next.(Model)
+
+	lines := strings.Count(m.View(), "\n") + 1
+	if lines > termHeight {
+		t.Fatalf("View rendered %d lines, exceeds terminal height %d — banner header is off by one", lines, termHeight)
+	}
+	// And it should fill the frame exactly (header + rowsPerFrame rows + footer).
+	if want := m.headerLines() + m.rowsPerFrame() + 1; lines != want {
+		t.Fatalf("View rendered %d lines, want %d (header %d + rows %d + footer 1)",
+			lines, want, m.headerLines(), m.rowsPerFrame())
+	}
+}
+
 func TestView_EmptyStoreShowsClipboardHint(t *testing.T) {
 	state := State{
 		Rows: []Row{{Key: 'p', Description: "(read on select)"}},
@@ -295,6 +374,34 @@ func TestView_NonEmptyShowsBoardFooter(t *testing.T) {
 	out := m.View()
 	if !strings.Contains(out, "[/ search]") || !strings.Contains(out, "[Esc cancel]") {
 		t.Fatalf("board footer missing. Got:\n%s", out)
+	}
+}
+
+func TestView_BoardFooterShowsKeyLegend(t *testing.T) {
+	m := NewModel(sampleState(), ModelDeps{})
+	m.width = 80
+
+	out := m.View()
+	if !strings.Contains(out, "press a row's [key] to select") {
+		t.Fatalf("board footer must show the [key] legend (AUR-449). Got:\n%s", out)
+	}
+	// The legend leads the line but must not displace the existing hints.
+	if !strings.Contains(out, "[/ search]") || !strings.Contains(out, "[Esc cancel]") {
+		t.Fatalf("legend must not displace existing footer hints. Got:\n%s", out)
+	}
+}
+
+func TestView_BoardFooterLegendDroppedWhenNarrow(t *testing.T) {
+	m := NewModel(sampleState(), ModelDeps{})
+	m.width = 40 // legend + hints would exceed one footer line at this width
+
+	out := m.View()
+	if strings.Contains(out, "press a row's [key]") {
+		t.Fatalf("legend must be dropped when it would overflow the footer line. Got:\n%s", out)
+	}
+	// The functional hints must survive when the legend is dropped.
+	if !strings.Contains(out, "[Esc cancel]") {
+		t.Fatalf("functional hints must survive when legend is dropped. Got:\n%s", out)
 	}
 }
 

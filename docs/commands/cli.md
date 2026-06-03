@@ -8,7 +8,7 @@ This file describes the current command surface.
 
 Default dispatch: when stdin is a tty **and** `$TMUX` is set, the invocation is rewritten to `tprompt tui` before cobra parses flags, so a tmux binding can use `tprompt --target-pane '#{pane_id}' ...` instead of `tprompt tui --target-pane '#{pane_id}' ...`. Outside tmux (or without a tty), bare `tprompt` prints help.
 
-Because rewriting happens before flag parsing, `tui`'s required `--target-pane` still fires — bare `tprompt` with no flags inside tmux+tty errors clearly with exit 2. This is intentional: see DECISIONS.md §30 and `examples/tmux-bindings.md`.
+Without `--target-pane`, `tui` enters **direct mode**: it delivers to the current pane and shows a banner nudging popup setup — but only when it can confirm the pane is not a popup (`$TMUX_PANE` resolves and appears in `tmux list-panes -a`). Inside a popup, or on any ambiguity, it exits 2 with a usage error pointing at `tprompt init`. The canonical popup binding passes `#{pane_id}` explicitly and bypasses direct mode. See DECISIONS.md §30 and `examples/tmux-bindings.md`.
 
 `tprompt --version` (or the `-v` shorthand) prints the build-stamped version and exits 0 — release builds report the release tag (e.g. `0.3.0`), unstamped dev builds report `dev`. Inside tmux+tty the version flags are recognized before the default-`tui` rewrite, so they behave the same in and out of a popup.
 
@@ -20,12 +20,29 @@ frontmatter values are tolerated at load time (see
 `docs/storage/prompt-store.md`), so a freshly scaffolded file loads cleanly
 without further edits.
 
+stdout is exactly the created path (for scripting). When stderr is a
+terminal, an additional hint is printed to stderr pointing at the new file so
+the author remembers to add a body to the otherwise-empty scaffold; piped or
+non-tty runs emit nothing on stderr.
+
 Flags:
 
 - `--project` — scaffold into `<gitroot>/tprompt/` instead of the primary
   global prompts directory. Outside any git tree the command fails with a
   clear `no project root found` error so users do not accidentally create a
   stray `tprompt/` folder somewhere unexpected.
+- `--force` — overwrite the target file if it already exists, instead of
+  refusing. Only the exact file `new` would write is overwritten (atomically,
+  via a temp file + rename, so a failed write never loses the original); a
+  same-id prompt in a subdirectory or another source is a duplicate `--force`
+  cannot resolve in place, so the command still refuses those. A `--force`
+  create of a not-yet-existing id behaves like a normal create.
+- `--edit` — open the created file in `$EDITOR` after scaffolding. `$EDITOR` is
+  run as a shell command (a path containing spaces must be quoted, as with
+  git). A clean no-op when `$EDITOR` is unset or stdin/stdout is not a tty, so
+  piped and scripted runs are unaffected. Editing is best-effort: a failing
+  editor is reported on stderr but does not fail the command, since the file
+  was already created.
 
 ID validation (rejected up front, exit 2):
 
@@ -46,7 +63,8 @@ Behavior:
 - Refuses to overwrite if any markdown file under the resolved tier already
   has the same filename stem — even nested in a subdirectory, since
   directories do not namespace IDs. Exits non-zero (exit 3) and names the
-  conflicting path.
+  conflicting path. `--force` overwrites the exact target file; a same-id file
+  at a different path is still refused.
 
 ### `tprompt list`
 
@@ -141,7 +159,7 @@ This is distinct from the built-in TUI, which is not configurable. `pick` is a s
 
 ### `tprompt tui`
 
-Launches the built-in interactive TUI, which submits a delivery job to a short-lived handoff worker for deferred injection into the target pane. Typically invoked from a tmux popup, but works in any terminal context. See `docs/commands/tui-flow.md` for the end-to-end flow and `docs/commands/tui.md` for the TUI details.
+Launches the built-in interactive TUI, which submits a delivery job to a short-lived handoff worker for deferred injection into the target pane. Typically invoked from a tmux popup, but works in any terminal context. Pass `--target-pane` to name the destination; omit it to fall back to direct mode against the current pane (subject to the popup-safety rule in the no-subcommand section above). See `docs/commands/tui-flow.md` for the end-to-end flow and `docs/commands/tui.md` for the TUI details.
 
 ### `tprompt doctor`
 
@@ -158,17 +176,22 @@ Checks, in order:
    frontmatter, or duplicate/reserved/malformed `key:` values; reports the
    discovered prompt count on success.
 5. **inside tmux** — `warn` when `$TMUX` is unset.
-6. **clipboard reader** — `warn` when no reader is auto-detected and no
+6. **tmux popup binding** — only when inside tmux: parses `tmux list-keys` and
+   reports `ok` when a key binding's command contains `tprompt`, else `warn ...
+   run 'tprompt init'`. Detection is heuristic (any tprompt-invoking binding
+   counts). Skipped outside tmux, and never a `FAIL` — a missing binding is a
+   nudge, not a blocker. Adapter/query failures degrade to a soft `warn`.
+7. **clipboard reader** — `warn` when no reader is auto-detected and no
    override is configured, or when a configured override is missing on
    `$PATH`. `tprompt send`-only workflows do not need a reader.
-7. **picker command** — `warn` when `picker_command` is empty or its binary is
+8. **picker command** — `warn` when `picker_command` is empty or its binary is
    not on `$PATH`. Only `tprompt pick` needs this.
-8. **TUI handoff ready** — `warn` when the handoff worker cannot be
+9. **TUI handoff ready** — `warn` when the handoff worker cannot be
    constructed. Direct `send`/`paste` are unaffected.
 
-Only the first three checks affect the exit code. Tmux, clipboard, picker, and
-handoff-readiness failures are reported as warnings so a user who only runs
-`tprompt send` is not blocked by missing optional tooling.
+Only the first three checks affect the exit code. Tmux, popup-binding,
+clipboard, picker, and handoff-readiness failures are reported as warnings so a
+user who only runs `tprompt send` is not blocked by missing optional tooling.
 
 Example output:
 
@@ -179,6 +202,7 @@ ok   prompts directory exists (scope global, /home/user/.config/tprompt/prompts)
 ok   project overlay: no project overlay
 ok   4 prompts discovered
 ok   inside tmux
+warn no tmux key binding runs tprompt (run 'tprompt init' to wire the popup)
 ok   clipboard reader: pbpaste (auto-detected, darwin)
 warn picker command: fzf not found on $PATH (tprompt pick unavailable)
 ok   TUI handoff ready (/home/user/.local/state/tprompt/jobs)

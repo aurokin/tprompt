@@ -13,7 +13,11 @@ Example path:
 Example:
 
 ```toml
-prompts_dir = "~/.config/tprompt/prompts"
+# prompts_dir is optional. Leave it unset to use the auto-created default
+# (~/.config/tprompt/prompts, or $XDG_CONFIG_HOME/tprompt/prompts). Setting it
+# explicitly opts OUT of that safety net (DECISIONS §31): an explicit path is
+# used verbatim and is NOT auto-created — it must already exist.
+# prompts_dir = "~/.config/tprompt/prompts"
 additional_prompts_dirs = []
 prompt_priority = "global"             # "global" | "project"
 default_mode = "paste"

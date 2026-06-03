@@ -32,6 +32,7 @@ tracker; planned work lives in Linear.
 - `tprompt tui` launches the built-in TUI and submits delivery through a short-lived handoff worker.
 - Bare `tprompt` dispatches to `tprompt tui` when stdin is a tty and `$TMUX` is set.
 - Bare `tprompt` outside tmux or without a tty prints help.
+- With no `--target-pane`, the TUI enters direct mode and delivers to the current pane (showing a banner that nudges popup setup) — but only when the origin pane is confirmed real (`$TMUX_PANE` is present in `tmux list-panes -a`). Inside a popup, or on any ambiguity, it exits 2 with a usage error pointing at `tprompt init`.
 - Operational failures return non-zero exit codes.
 - User cancellation in `pick` or the TUI exits with status 0.
 - Errors should be human-readable and specific enough to fix the local environment or prompt data.

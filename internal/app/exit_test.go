@@ -102,6 +102,12 @@ func TestExitCodeInvalidKey(t *testing.T) {
 	}
 }
 
+func TestExitCodeDirectModeUnavailable(t *testing.T) {
+	if got := ExitCode(directModeUnavailableError{}); got != ExitUsage {
+		t.Fatalf("ExitCode(directModeUnavailableError) = %d, want %d", got, ExitUsage)
+	}
+}
+
 func TestExitCodePromptFileExists(t *testing.T) {
 	err := &PromptFileExistsError{Path: "/prompts/existing.md"}
 	if got := ExitCode(err); got != ExitPrompt {
@@ -139,6 +145,7 @@ func TestExitCodeCobraUsageErrors(t *testing.T) {
 	// fails this test loudly rather than silently degrading exit code 2 → 1.
 	cases := []string{
 		`required flag(s) "target-pane" not set`,
+		`required flag(s) "job" not set`,
 		"unknown flag: --nope",
 		"unknown shorthand flag: 'x' in -x",
 		`unknown command "bogus" for "tprompt"`,

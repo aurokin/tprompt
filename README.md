@@ -35,8 +35,10 @@ already expect from tmux, now covering your prompts. (Delivery is verified tmux-
 paste; the receiving app still decides how to interpret the text — see
 [What tprompt guarantees](#what-tprompt-guarantees).)
 
-**Requirements:** a working `tmux` install on Linux or macOS. Windows is outside the
-tmux-first workflow.
+**Requirements:** a working `tmux` install on Linux or macOS. Clipboard features
+(`tprompt paste` and the TUI clipboard row) use `pbpaste` on macOS (built in) or one of
+`wl-paste`/`xclip`/`xsel` on Linux; `send`-only workflows need no clipboard tool.
+Windows is outside the tmux-first workflow.
 
 ## Install
 
@@ -128,9 +130,10 @@ outside tmux it prints help. Full behavior and exit codes:
 
 When you pick a row in the TUI, it writes your selection to a private handoff job,
 spawns a short-lived worker, and exits. The worker waits until the target pane is
-actually ready — real tmux state, not a fixed sleep — then injects. Direct `send`
-and `paste` skip the handoff entirely and deliver synchronously. Nothing runs as a
-daemon. For the full data flow, see
+actually ready — real tmux state, not a fixed sleep — then injects. Nothing lands
+while the popup is still open, so the brief pause before the prompt appears is
+expected, not a failure. Direct `send` and `paste` skip the handoff entirely and
+deliver synchronously. Nothing runs as a daemon. For the full data flow, see
 [docs/architecture/overview.md](docs/architecture/overview.md).
 
 ## What tprompt guarantees

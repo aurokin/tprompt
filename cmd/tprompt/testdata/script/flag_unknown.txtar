@@ -1,4 +1,7 @@
-# Unknown flag should fail.
+# Unknown flag should fail, with a one-line --help pointer (AUR-450).
+# The full usage block stays suppressed (SilenceUsage); only the error line
+# plus a single help-pointer line are printed.
 
 ! tprompt --bogus
 stderr 'unknown flag'
+stderr 'run ''tprompt --help'' for usage\.'

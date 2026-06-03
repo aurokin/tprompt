@@ -17,9 +17,6 @@ func newHandoffCmd(deps Deps) *cobra.Command {
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			if jobPath == "" {
-				return fmt.Errorf("handoff: --job is required")
-			}
 			cfg, err := deps.LoadHandoffConfig(*deps.ConfigPath)
 			if err != nil {
 				return err
@@ -32,5 +29,15 @@ func newHandoffCmd(deps Deps) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&jobPath, "job", "", "handoff job file")
+	// MarkFlagRequired only rejects a *missing* --job (→ usage exit 2), not an
+	// explicitly-empty `--job=`. That gap is intentional: handoff is a hidden,
+	// internal command and its sole caller (the handoff client) always spawns it
+	// with a real, non-empty path (internal/handoff/client.go: args are
+	// ["handoff", "--job", <temp job file>], after validating job.JobID != "").
+	// An empty value is unreachable in production; were it ever passed it would
+	// surface a clear readJob error rather than silently misbehave.
+	if err := cmd.MarkFlagRequired("job"); err != nil {
+		panic(fmt.Sprintf("handoff: mark --job required: %v", err))
+	}
 	return cmd
 }

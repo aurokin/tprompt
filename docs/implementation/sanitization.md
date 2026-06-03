@@ -8,8 +8,8 @@ Three modes, locked at `config.toml` or overridden per-invocation with `--saniti
 
 | Mode | Behavior |
 |---|---|
-| `off` (default) | No modification. Content is forwarded byte-for-byte. |
-| `safe` | Strip a **denylist** of known-dangerous sequences; leave cosmetic sequences (SGR colors, cursor move) alone. |
+| `off` | No modification. Content is forwarded byte-for-byte. |
+| `safe` (default) | Strip a **denylist** of known-dangerous sequences; leave cosmetic sequences (SGR colors, cursor move) alone. |
 | `strict` | Reject the delivery if **any** escape sequence is present. |
 
 Both `safe` and `strict` require fixture-backed tests (see `docs/testing/harness.md`). `off` requires no logic beyond pass-through.

@@ -83,6 +83,32 @@ func TestNew_HappyPathWritesScaffoldTemplate(t *testing.T) {
 	}
 }
 
+func TestNew_PrintsAddBodyHintWhenStderrIsTTY(t *testing.T) {
+	dir := t.TempDir()
+	deps := newCmdDeps(t, dir)
+
+	forceStreamsTTY(t)
+
+	stdout, stderr, err := executeRootWith(t, deps, "new", "code-review")
+	if err != nil {
+		t.Fatalf("executeRootWith: %v", err)
+	}
+
+	// stdout stays exactly the created path (scripting contract).
+	abs, err := filepath.Abs(filepath.Join(dir, "code-review.md"))
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	if got := strings.TrimRight(stdout, "\n"); got != abs {
+		t.Errorf("stdout = %q, want %q (hint must not pollute stdout)", got, abs)
+	}
+	// The hint is emitted on stderr and points at the created file's path
+	// (self-contained, so it survives stdout redirection).
+	if !strings.Contains(stderr, "add your prompt body") || !strings.Contains(stderr, abs) {
+		t.Errorf("stderr = %q, want add-a-body hint naming the created path %q", stderr, abs)
+	}
+}
+
 func TestNew_RefusesToOverwriteExistingFile(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "code-review.md")
@@ -493,6 +519,345 @@ func TestEnsureScaffoldDir_NoAutoCreateRejectsMissing(t *testing.T) {
 	if dirMissing.Path != missing {
 		t.Errorf("Path = %q, want %q", dirMissing.Path, missing)
 	}
+}
+
+func TestNew_ForceOverwritesExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "code-review.md")
+	if err := os.WriteFile(target, []byte("stale body\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	deps := newCmdDeps(t, dir)
+	stdout, _, err := executeRootWith(t, deps, "new", "code-review", "--force")
+	if err != nil {
+		t.Fatalf("executeRootWith: %v", err)
+	}
+	abs, err := filepath.Abs(target)
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	if got := strings.TrimRight(stdout, "\n"); got != abs {
+		t.Errorf("stdout = %q, want %q", got, abs)
+	}
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(body) != scaffoldTemplate {
+		t.Errorf("--force should reset the file to a fresh scaffold\n--- got ---\n%s--- want ---\n%s", body, scaffoldTemplate)
+	}
+}
+
+func TestNew_ForceStillRefusesCrossSubdirCollision(t *testing.T) {
+	// --force overwrites the exact target only. A same-stem file in a
+	// subdirectory cannot be overwritten in place, and writing the top-level
+	// target anyway would leave a duplicate-ID store, so --force still refuses
+	// and names the colliding file.
+	dir := t.TempDir()
+	subdir := filepath.Join(dir, "team")
+	if err := os.MkdirAll(subdir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	nested := filepath.Join(subdir, "code-review.md")
+	if err := os.WriteFile(nested, []byte("# nested\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	deps := newCmdDeps(t, dir)
+	_, _, err := executeRootWith(t, deps, "new", "code-review", "--force")
+	var existsErr *PromptFileExistsError
+	if !errors.As(err, &existsErr) {
+		t.Fatalf("err = %T %v, want *PromptFileExistsError even with --force", err, err)
+	}
+	if existsErr.Path != nested {
+		t.Errorf("Path = %q, want %q (the colliding nested file)", existsErr.Path, nested)
+	}
+	// Top-level target must not be created, and the nested file is untouched.
+	if _, err := os.Stat(filepath.Join(dir, "code-review.md")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("top-level code-review.md should not exist, stat err = %v", err)
+	}
+	if got, err := os.ReadFile(nested); err != nil || string(got) != "# nested\n" {
+		t.Errorf("nested same-stem file changed: got %q err %v", got, err)
+	}
+}
+
+func TestNew_ForceCreatesAbsentTarget(t *testing.T) {
+	// --force on a non-existent target is an ordinary create (nothing to
+	// overwrite): it must not error and writes the scaffold. The overwrite
+	// (rename) path is reserved for an actually-existing target, so a fresh
+	// create still goes through the O_EXCL guard.
+	dir := t.TempDir()
+	deps := newCmdDeps(t, dir)
+	stdout, _, err := executeRootWith(t, deps, "new", "code-review", "--force")
+	if err != nil {
+		t.Fatalf("executeRootWith: %v", err)
+	}
+	abs, err := filepath.Abs(filepath.Join(dir, "code-review.md"))
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	if got := strings.TrimRight(stdout, "\n"); got != abs {
+		t.Errorf("stdout = %q, want %q", got, abs)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "code-review.md"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(body) != scaffoldTemplate {
+		t.Errorf("body mismatch\n--- got ---\n%s--- want ---\n%s", body, scaffoldTemplate)
+	}
+}
+
+func TestNew_ForceRefusesHardlinkedDuplicate(t *testing.T) {
+	// A same-id file hard-linked into a subdirectory shares the target's inode
+	// but is a distinct path, so the store sees two same-stem files: a real
+	// duplicate ID. --force must refuse (collision detection is path-based, not
+	// inode-based).
+	dir := t.TempDir()
+	target := filepath.Join(dir, "code-review.md")
+	if err := os.WriteFile(target, []byte("body\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	subdir := filepath.Join(dir, "team")
+	if err := os.MkdirAll(subdir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	link := filepath.Join(subdir, "code-review.md")
+	if err := os.Link(target, link); err != nil {
+		t.Skipf("hardlink unsupported on this filesystem: %v", err)
+	}
+
+	deps := newCmdDeps(t, dir)
+	_, _, err := executeRootWith(t, deps, "new", "code-review", "--force")
+	var existsErr *PromptFileExistsError
+	if !errors.As(err, &existsErr) {
+		t.Fatalf("err = %T %v, want *PromptFileExistsError", err, err)
+	}
+	if existsErr.Path != link {
+		t.Errorf("Path = %q, want %q (the hard-linked duplicate)", existsErr.Path, link)
+	}
+}
+
+func TestNew_ForceRefusesWhenTargetAndDuplicateBothExist(t *testing.T) {
+	// If the exact target AND another same-stem file both exist, --force must
+	// still refuse: overwriting the target would leave the other file as a
+	// lingering duplicate ID. (Regression guard: the collision scan must
+	// inspect every match, not stop at the first.)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "code-review.md")
+	if err := os.WriteFile(target, []byte("top-level body\n"), 0o600); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	subdir := filepath.Join(dir, "team")
+	if err := os.MkdirAll(subdir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	nested := filepath.Join(subdir, "code-review.md")
+	if err := os.WriteFile(nested, []byte("# nested\n"), 0o600); err != nil {
+		t.Fatalf("seed nested: %v", err)
+	}
+
+	deps := newCmdDeps(t, dir)
+	_, _, err := executeRootWith(t, deps, "new", "code-review", "--force")
+	var existsErr *PromptFileExistsError
+	if !errors.As(err, &existsErr) {
+		t.Fatalf("err = %T %v, want *PromptFileExistsError even with --force", err, err)
+	}
+	if existsErr.Path != nested {
+		t.Errorf("Path = %q, want %q (the lingering duplicate)", existsErr.Path, nested)
+	}
+	// Neither file is modified.
+	if got, err := os.ReadFile(target); err != nil || string(got) != "top-level body\n" {
+		t.Errorf("target changed: got %q err %v", got, err)
+	}
+	if got, err := os.ReadFile(nested); err != nil || string(got) != "# nested\n" {
+		t.Errorf("nested changed: got %q err %v", got, err)
+	}
+}
+
+func TestNew_ForceRefusesCollisionInAdditionalSource(t *testing.T) {
+	// A same-id prompt living in an additional global source is a real
+	// duplicate-ID collision that --force cannot overwrite in place; --force
+	// must still refuse rather than create a second global prompt.
+	primary := t.TempDir()
+	additional := t.TempDir()
+	other := filepath.Join(additional, "code-review.md")
+	if err := os.WriteFile(other, []byte("# other source\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	deps := newCmdDepsWithAdditional(t, primary, []string{additional})
+	_, _, err := executeRootWith(t, deps, "new", "code-review", "--force")
+	var existsErr *PromptFileExistsError
+	if !errors.As(err, &existsErr) {
+		t.Fatalf("err = %T %v, want *PromptFileExistsError even with --force", err, err)
+	}
+	if existsErr.Path != other {
+		t.Errorf("Path = %q, want %q (the additional-source file)", existsErr.Path, other)
+	}
+	if _, err := os.Stat(filepath.Join(primary, "code-review.md")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("primary code-review.md should not exist, stat err = %v", err)
+	}
+}
+
+func TestNew_EditLaunchesEditorAndSuppressesHint(t *testing.T) {
+	dir := t.TempDir()
+	editor := writeFakeEditor(t)
+
+	deps := newCmdDeps(t, dir)
+	// $EDITOR may carry leading args; the scaffold path must be appended last.
+	// The fake editor edits whichever path lands in its final argv slot, so a
+	// "--wait"-style prefix exercises both the shell parse and the
+	// append-target-last behavior.
+	deps.Env = func(k string) string {
+		if k == "EDITOR" {
+			return editor + " --wait"
+		}
+		return ""
+	}
+
+	// Editor launch is gated on the command's stdin AND stdout being ttys; force
+	// all streams on (the blanket gate would also fire the add-a-body hint, so a
+	// suppressed hint proves the editor branch took over).
+	forceStreamsTTY(t)
+
+	_, stderr, err := executeRootWith(t, deps, "new", "code-review", "--edit")
+	if err != nil {
+		t.Fatalf("executeRootWith: %v", err)
+	}
+
+	body, err := os.ReadFile(filepath.Join(dir, "code-review.md"))
+	if err != nil {
+		t.Fatalf("read scaffolded file: %v", err)
+	}
+	if !strings.Contains(string(body), "EDITED-BY-FAKE-EDITOR") {
+		t.Errorf("editor did not run on the scaffold path: body = %q", body)
+	}
+	if strings.Contains(stderr, "add your prompt body") {
+		t.Errorf("hint must be suppressed once the editor launches, stderr = %q", stderr)
+	}
+}
+
+func TestNew_EditNotLaunchedWhenStdoutRedirected(t *testing.T) {
+	// The editor inherits the command's stdout, so launching while stdout is
+	// redirected (not a tty) would corrupt the stdout-is-the-path contract.
+	// With stdin a tty but stdout not, --edit must skip the editor entirely.
+	dir := t.TempDir()
+	editor := writeFakeEditor(t)
+	deps := newCmdDeps(t, dir)
+	deps.Env = func(k string) string {
+		if k == "EDITOR" {
+			return editor
+		}
+		return ""
+	}
+
+	// Mark only the command's stdin as a tty (stdout/stderr are "redirected").
+	// runNew is called directly so the streams under test are the ones the gate
+	// and the editor wiring actually consult.
+	orig := streamIsTTY
+	streamIsTTY = func(v any) bool { return v == deps.Stdin }
+	t.Cleanup(func() { streamIsTTY = orig })
+
+	if err := runNew(deps, "code-review", newFlags{edit: true}); err != nil {
+		t.Fatalf("runNew: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "code-review.md"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(body) != scaffoldTemplate {
+		t.Errorf("editor must not run when stdout is redirected; body = %q", body)
+	}
+}
+
+func TestNew_EditEditorFailureIsNonFatal(t *testing.T) {
+	// A non-zero editor exit (or an unstartable $EDITOR) must not abort `new`:
+	// the file was already created, so the command succeeds (exit 0), still
+	// prints the path, and reports the editor failure on stderr.
+	dir := t.TempDir()
+	deps := newCmdDeps(t, dir)
+	deps.Env = func(k string) string {
+		if k == "EDITOR" {
+			return "tprompt-no-such-editor-binary"
+		}
+		return ""
+	}
+
+	forceStreamsTTY(t)
+
+	stdout, stderr, err := executeRootWith(t, deps, "new", "code-review", "--edit")
+	if err != nil {
+		t.Fatalf("editor failure must not abort new: %v", err)
+	}
+	abs, err := filepath.Abs(filepath.Join(dir, "code-review.md"))
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	if got := strings.TrimRight(stdout, "\n"); got != abs {
+		t.Errorf("stdout = %q, want %q", got, abs)
+	}
+	if !strings.Contains(stderr, "editor exited with error") {
+		t.Errorf("stderr = %q, want editor-failure note", stderr)
+	}
+	if _, err := os.Stat(abs); err != nil {
+		t.Errorf("scaffold should exist despite editor failure: %v", err)
+	}
+}
+
+func TestNew_EditNoopWhenEditorUnsetStillPrintsHint(t *testing.T) {
+	dir := t.TempDir()
+	deps := newCmdDeps(t, dir) // Env returns "" for EDITOR.
+
+	forceStreamsTTY(t)
+
+	stdout, stderr, err := executeRootWith(t, deps, "new", "code-review", "--edit")
+	if err != nil {
+		t.Fatalf("executeRootWith: %v", err)
+	}
+	abs, err := filepath.Abs(filepath.Join(dir, "code-review.md"))
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	if got := strings.TrimRight(stdout, "\n"); got != abs {
+		t.Errorf("stdout = %q, want %q", got, abs)
+	}
+	// With no $EDITOR the launch is a clean no-op, so the add-a-body hint still
+	// fires (and the scaffold is left at the template).
+	if !strings.Contains(stderr, "add your prompt body") || !strings.Contains(stderr, abs) {
+		t.Errorf("stderr = %q, want add-a-body hint naming %q", stderr, abs)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "code-review.md"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(body) != scaffoldTemplate {
+		t.Errorf("scaffold should be untouched when no editor runs")
+	}
+}
+
+// forceStreamsTTY makes every command stream report as a terminal for the
+// duration of the test, satisfying the --edit launch gate and the hint gate
+// without a real pty.
+func forceStreamsTTY(t *testing.T) {
+	t.Helper()
+	orig := streamIsTTY
+	streamIsTTY = func(any) bool { return true }
+	t.Cleanup(func() { streamIsTTY = orig })
+}
+
+// writeFakeEditor writes an executable script that appends a fixed marker to
+// its final argument, then returns its path. It lets `--edit` tests assert the
+// editor ran against the scaffold path without a real interactive editor.
+func writeFakeEditor(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fake-editor.sh")
+	script := "#!/bin/sh\nfor f in \"$@\"; do last=\"$f\"; done\nprintf 'EDITED-BY-FAKE-EDITOR\\n' >> \"$last\"\n"
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake editor: %v", err)
+	}
+	return path
 }
 
 // newCmdDeps builds a Deps suitable for `tprompt new` tests. The supplied dir
