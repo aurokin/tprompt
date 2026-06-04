@@ -38,7 +38,7 @@ paste; the receiving app still decides how to interpret the text — see
 **Requirements:** a working `tmux` install on Linux or macOS. Clipboard features
 (`tprompt paste` and the TUI clipboard row) use `pbpaste` on macOS (built in) or one of
 `wl-paste`/`xclip`/`xsel` on Linux; `send`-only workflows need no clipboard tool.
-Windows is outside the tmux-first workflow.
+On Windows, run it inside WSL2 — a Linux environment, so the Linux build applies there.
 
 ## Install
 

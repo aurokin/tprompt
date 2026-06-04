@@ -114,7 +114,7 @@ That boundary is intentional.
 
 - Primary platforms are Linux and macOS.
 - Packaging target is a single CLI binary with no background daemon command surface.
-- Windows is outside the current tmux-first workflow.
+- Windows is supported only through WSL2 (a Linux environment); there is no native Windows build.
 
 ## Non-Goals
 
