@@ -1,0 +1,205 @@
+package wispr
+
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/hsadler/tprompt/internal/promptmeta"
+)
+
+func TestSlugify(t *testing.T) {
+	tests := []struct {
+		name   string
+		phrase string
+		want   string
+	}{
+		{"simple", "organize thoughts prompt", "organize-thoughts-prompt"},
+		{"already-slug", "code-review", "code-review"},
+		{"underscores", "deep_review_v2", "deep-review-v2"},
+		{"mixed-case", "Code Review", "code-review"},
+		{"collapse-spaces", "a   b", "a-b"},
+		{"trim-edges", "  hello  ", "hello"},
+		{"strip-punctuation", "what's up?!", "whats-up"},
+		{"colon-in-phrase", "title: thing", "title-thing"},
+		{"unicode-dropped", "café ☕ time", "caf-time"},
+		{"all-punctuation-empty", "!@#$%", ""},
+		{"leading-trailing-dash", "--x--", "x"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := slugify(tc.phrase); got != tc.want {
+				t.Errorf("slugify(%q) = %q, want %q", tc.phrase, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestToPrompt_FrontmatterAndBodyRoundTrip(t *testing.T) {
+	s := Snippet{
+		ID:          "11111111-2222-3333-4444-555555555555",
+		Phrase:      "organize thoughts prompt",
+		Replacement: "Help me organize my thoughts into a clear outline.",
+	}
+	id, md, ok := s.ToPrompt("wispr")
+	if !ok {
+		t.Fatal("ToPrompt ok = false, want true")
+	}
+	if id != "organize-thoughts-prompt" {
+		t.Errorf("id = %q, want %q", id, "organize-thoughts-prompt")
+	}
+	// The provenance tag renders in compact flow style, matching the PRD example.
+	if !strings.Contains(string(md), "tags: [wispr]") {
+		t.Errorf("markdown missing `tags: [wispr]`:\n%s", md)
+	}
+
+	// The file the importer writes must load cleanly through the real prompt
+	// parser: title preserved verbatim, tags carried, body == replacement.
+	parsed, err := promptmeta.Parse(md)
+	if err != nil {
+		t.Fatalf("promptmeta.Parse: %v", err)
+	}
+	if parsed.Meta.Title != s.Phrase {
+		t.Errorf("title = %q, want %q (verbatim phrase)", parsed.Meta.Title, s.Phrase)
+	}
+	if len(parsed.Meta.Tags) != 1 || parsed.Meta.Tags[0] != "wispr" {
+		t.Errorf("tags = %v, want [wispr]", parsed.Meta.Tags)
+	}
+	if parsed.Body != s.Replacement {
+		t.Errorf("body = %q, want %q (== replacement)", parsed.Body, s.Replacement)
+	}
+}
+
+func TestToPrompt_BodyEqualsReplacementByteForByte(t *testing.T) {
+	// Pin the promptmeta trim interaction for whitespace-bearing replacements:
+	// the single trailing newline ToPrompt appends is exactly what Parse strips.
+	cases := map[string]string{
+		"plain":            "Review this code.",
+		"multiline":        "line1\nline2",
+		"trailing-newline": "ends with newline\n",
+		"leading-newline":  "\nstarts with a blank line",
+		"leading-spaces":   "  indented body",
+		"internal-blank":   "para one\n\npara two",
+		"crlf":             "windows\r\nline",
+		"colon-and-quotes": `say "hi: there"`,
+	}
+	for name, replacement := range cases {
+		t.Run(name, func(t *testing.T) {
+			s := Snippet{ID: "id", Phrase: "phrase", Replacement: replacement}
+			_, md, ok := s.ToPrompt("wispr")
+			if !ok {
+				t.Fatalf("ToPrompt ok = false for %q", replacement)
+			}
+			parsed, err := promptmeta.Parse(md)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if parsed.Body != replacement {
+				t.Errorf("body = %q, want %q", parsed.Body, replacement)
+			}
+		})
+	}
+}
+
+func TestToPrompt_StarredAppendsTag(t *testing.T) {
+	s := Snippet{ID: "id", Phrase: "fav", Replacement: "body", Starred: true}
+	_, md, ok := s.ToPrompt("wispr")
+	if !ok {
+		t.Fatal("ok = false")
+	}
+	parsed, err := promptmeta.Parse(md)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := []string{"wispr", "starred"}
+	if len(parsed.Meta.Tags) != 2 || parsed.Meta.Tags[0] != want[0] || parsed.Meta.Tags[1] != want[1] {
+		t.Errorf("tags = %v, want %v", parsed.Meta.Tags, want)
+	}
+}
+
+func TestToPrompt_CustomTag(t *testing.T) {
+	s := Snippet{ID: "id", Phrase: "fav", Replacement: "body"}
+	_, md, _ := s.ToPrompt("imported")
+	parsed, err := promptmeta.Parse(md)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(parsed.Meta.Tags) != 1 || parsed.Meta.Tags[0] != "imported" {
+		t.Errorf("tags = %v, want [imported]", parsed.Meta.Tags)
+	}
+}
+
+func TestToPrompt_EmptyReplacementNotImportable(t *testing.T) {
+	for _, replacement := range []string{"", "   ", "\n\t "} {
+		s := Snippet{ID: "id", Phrase: "x", Replacement: replacement}
+		if _, _, ok := s.ToPrompt("wispr"); ok {
+			t.Errorf("ToPrompt(replacement=%q) ok = true, want false", replacement)
+		}
+	}
+}
+
+func TestDefaultDBPath(t *testing.T) {
+	tests := []struct {
+		name   string
+		goos   string
+		getenv func(string) string
+		home   string
+		want   string
+		wantOK bool
+	}{
+		{
+			name:   "darwin",
+			goos:   "darwin",
+			getenv: func(string) string { return "" },
+			home:   "/Users/me",
+			want:   "/Users/me/Library/Application Support/Wispr Flow/flow.sqlite",
+			wantOK: true,
+		},
+		{
+			name:   "darwin-no-home",
+			goos:   "darwin",
+			getenv: func(string) string { return "" },
+			home:   "",
+			wantOK: false,
+		},
+		{
+			name: "windows",
+			goos: "windows",
+			getenv: func(k string) string {
+				if k == "APPDATA" {
+					return `C:\Users\me\AppData\Roaming`
+				}
+				return ""
+			},
+			home: "",
+			// Built with filepath.Join so the expected separators match the test
+			// host (backslashes are literal in the APPDATA input on POSIX).
+			want:   filepath.Join(`C:\Users\me\AppData\Roaming`, "Wispr Flow", "flow.sqlite"),
+			wantOK: true,
+		},
+		{
+			name:   "windows-no-appdata",
+			goos:   "windows",
+			getenv: func(string) string { return "" },
+			wantOK: false,
+		},
+		{
+			name:   "linux-no-default",
+			goos:   "linux",
+			getenv: func(string) string { return "" },
+			home:   "/home/me",
+			wantOK: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := DefaultDBPath(tc.goos, tc.getenv, tc.home)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if ok && got != tc.want {
+				t.Errorf("path = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

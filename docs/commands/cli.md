@@ -230,6 +230,34 @@ Flags:
 Takes no positional arguments. See `examples/tmux-bindings.md` for the same bindings
 documented for reference.
 
+### `tprompt import wispr`
+
+Imports your local [Wispr Flow](https://wisprflow.ai) snippets as markdown
+prompts. Wispr stores snippets (trigger → expansion text) in a local
+`flow.sqlite`; `import wispr` opens that database **read-only** — it never writes
+to Wispr — and reads **only snippets**, never your dictation history. Each live
+snippet becomes a prompt in the primary global prompts directory:
+
+- `phrase` → `title:` frontmatter (verbatim) **and** the slug for the filename id
+- `replacement` → the markdown body
+- `tags: [wispr]` provenance tag (a starred snippet also gets `starred`)
+
+Frontmatter is YAML-marshaled (not string-templated), so a phrase containing `:`
+or quotes cannot corrupt the written file.
+
+Import is **idempotent**: a snippet whose id already exists as a prompt is
+**skipped** by default, so re-running never creates duplicates. Created file
+paths print to stdout (one per line, for scripting); an `imported N, skipped M`
+summary prints to stderr when stderr is a terminal (piped runs emit nothing on
+stderr).
+
+Flags:
+
+- `--db-path <path>` — path to Wispr's `flow.sqlite`. Defaults to the OS
+  location (macOS `~/Library/Application Support/Wispr Flow/flow.sqlite`, Windows
+  `%APPDATA%\Wispr Flow\flow.sqlite`); required where there is no default
+  (e.g. Linux).
+
 ## Cancel semantics
 
 When the user cancels an interactive flow (TUI `Esc`, `pick` external cancel), the command exits with **status 0**. Cancellation is a valid outcome, not an error. Scripts should not treat it as a failure.
