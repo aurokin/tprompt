@@ -37,6 +37,19 @@ tracker; planned work lives in Linear.
 - User cancellation in `pick` or the TUI exits with status 0.
 - Errors should be human-readable and specific enough to fix the local environment or prompt data.
 
+## Import
+
+- `tprompt import wispr` imports local Wispr Flow snippets as prompts. It opens
+  Wispr's local `flow.sqlite` **read-only** and never writes to it.
+- It reads **only snippets** (Wispr `Dictionary` rows that are snippets and not
+  deleted); it never reads dictation History.
+- Import is idempotent and **skip-by-default**: a snippet whose id already
+  exists as a prompt is skipped, so re-runs never create duplicates.
+- Importing Wispr snippets produces standalone prompts — a one-way migration
+  into the prompt store. This is unrelated to the "prompt snippets or
+  composition" non-goal below: tprompt still has no in-tool snippet/composition
+  system; it only ingests Wispr's snippets as ordinary prompt files.
+
 ## TUI Delivery Behavior
 
 - The TUI is built in; it is separate from the external `pick` command.

@@ -12,11 +12,12 @@ import (
 	"github.com/hsadler/tprompt/internal/submitter"
 	"github.com/hsadler/tprompt/internal/tmux"
 	"github.com/hsadler/tprompt/internal/tui"
+	"github.com/hsadler/tprompt/internal/wispr"
 )
 
 func TestRootCmdRegistersAllSubcommands(t *testing.T) {
 	root := NewRootCmd(fakeDeps(t))
-	want := []string{"list", "show", "send", "paste", "doctor", "tui", "pick", "new", "init"}
+	want := []string{"list", "show", "send", "paste", "doctor", "tui", "pick", "new", "init", "import"}
 	have := map[string]bool{}
 	for _, c := range root.Commands() {
 		have[c.Name()] = true
@@ -165,6 +166,9 @@ func fakeDeps(t *testing.T) Deps {
 		},
 		NewStore: func(config.Resolved) (store.Store, error) {
 			return nil, ErrNotImplemented
+		},
+		NewWisprReader: func(string) wispr.Reader {
+			return &fakeWisprReader{err: ErrNotImplemented}
 		},
 		NewTmux: func() (tmux.Adapter, error) {
 			return nil, ErrNotImplemented

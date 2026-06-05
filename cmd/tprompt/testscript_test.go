@@ -32,6 +32,16 @@ func TestScript(t *testing.T) {
 				return err
 			}
 			env.Vars = append(env.Vars, "SHORT_TMPDIR="+d)
+
+			// Expose the checked-in Wispr fixture DB by absolute path so a
+			// testscript can `cp $WISPR_FIXTURE flow.sqlite` into its $WORK. The
+			// fixture is a binary SQLite blob that cannot be embedded inline in a
+			// .txtar, so it lives under testdata/wispr/ and is referenced here.
+			fixture, err := filepath.Abs(filepath.Join("testdata", "wispr", "flow.sqlite"))
+			if err != nil {
+				return err
+			}
+			env.Vars = append(env.Vars, "WISPR_FIXTURE="+fixture)
 			env.Defer(func() {
 				// Belt-and-suspenders cleanup: if a script aborts before its
 				// own `exec tmux kill-server`, kill any tmux server started on

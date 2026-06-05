@@ -19,6 +19,7 @@ import (
 	"github.com/hsadler/tprompt/internal/submitter"
 	"github.com/hsadler/tprompt/internal/tmux"
 	"github.com/hsadler/tprompt/internal/tui"
+	"github.com/hsadler/tprompt/internal/wispr"
 )
 
 // Deps provides the capabilities that CLI handlers need. Production code
@@ -36,6 +37,7 @@ type Deps struct {
 	LoadPasteConfig   func(explicitPath string) (config.Resolved, error)
 	LoadHandoffConfig func(explicitPath string) (config.Resolved, error)
 	NewStore          func(cfg config.Resolved) (store.Store, error)
+	NewWisprReader    func(dbPath string) wispr.Reader
 	NewTmux           func() (tmux.Adapter, error)
 	NewClip           func(cfg config.Resolved) (clipboard.Reader, error)
 	NewPicker         func(cfg config.Resolved) (picker.Picker, error)
@@ -66,6 +68,9 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 				cfg.ReservedPrintable,
 				cfg.KeybindPool,
 			), nil
+		},
+		NewWisprReader: func(dbPath string) wispr.Reader {
+			return wispr.NewReader(dbPath)
 		},
 		NewTmux: func() (tmux.Adapter, error) {
 			return tmux.New(tmux.NewExecRunner("")), nil

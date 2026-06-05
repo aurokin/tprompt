@@ -112,7 +112,7 @@ func runNew(deps Deps, id string, flags newFlags) error {
 	if err != nil {
 		return err
 	}
-	source, collisionSources, err := scaffoldTargetSources(cfg, flags)
+	source, collisionSources, err := scaffoldTargetSources(cfg, flags.project)
 	if err != nil {
 		return err
 	}
@@ -249,8 +249,12 @@ func launchEditor(deps Deps, target string) bool {
 	return true
 }
 
-func scaffoldTargetSources(cfg config.Resolved, flags newFlags) (promptsource.Source, []promptsource.Source, error) {
-	if flags.project {
+// scaffoldTargetSources resolves the write target and the collision-scan tier
+// for `new` and `import`. With project=true it targets the git project's
+// tprompt/ overlay; otherwise it targets the primary global source and scans all
+// configured global sources for duplicate ids.
+func scaffoldTargetSources(cfg config.Resolved, project bool) (promptsource.Source, []promptsource.Source, error) {
+	if project {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return promptsource.Source{}, nil, fmt.Errorf("resolve current directory: %w", err)

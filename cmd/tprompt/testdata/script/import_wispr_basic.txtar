@@ -1,0 +1,41 @@
+# `tprompt import wispr` reads live snippets from a local Wispr Flow flow.sqlite
+# and writes each as a markdown prompt, idempotently. The fixture DB (copied in
+# from $WISPR_FIXTURE) holds two live snippets plus a non-snippet row and a
+# deleted snippet that must be excluded. Re-running skips already-imported prompts.
+
+mkdir prompts
+cp $WISPR_FIXTURE flow.sqlite
+
+# First import: the two live snippets become prompts on stdout (one per line).
+tprompt import wispr --db-path flow.sqlite --config config.toml
+stdout 'prompts/organize-thoughts-prompt\.md'
+stdout 'prompts/code-review\.md'
+! stderr .
+
+# The non-snippet and deleted rows produced no files.
+! exists prompts/a-dictionary-word.md
+! exists prompts/old-snippet.md
+
+# The read-only open never writes the source DB (no WAL sidecar left behind).
+! exists flow.sqlite-wal
+
+# Imported prompts load cleanly: phrase preserved verbatim as title, wispr tag
+# stamped, body == the snippet replacement.
+tprompt show organize-thoughts-prompt --config config.toml
+stdout 'ID: organize-thoughts-prompt'
+stdout 'Title: organize thoughts prompt'
+stdout 'Tags: wispr'
+stdout 'Help me organize my thoughts into a clear outline\.'
+
+# The starred snippet carries the starred tag in addition to the provenance tag.
+tprompt show code-review --config config.toml
+stdout 'Tags: wispr, starred'
+
+# Re-running is idempotent: both prompts already exist, so both are skipped and
+# nothing is created or printed.
+tprompt import wispr --db-path flow.sqlite --config config.toml
+! stdout .
+! stderr .
+
+-- config.toml --
+prompts_dir = "prompts"

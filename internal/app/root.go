@@ -84,6 +84,7 @@ tmux (or without a tty), bare 'tprompt' prints this help.`,
 		newPickCmd(deps),
 		newNewCmd(deps),
 		newInitCmd(deps),
+		newImportCmd(deps),
 	)
 
 	return root
