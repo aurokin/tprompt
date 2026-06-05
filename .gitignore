@@ -10,3 +10,4 @@ coverage.txt
 .idea/
 .vscode/
 .claude/scheduled_tasks.lock
+.DS_Store
