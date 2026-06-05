@@ -837,6 +837,113 @@ func TestNew_EditNoopWhenEditorUnsetStillPrintsHint(t *testing.T) {
 	}
 }
 
+// --- writePromptFile: the shared collision-check + atomic write seam (AUR-523).
+// These lock the "accepts arbitrary content" contract that `import` relies on,
+// independently of the scaffold template that `new` happens to pass through it.
+
+func globalSources(dir string) []promptsource.Source {
+	return []promptsource.Source{{Path: dir, Scope: promptsource.ScopeGlobal}}
+}
+
+func TestWritePromptFile_CreatesArbitraryContent(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "imported.md")
+	content := []byte("---\ntitle: hi\n---\narbitrary body\n")
+
+	if err := writePromptFile(target, globalSources(dir), promptsource.ScopeGlobal, "imported", content, false); err != nil {
+		t.Fatalf("writePromptFile: %v", err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("content mismatch\n got: %q\nwant: %q", got, content)
+	}
+}
+
+func TestWritePromptFile_RefusesExistingTargetWithoutOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "imported.md")
+	original := []byte("original\n")
+	if err := os.WriteFile(target, original, 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	err := writePromptFile(target, globalSources(dir), promptsource.ScopeGlobal, "imported", []byte("new\n"), false)
+	var existsErr *PromptFileExistsError
+	if !errors.As(err, &existsErr) {
+		t.Fatalf("err = %T %v, want *PromptFileExistsError", err, err)
+	}
+	if existsErr.Path != target {
+		t.Errorf("Path = %q, want %q", existsErr.Path, target)
+	}
+	if got, _ := os.ReadFile(target); string(got) != string(original) {
+		t.Errorf("file changed: %q", got)
+	}
+}
+
+func TestWritePromptFile_OverwriteReplacesExistingTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "imported.md")
+	if err := os.WriteFile(target, []byte("stale\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	fresh := []byte("refreshed body\n")
+
+	if err := writePromptFile(target, globalSources(dir), promptsource.ScopeGlobal, "imported", fresh, true); err != nil {
+		t.Fatalf("writePromptFile overwrite: %v", err)
+	}
+	if got, _ := os.ReadFile(target); string(got) != string(fresh) {
+		t.Errorf("overwrite did not refresh: %q", got)
+	}
+}
+
+func TestWritePromptFile_OverwriteAbsentTargetUsesExclCreate(t *testing.T) {
+	// overwrite=true on a not-yet-existing target must still take the O_EXCL
+	// create path (not the rename path), so a concurrent creator racing between
+	// the scan and the write is refused rather than silently clobbered. Proven
+	// indirectly: the write succeeds and the file lands with exactly the content.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "imported.md")
+	content := []byte("created under overwrite\n")
+
+	if err := writePromptFile(target, globalSources(dir), promptsource.ScopeGlobal, "imported", content, true); err != nil {
+		t.Fatalf("writePromptFile: %v", err)
+	}
+	if got, _ := os.ReadFile(target); string(got) != string(content) {
+		t.Errorf("content mismatch: %q", got)
+	}
+}
+
+func TestWritePromptFile_OverwriteStillRefusesOtherPathCollision(t *testing.T) {
+	// overwrite replaces the exact target only; a same-stem file at a different
+	// path is a duplicate ID overwrite cannot resolve in place, so it refuses
+	// even with overwrite=true and names the colliding file.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "imported.md")
+	subdir := filepath.Join(dir, "team")
+	if err := os.MkdirAll(subdir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	nested := filepath.Join(subdir, "imported.md")
+	if err := os.WriteFile(nested, []byte("# nested\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	err := writePromptFile(target, globalSources(dir), promptsource.ScopeGlobal, "imported", []byte("body\n"), true)
+	var existsErr *PromptFileExistsError
+	if !errors.As(err, &existsErr) {
+		t.Fatalf("err = %T %v, want *PromptFileExistsError even with overwrite", err, err)
+	}
+	if existsErr.Path != nested {
+		t.Errorf("Path = %q, want %q (the colliding nested file)", existsErr.Path, nested)
+	}
+	if _, err := os.Stat(target); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("target must not be created on refusal, stat err = %v", err)
+	}
+}
+
 // forceStreamsTTY makes every command stream report as a terminal for the
 // duration of the test, satisfying the --edit launch gate and the hint gate
 // without a real pty.
