@@ -126,22 +126,35 @@ func runNew(deps Deps, id string, flags newFlags) error {
 	if err := ensureScaffoldDir(source.Path, source.AutoCreateOnAccess); err != nil {
 		return err
 	}
-	// Determine collision state. Prompt ids are filename stems and the store
-	// walks subdirectories (and additional sources), so a same-id `.md` anywhere
-	// in this scope collides — not just the exact target.
-	//
-	// The exact target is checked directly (a stat, not a walk) so an unreadable
-	// sibling subtree can never mask an already-taken target: this preserves the
-	// original "first collision wins" error semantics (PromptFileExistsError,
-	// exit 3) instead of leaking a filesystem walk error. A same-id file at any
-	// OTHER path in scope (subdirectory or another source) is a duplicate that
-	// --force cannot overwrite in place, so it refuses even with --force; a
-	// plain create refuses on any collision.
+	if err := writePromptFile(target, collisionSources, source.Scope, id, []byte(scaffoldTemplate), flags.force); err != nil {
+		return err
+	}
+	return announceNewFile(deps, target, flags.edit)
+}
+
+// writePromptFile is the TOCTOU-safe collision-check + atomic write shared by
+// `tprompt new` and `tprompt import`. target is the absolute destination path;
+// sources/scope define the duplicate-stem scan tier; content is the file bytes;
+// overwrite selects refuse-vs-atomic-replace. The destination directory must
+// already exist — callers own ensure/auto-create.
+//
+// Prompt ids are filename stems and the store walks subdirectories (and
+// additional sources), so a same-id `.md` anywhere in this scope collides — not
+// just the exact target.
+//
+// The exact target is checked directly (a stat, not a walk) so an unreadable
+// sibling subtree can never mask an already-taken target: this preserves the
+// original "first collision wins" error semantics (PromptFileExistsError, exit 3)
+// instead of leaking a filesystem walk error. A same-id file at any OTHER path
+// in scope (subdirectory or another source) is a duplicate that overwrite cannot
+// resolve in place, so it refuses even with overwrite=true; an overwrite=false
+// create refuses on any collision.
+func writePromptFile(target string, sources []promptsource.Source, scope promptsource.Scope, id string, content []byte, overwrite bool) error {
 	targetExisted := pathExists(target)
-	if targetExisted && !flags.force {
+	if targetExisted && !overwrite {
 		return &PromptFileExistsError{ID: id, Path: target}
 	}
-	other, err := findOtherPromptMatch(collisionSources, source.Scope, id, target)
+	other, err := findOtherPromptMatch(sources, scope, id, target)
 	if err != nil {
 		return err
 	}
@@ -149,13 +162,10 @@ func runNew(deps Deps, id string, flags newFlags) error {
 		return &PromptFileExistsError{ID: id, Path: other}
 	}
 	// Overwrite (atomic rename) only when the target actually existed and
-	// --force was given. A fresh create still goes through the O_EXCL path even
-	// under --force, so a concurrent creator racing in between the scan and the
-	// write is refused rather than silently clobbered.
-	if err := writeScaffold(id, target, flags.force && targetExisted); err != nil {
-		return err
-	}
-	return announceNewFile(deps, target, flags.edit)
+	// overwrite was requested. A fresh create still goes through the O_EXCL path
+	// even under overwrite=true, so a concurrent creator racing in between the
+	// scan and the write is refused rather than silently clobbered.
+	return writePromptContent(id, target, content, overwrite && targetExisted)
 }
 
 // pathExists reports whether p names an existing filesystem entry. Lstat (not
@@ -411,20 +421,20 @@ func findOtherMatchInTree(root, id, target string) (string, error) {
 	return other, nil
 }
 
-// writeScaffold creates target with the scaffold template. When overwrite is
+// writePromptContent creates target with the given content. When overwrite is
 // false it refuses to clobber an existing file: O_EXCL closes the TOCTOU window
 // between the collision scan and the write so a concurrent author cannot lose
 // work. When overwrite is true (the caller confirmed the target already existed
-// and --force was given) it replaces the target atomically (see
-// overwriteScaffold).
-func writeScaffold(id, target string, overwrite bool) error {
+// and an overwrite was requested) it replaces the target atomically (see
+// overwritePromptContent).
+func writePromptContent(id, target string, content []byte, overwrite bool) error {
 	if overwrite {
-		return overwriteScaffold(target)
+		return overwritePromptContent(target, content)
 	}
-	// G304: target is composed from the resolved primary prompts directory
-	// and a validated id (validateNewID rejects path separators, .md
-	// suffix, non-printable runes, empty input), so this is a bounded write
-	// into the user's own prompt store, not arbitrary user input.
+	// G304: target is composed from a resolved prompts directory and a validated
+	// id (validateNewID rejects path separators, .md suffix, non-printable runes,
+	// empty input), so this is a bounded write into the user's own prompt store,
+	// not arbitrary user input.
 	f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600) //nolint:gosec
 	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
@@ -432,7 +442,7 @@ func writeScaffold(id, target string, overwrite bool) error {
 		}
 		return fmt.Errorf("create prompt file %s: %w", target, err)
 	}
-	if _, writeErr := f.Write([]byte(scaffoldTemplate)); writeErr != nil {
+	if _, writeErr := f.Write(content); writeErr != nil {
 		_ = f.Close()
 		return fmt.Errorf("write prompt file %s: %w", target, writeErr)
 	}
@@ -442,16 +452,16 @@ func writeScaffold(id, target string, overwrite bool) error {
 	return nil
 }
 
-// overwriteScaffold replaces target with a fresh scaffold atomically: write the
-// template to a temp file in the same directory, then rename it over target.
-// The original prompt is never unlinked before the new content is durable, so a
-// mid-write failure cannot lose it; and rename replaces a symlinked target
-// entry without following it, so --force cannot clobber a file outside the
-// store the way a truncating open would. The temp name is hidden (leading dot)
-// so the store walk ignores any leftover from an interrupted run.
-func overwriteScaffold(target string) error {
+// overwritePromptContent replaces target with content atomically: write to a
+// temp file in the same directory, then rename it over target. The original
+// prompt is never unlinked before the new content is durable, so a mid-write
+// failure cannot lose it; and rename replaces a symlinked target entry without
+// following it, so an overwrite cannot clobber a file outside the store the way
+// a truncating open would. The temp name is hidden (leading dot) so the store
+// walk ignores any leftover from an interrupted run.
+func overwritePromptContent(target string, content []byte) error {
 	dir := filepath.Dir(target)
-	tmp, err := os.CreateTemp(dir, ".tprompt-new-*")
+	tmp, err := os.CreateTemp(dir, ".tprompt-*")
 	if err != nil {
 		return fmt.Errorf("create temp prompt file in %s: %w", dir, err)
 	}
@@ -462,7 +472,7 @@ func overwriteScaffold(target string) error {
 			_ = os.Remove(tmpName)
 		}
 	}()
-	if _, err := tmp.Write([]byte(scaffoldTemplate)); err != nil {
+	if _, err := tmp.Write(content); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("write temp prompt file %s: %w", tmpName, err)
 	}
