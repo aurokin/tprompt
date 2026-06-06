@@ -3,6 +3,7 @@ package importtui
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -268,11 +269,25 @@ func renderRow(item Item, checked bool, idWidth, width int) string {
 		titleCol = 0
 	}
 	id := padRight(truncateToWidth(item.ID, idWidth), idWidth)
-	title := truncateToWidth(item.Title, titleCol)
+	title := truncateToWidth(sanitizeLabel(item.Title), titleCol)
 	// Cap the composed line too: the fixed checkbox + column gaps are 7 cells, so
 	// a terminal narrower than that would otherwise wrap the row and desync the
 	// one-line-per-row viewport math. Truncating keeps the invariant at any width.
 	return truncateToWidth(fmt.Sprintf("%s  %s  %s", box, id, title), width)
+}
+
+// sanitizeLabel makes a snippet phrase safe for a single-line row: every control
+// rune — newlines and tabs (which would spill the row onto extra physical lines
+// and desync the viewport) and the ESC that begins ANSI sequences (which could
+// recolor or manipulate the terminal) — is replaced with a space. Wispr phrases
+// are stored verbatim, so the picker must not trust them as display-ready.
+func sanitizeLabel(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 func maxIDWidth(items []Item) int {

@@ -231,8 +231,10 @@ absolute path via `$WISPR_FIXTURE`.
 
 `internal/importtui` is a sibling of `internal/tui` (neither imports the other);
 its pure model/view tests mirror the board's — toggle/select-all/confirm/cancel
-key handling, the pre-checked default, and a viewport regression (rows never wrap
-or overflow the terminal height). The `-i` wiring is driven by a stub renderer
+key handling, the pre-checked default, a viewport regression (rows never wrap or
+overflow the terminal height at any width), and label sanitization (a verbatim
+snippet phrase with a newline or ANSI escape can neither spill a row nor inject
+terminal control codes). The `-i` wiring is driven by a stub renderer
 selected via `TPROMPT_TEST_IMPORT_RENDERER` (a test-only env, mirroring
 `TPROMPT_TEST_RENDERER`) so the black-box testscript can run the picker over pipes.
 

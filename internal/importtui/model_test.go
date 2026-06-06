@@ -155,6 +155,29 @@ func TestView_RowsNeverExceedWidth(t *testing.T) {
 	}
 }
 
+// TestView_SanitizesTitleControlBytes pins that a verbatim snippet phrase with a
+// newline or an ANSI escape cannot spill the row onto extra lines or inject
+// terminal control codes: control bytes are neutralized to spaces before render.
+func TestView_SanitizesTitleControlBytes(t *testing.T) {
+	state := State{Items: []Item{
+		{ID: "multi", Title: "first\nsecond"},
+		{ID: "ansi", Title: "danger\x1b[31mred\x1b[0m"},
+	}}
+	m := NewModel(state)
+	m = send(m, tea.WindowSizeMsg{Width: 80, Height: 20})
+	view := m.View()
+
+	// All items fit (tall terminal), so the rendered lines are exactly header +
+	// one line per item + footer; a title newline must not spill an extra line.
+	if got, want := strings.Count(view, "\n")+1, m.headerLines()+len(state.Items)+footerLines; got != want {
+		t.Fatalf("View has %d lines, want %d — a title newline spilled a row", got, want)
+	}
+	// No raw ESC survives into the rendered output.
+	if strings.ContainsRune(view, '\x1b') {
+		t.Errorf("rendered view contains a raw ESC byte from a snippet phrase:\n%q", view)
+	}
+}
+
 func TestView_RendersCheckboxes(t *testing.T) {
 	m := NewModel(sampleState())
 	m = send(m, keyType(tea.KeySpace)) // deselect row 0
