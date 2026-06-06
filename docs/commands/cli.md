@@ -272,14 +272,26 @@ Flags:
 - `--tag <tag>` — provenance tag stamped on every imported prompt (default
   `wispr`). A starred snippet still also gets `starred`.
 - `-i`, `--interactive` — open a checkbox picker to choose which snippets to
-  import. Only importable (fresh, or refreshable under `--overwrite`) snippets are
-  listed; all rows start checked. Keys: `↑`/`↓` (or `j`/`k`) move, `Space`
-  toggles, `a` checks all, `Enter` imports the checked rows, `Esc`/`Ctrl+C`
-  cancels. Confirming imports exactly the checked rows and is otherwise identical
-  to a non-interactive run; **cancelling writes nothing and exits 0**. Snippets
-  that aren't importable (e.g. a same-id duplicate elsewhere) aren't shown and are
-  skipped rather than aborting the run. `-i` needs an interactive terminal and
-  cannot combine with `--dry-run` (both are usage errors — see below).
+  import, with conflicts surfaced for review. Each row shows a status glyph:
+  - `[ ]`/`[x]` — a **fresh** snippet (pre-checked; toggle to import).
+  - `[=]` — the id already exists at the **exact target**: **skip-by-default**
+    (§34); check it to **arm a per-item overwrite** that refreshes just that prompt
+    (the row then shows `[x]`).
+  - `[!]` — a same-id prompt exists at **another path** (a cross-path duplicate):
+    **non-selectable**, shown with the conflicting path.
+
+  Keys: `↑`/`↓` (or `j`/`k`) move, `Space` toggles/arms the current row, `a`
+  resets to the safe default (all fresh checked, ad-hoc overwrites cleared,
+  CLI-authorized refreshes kept), `Enter` writes, `Esc`/`Ctrl+C` cancels. The
+  footer counts `N selected · M overwrite · K blocked` and confirms `write N
+  prompts?`. Confirming creates the checked fresh rows and overwrites the armed
+  rows; **cancelling writes nothing and exits 0**. Per-item overwrite is
+  **exact-target-only**: it routes through the same writer as `--overwrite`, which
+  still refuses a cross-path duplicate as a **prompt-store error (exit 3)** — the
+  picker surfaces the §34 policy, it cannot weaken it. `-i` needs an interactive
+  terminal and cannot combine with `--dry-run` (both are usage errors — see below).
+  `-i --overwrite` is allowed: the flag pre-arms every refresh (shown as `[x]`),
+  the all-or-nothing counterpart to per-item arming.
 
 When two snippets' phrases normalize to the same id, the first keeps the bare
 slug and each later one gets a short `-<uuid-prefix>` suffix, so no snippet is

@@ -231,12 +231,17 @@ absolute path via `$WISPR_FIXTURE`.
 
 `internal/importtui` is a sibling of `internal/tui` (neither imports the other);
 its pure model/view tests mirror the board's — toggle/select-all/confirm/cancel
-key handling, the pre-checked default, a viewport regression (rows never wrap or
-overflow the terminal height at any width), and label sanitization (a verbatim
-snippet phrase with a newline or ANSI escape can neither spill a row nor inject
-terminal control codes). The `-i` wiring is driven by a stub renderer
-selected via `TPROMPT_TEST_IMPORT_RENDERER` (a test-only env, mirroring
-`TPROMPT_TEST_RENDERER`) so the black-box testscript can run the picker over pipes.
+key handling, conflict-aware pre-check (fresh checked, exact-target skip-by-default,
+cross-path non-selectable, a CLI-authorized refresh pre-armed), status-glyph
+rendering (`[ ]`/`[x]`/`[=]`/`[!]`) and the cross-path blocker path, the footer
+counter (`N selected · M overwrite · K blocked`), select-all reset semantics
+(clears ad-hoc arms, keeps CLI-authorized refreshes), a viewport regression (rows
+never wrap or overflow the terminal height at any width, with the two-line footer),
+and label sanitization (a verbatim snippet phrase with a newline or ANSI escape can
+neither spill a row nor inject terminal control codes). The `-i` wiring is driven by
+a stub renderer selected via `TPROMPT_TEST_IMPORT_RENDERER` (a test-only env,
+mirroring `TPROMPT_TEST_RENDERER`) so the black-box testscript can run the picker
+over pipes.
 
 Assert:
 
@@ -257,11 +262,18 @@ Assert:
   intra-batch claim-ordering holds (an empty-body snippet claims no slug), dry-run
   still aborts on a cross-path duplicate, and partial progress is flushed before an abort
 - interactive `-i`: confirm-all is byte-for-byte equal to a non-interactive import (pinned
-  by testscript + app test); the picker shows only importable rows; deselecting honors the
-  disambiguated id (shown id == written id); a hidden policy conflict (cross-path duplicate) is
-  skipped, not aborted, but a genuine classify error (unreadable collision-scan subtree) still
-  surfaces; cancel / deselect-all / zero-fresh write nothing and create no directory; `-i`
-  without a tty and `-i --dry-run` map to usage errors (exit 2)
+  by testscript + app test); the picker shows fresh rows and conflict rows (exact-target and
+  cross-path, the latter carrying its conflicting path); deselecting honors the disambiguated
+  id (shown id == written id); a cross-path duplicate is shown but non-selectable and, when
+  confirmed around, writes nothing without aborting, while a genuine classify error
+  (unreadable collision-scan subtree) still surfaces; cancel / deselect-all / zero-fresh write
+  nothing and create no directory; `-i` without a tty and `-i --dry-run` map to usage errors
+  (exit 2)
+- per-item overwrite (`-i`): arming an exact-target conflict routes through the existing
+  overwrite write-path (refreshes the file, exact-target only); a re-classification unit test
+  pins armed exact-target → `planImportable` with `overwrite=true` (not `planExists`); a
+  *forced* cross-path overwrite still yields the §4 hard error (exit 3) with nothing written
+  at the exact target (writer stays authoritative); an idempotent re-run defaults to all-skip
 - DB error taxonomy maps to exit codes: missing DB / no default location →
   usage (2); unreadable/garbage/locked DB → general (1)
 - the awkward-path DSN survives spaces and URI metacharacters in the db path

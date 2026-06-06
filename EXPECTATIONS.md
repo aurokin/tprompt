@@ -51,14 +51,22 @@ tracker; planned work lives in Linear.
   exists as a prompt is skipped, so re-runs never create duplicates. `--overwrite`
   refreshes existing prompts from Wispr; `--dry-run` previews without writing;
   `--project` writes to the project overlay; `--tag` overrides the provenance tag.
-- `-i`/`--interactive` opens a checkbox picker (all rows pre-checked) listing only
-  importable snippets; confirming imports exactly the checked rows and is otherwise
-  identical to a non-interactive run, while cancelling writes nothing and exits 0.
-  A no-op interactive outcome (cancel, deselect-all, nothing importable) creates no
-  files and no directories. `-i` requires an interactive terminal and rejects
-  `--dry-run`; both unmet preconditions are usage errors (exit 2), never a silent
-  fallback. Non-importable snippets (e.g. a same-id duplicate elsewhere) are not
-  shown and are skipped rather than aborting the run.
+- `-i`/`--interactive` opens a checkbox picker that surfaces conflicts so you can
+  review them before writing. Each row carries a status glyph: fresh snippets show
+  `[ ]`/`[x]` (pre-checked, toggle to import); a snippet whose id already exists at
+  the exact target shows `[=]` (**skip-by-default** — check it to **arm a per-item
+  overwrite** that refreshes just that prompt); a same-id duplicate at another path
+  shows `[!]` (**non-selectable**, with the conflicting path). The footer counts
+  `N selected · M overwrite · K blocked` and asks `write N prompts?`. Confirming
+  imports the checked creates and overwrites exactly the armed rows; cancelling
+  writes nothing and exits 0; a no-op outcome (cancel, deselect-all, nothing
+  selected) creates no files and no directories. Per-item overwrite is
+  **exact-target-only** and routes through the same writer, which still refuses a
+  cross-path duplicate as a hard error (exit 3) — the picker surfaces policy, it
+  cannot weaken it. `-i` requires an interactive terminal and rejects `--dry-run`
+  (both usage errors, exit 2). `-i --overwrite` is allowed: the global flag is the
+  all-or-nothing opt-in and pre-arms every refresh, while per-item arming is the
+  finer choice when no flag is passed.
 - Importing never drops a snippet: two phrases that normalize to the same id are
   disambiguated with a short uuid suffix, and a phrase with no slug-able
   characters falls back to a `wispr-<uuid>` id (its phrase is still its title).

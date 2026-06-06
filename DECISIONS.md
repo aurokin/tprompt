@@ -360,6 +360,23 @@ files. The contract is locked:
   idempotent re-runs a stat per snippet, not a full store walk). `--overwrite` is
   the explicit opt-in to refresh an existing prompt from Wispr; `--dry-run` previews
   without writing.
+- **Interactive conflict review & per-item overwrite (`-i`).** The `-i` picker
+  surfaces the §34 collision tuple per row: a fresh snippet (`[ ]`/`[x]`, toggle to
+  import), an **exact-target** conflict (`[=]`, **skip-by-default** — check to arm a
+  **per-item overwrite**), and a **cross-path** duplicate (`[!]`, **non-selectable**,
+  shown with the conflicting path). Per-item overwrite **widens the contract surface
+  but not the policy**: it is finer than the all-or-nothing `--overwrite` flag, yet it
+  is **exact-target-only** and routes through the *same* `writePromptContent` overwrite
+  path. The writer stays authoritative — arming an id whose write would create a
+  cross-path duplicate is still refused as the §4/§18 hard error (exit 3); the TUI can
+  surface the tuple but can neither invent nor weaken policy. Skip-by-default holds in
+  the picker: an unarmed exact-target is skipped, so an idempotent re-run defaults to
+  all-skip. `-i --overwrite` stays allowed (the flag is the all-or-nothing opt-in and
+  pre-arms every refresh, shown checked); `-i --dry-run` and a non-tty `-i` are usage
+  errors (exit 2). The race-safety from the non-interactive path carries over: a
+  *non-armed* row that races to a conflict while the picker is open is skipped (never a
+  surprise hard error), while an *explicitly armed* overwrite that resolves to a
+  cross-path surfaces the exit-3 — only deliberate overwrite intent escalates.
 - **Additive and one-way.** Import only creates prompt files (or refreshes them
   under `--overwrite`). It never deletes prompts, never mutates Wispr, and does
   not establish any ongoing sync — the result is standalone prompt files. This is

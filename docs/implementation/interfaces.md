@@ -122,36 +122,44 @@ Submitter
 ## Import TUI
 
 `internal/importtui` is a separate Bubble Tea seam for `import wispr -i` — a
-checkbox picker over importable snippets. It is a deliberate sibling of
-`internal/tui` (neither imports the other): the board selects a prompt to submit;
-the import picker selects ids to write. It depends on no store, clipboard, or
-submitter — only the items the command layer hands it.
+checkbox picker that surfaces import conflicts and per-item overwrite. It is a
+deliberate sibling of `internal/tui` (neither imports the other): the board selects
+a prompt to submit; the import picker selects ids to write (and which to overwrite).
+It depends on no store, clipboard, or submitter — only the items the command layer
+hands it.
 
 ```text
 ImportRenderer
 - Run(state ImportState) -> ImportResult | error
 
 ImportState {
-  items: []ImportItem              // one fresh (importable) snippet per row
+  items: []ImportItem              // one conflict-classified snippet per row
 }
 
 ImportItem {
   id: string                       // disambiguated prompt id (the id the writer uses)
   title: string                    // snippet phrase, shown as the row label
+  conflict: none | exact-target | cross-path   // glyph + selectability
+  blocker: string                  // conflicting path (cross-path rows only)
+  armed: bool                      // pre-arm an exact-target (a CLI --overwrite refresh)
 }
 
 ImportResult {
   action: "confirm" | "cancel"
-  selected_ids: []string           // when action == "confirm"; in item order
+  selected_ids: []string           // every checked id (writes); confirm only, item order
+  overwrite_ids: []string          // checked exact-targets armed to overwrite (⊆ selected_ids)
 }
 ```
 
-The command layer builds the write-free plan (`dryRunPlan`), passes the
-importable rows to `Run`, and on confirm re-runs the writer over the same
-snippets slice, importing exactly `selected_ids`. The small pure scroll/viewport
-helpers are copied from `internal/tui` (noted in the package doc), and the
-renderer runs with alt-screen so the picker is torn down before the command
-prints created-path lines to stdout.
+The command layer builds the write-free plan (`dryRunPlan`), projects fresh /
+exact-target / cross-path rows to `Run`, and on confirm re-runs the writer over the
+same snippets slice — importing `selected_ids` and folding `overwrite_ids` into a
+per-item effective overwrite. Per-item overwrite is exact-target-only and routes
+through the single `writePromptContent` overwrite path, so the writer still refuses a
+cross-path duplicate (exit 3); the picker surfaces policy, it cannot weaken it. The
+small pure scroll/viewport helpers are copied from `internal/tui` (noted in the
+package doc), and the renderer runs with alt-screen so the picker is torn down before
+the command prints created-path lines to stdout.
 
 ## Keybind resolver
 
