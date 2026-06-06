@@ -390,10 +390,13 @@ files. The contract is locked:
   preserved exactly by a thin adapter (zero behavior change; existing `tui` search
   tests are the regression guard). Search is a **view filter, not a selection
   mutation**: the selection set and the `write N prompts?` count stay **global**
-  (over all snippets) while `Space`/`a` act on the **visible** rows — except that
-  `a` disarms hidden ad-hoc overwrites globally, so a filter can never strand a
-  surprise destructive overwrite. An applied filter is shown in the header, and
-  `Esc` clears it before it cancels the picker.
+  (over all snippets) while `Space`/`a` act on the **visible** rows. The one
+  overwrite-safety invariant is that an ad-hoc per-item overwrite is armed only
+  while its row is **visible** — filtering an armed exact-target out of view
+  disarms it, so a filter can never strand a surprise destructive overwrite (the
+  global overwrite count truthfully drops to 0). A CLI `--overwrite` refresh is an
+  authorized bulk opt-in and survives while hidden. An applied filter is shown in
+  the header, and `Esc` clears it before it cancels the picker.
 - **Additive and one-way.** Import only creates prompt files (or refreshes them
   under `--overwrite`). It never deletes prompts, never mutates Wispr, and does
   not establish any ongoing sync — the result is standalone prompt files. This is

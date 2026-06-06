@@ -97,8 +97,26 @@ func (m Model) computeVisible() []Item {
 
 // refilter recomputes the visible set after a query change and resets the cursor
 // to the top (the ranked order changed, so preserving the index is meaningless).
+//
+// It also enforces the picker's overwrite-safety invariant: an ad-hoc per-item
+// overwrite is only ever armed while its row is VISIBLE. A filter that hides an
+// armed exact-target disarms it, so the global counter truthfully drops to "0
+// overwrite" and confirm can never silently overwrite a prompt the user can no
+// longer see. CLI --overwrite refreshes (Armed) are an authorized bulk opt-in, so
+// they survive while hidden; only ad-hoc arms are scoped to visibility. This is
+// refilter's choke point because it is the only place the visible set ever shrinks
+// (NewModel starts with an empty query, so everything is visible).
 func (m Model) refilter() Model {
 	m.visible = m.computeVisible()
+	visible := make(map[string]bool, len(m.visible))
+	for _, it := range m.visible {
+		visible[it.ID] = true
+	}
+	for _, it := range m.items {
+		if !visible[it.ID] && it.Conflict == ConflictExactTarget && !it.Armed {
+			m.selected[it.ID] = false
+		}
+	}
 	m.cursor = 0
 	m.scrollOffset = 0
 	return m
@@ -267,27 +285,12 @@ func (m Model) toggleCurrent() Model {
 // with no filter (visible == all) it is byte-identical to the unfiltered
 // select-all.
 //
-// The one thing `a` resets GLOBALLY, even for hidden rows, is an ad-hoc armed
-// overwrite: a checked exact-target that the CLI --overwrite flag did NOT
-// authorize. AUR-529's safety contract is that `a` never leaves a surprise
-// destructive overwrite armed; a row armed and then filtered out of view is
-// exactly such a surprise, so disarming it everywhere keeps that guarantee while
-// the visible-scoped fresh selection still respects the active filter.
-// CLI-authorized refreshes (Armed) are not surprises and survive untouched.
+// `a` does not need to reach hidden rows to stay safe: refilter already guarantees
+// no ad-hoc overwrite is armed while hidden (so there is no off-filter destructive
+// arm for `a` to miss), and hidden fresh selections are non-destructive.
 func (m Model) selectAll() Model {
-	visible := make(map[string]bool, len(m.visible))
 	for _, it := range m.visible {
-		visible[it.ID] = true
-	}
-	for _, it := range m.items {
-		switch {
-		case visible[it.ID]:
-			m.selected[it.ID] = it.Conflict == ConflictNone || it.Armed
-		case it.Conflict == ConflictExactTarget && !it.Armed:
-			// Hidden ad-hoc overwrite: disarm it so `a` cannot leave an unseen
-			// destructive write pending.
-			m.selected[it.ID] = false
-		}
+		m.selected[it.ID] = it.Conflict == ConflictNone || it.Armed
 	}
 	return m
 }

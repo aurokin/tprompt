@@ -246,10 +246,11 @@ func TestModel_SelectAllRespectsFilterAndLeavesOffFilterAlone(t *testing.T) {
 	}
 }
 
-// `a` must never leave a surprise destructive overwrite armed (AUR-529's safety
-// contract): an exact-target armed ad-hoc and then filtered out of view is
-// disarmed globally by select-all, even though it is not in the visible set.
-func TestModel_SelectAllDisarmsHiddenOverwrite(t *testing.T) {
+// Overwrite-safety invariant: an ad-hoc overwrite is only armed while its row is
+// visible. Arming an exact-target with Space and then filtering it out of view
+// disarms it — confirming directly (no select-all) must NOT overwrite the hidden
+// file, and the global overwrite count drops to 0 once it is filtered away.
+func TestModel_FilteringDisarmsHiddenAdHocOverwrite(t *testing.T) {
 	state := State{Items: []Item{
 		{ID: "apple", Title: "x", Conflict: ConflictNone},
 		{ID: "exists", Title: "dup", Conflict: ConflictExactTarget},
@@ -258,29 +259,35 @@ func TestModel_SelectAllDisarmsHiddenOverwrite(t *testing.T) {
 	// Arm the exact-target overwrite ad-hoc.
 	m = send(m, keyType(tea.KeyDown))  // → exists
 	m = send(m, keyType(tea.KeySpace)) // arm
-	// Filter so the armed row is hidden, commit, then select-all.
+	if !contains(m.overwriteIDs(), "exists") {
+		t.Fatalf("setup: exists should be armed, overwriteIDs = %v", m.overwriteIDs())
+	}
+	// Filter so the armed row is hidden — this alone disarms it.
 	m = send(m, keyRune('/'))
 	m = typeRunes(m, "apple")
 	if got := visibleIDs(m); len(got) != 1 || got[0] != "apple" {
 		t.Fatalf("visible = %v, want [apple] (exists hidden)", got)
 	}
-	m = send(m, keyType(tea.KeyEnter)) // commit filter → modeList, query kept
-	m = send(m, keyRune('a'))          // select-all
+	if contains(m.overwriteIDs(), "exists") {
+		t.Fatalf("overwriteIDs = %v, filtering away an armed ad-hoc overwrite must disarm it", m.overwriteIDs())
+	}
+	// Confirm directly from search — no select-all needed to be safe.
+	m = send(m, keyType(tea.KeyEnter)) // commit filter → modeList
 	m = send(m, keyType(tea.KeyEnter)) // confirm
 
 	got := m.Result()
 	if contains(got.OverwriteIDs, "exists") {
-		t.Fatalf("OverwriteIDs = %v, a hidden ad-hoc overwrite must be disarmed by select-all", got.OverwriteIDs)
+		t.Fatalf("OverwriteIDs = %v, a hidden ad-hoc overwrite must never execute on confirm", got.OverwriteIDs)
 	}
 	if contains(got.SelectedIDs, "exists") {
 		t.Fatalf("SelectedIDs = %v, the disarmed hidden overwrite must not be written", got.SelectedIDs)
 	}
 }
 
-// A CLI-authorized refresh (Armed) that is filtered out of view is NOT a
-// surprise, so `a` leaves it armed even while hidden — the complement of the
-// ad-hoc disarm above.
-func TestModel_SelectAllKeepsHiddenCLIAuthorizedRefresh(t *testing.T) {
+// A CLI-authorized refresh (Armed) that is filtered out of view is an authorized
+// bulk opt-in, not a surprise, so it stays armed while hidden and still overwrites
+// on confirm — the complement of the ad-hoc disarm above.
+func TestModel_FilteringKeepsHiddenCLIAuthorizedRefresh(t *testing.T) {
 	state := State{Items: []Item{
 		{ID: "apple", Title: "x", Conflict: ConflictNone},
 		{ID: "refresh", Title: "dup", Conflict: ConflictExactTarget, Armed: true},
@@ -288,13 +295,15 @@ func TestModel_SelectAllKeepsHiddenCLIAuthorizedRefresh(t *testing.T) {
 	m := NewModel(state)
 	m = send(m, keyRune('/'))
 	m = typeRunes(m, "apple") // hides refresh
-	m = send(m, keyType(tea.KeyEnter))
-	m = send(m, keyRune('a'))
-	m = send(m, keyType(tea.KeyEnter))
+	if !contains(m.overwriteIDs(), "refresh") {
+		t.Fatalf("overwriteIDs = %v, a hidden CLI-authorized refresh must stay armed", m.overwriteIDs())
+	}
+	m = send(m, keyType(tea.KeyEnter)) // commit
+	m = send(m, keyType(tea.KeyEnter)) // confirm
 
 	got := m.Result()
 	if !contains(got.OverwriteIDs, "refresh") {
-		t.Fatalf("OverwriteIDs = %v, a hidden CLI-authorized refresh must survive select-all", got.OverwriteIDs)
+		t.Fatalf("OverwriteIDs = %v, a hidden CLI-authorized refresh must still overwrite on confirm", got.OverwriteIDs)
 	}
 }
 

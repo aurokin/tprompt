@@ -304,10 +304,11 @@ Assert:
   (a `starred`-only hit proves the tags corpus is wired via `pickerItems`→`wispr.Snippet.Tags`);
   in search mode every printable rune — `a`/`j`/`k`/space — is query text, not an action;
   selection is keyed by id and survives entering/typing/clearing/leaving search; footer counts
-  and `write N prompts?` stay global while `Space`/`a` act on the visible set; `a` still disarms
-  a *hidden* ad-hoc overwrite (but keeps a hidden CLI-authorized refresh); a committed filter is
-  visible in the list header and `Esc` clears it before it cancels; the search view honors the
-  viewport (re-clamps as the cursor moves past the frame)
+  and `write N prompts?` stay global while `Space`/`a` act on the visible set; the
+  overwrite-safety invariant holds — filtering an armed *ad-hoc* overwrite out of view disarms
+  it (so a bare confirm cannot execute a hidden overwrite), while a hidden CLI-authorized
+  refresh survives; a committed filter is visible in the list header and `Esc` clears it before
+  it cancels; the search view honors the viewport (re-clamps as the cursor moves past the frame)
 - DB error taxonomy maps to exit codes: missing DB / no default location →
   usage (2); unreadable/garbage/locked DB → general (1)
 - the awkward-path DSN survives spaces and URI metacharacters in the db path
