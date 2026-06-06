@@ -208,8 +208,8 @@ func interactivePicker(deps Deps, flags importWisprFlags) (importtui.Renderer, e
 // re-classifies to a skip while the picker was open — leaves no empty directory
 // behind, honoring the cancel/no-op = "writes nothing" contract even under a race.
 func runInteractiveImport(deps Deps, picker importtui.Renderer, source promptsource.Source, collisionSources []promptsource.Source, snippets []wispr.Snippet, flags importWisprFlags) error {
-	selected := map[string]bool{}
-	if items := freshItems(dryRunPlan(source, collisionSources, snippets, flags)); len(items) > 0 {
+	sel := &importSelection{write: map[string]bool{}, overwrite: map[string]bool{}}
+	if items := pickerItems(dryRunPlan(source, collisionSources, snippets, flags)); len(items) > 0 {
 		result, err := picker.Run(importtui.State{Items: items})
 		if err != nil {
 			return err
@@ -218,11 +218,14 @@ func runInteractiveImport(deps Deps, picker importtui.Renderer, source promptsou
 			return nil
 		}
 		for _, id := range result.SelectedIDs {
-			selected[id] = true
+			sel.write[id] = true
+		}
+		for _, id := range result.OverwriteIDs {
+			sel.overwrite[id] = true
 		}
 	}
 
-	imported, skipped, err := importSnippets(deps, source, collisionSources, snippets, flags, selected)
+	imported, skipped, err := importSnippets(deps, source, collisionSources, snippets, flags, sel)
 	if err != nil {
 		return err
 	}
@@ -240,15 +243,33 @@ func ensureImportWriteDir(source promptsource.Source) error {
 	return ensureScaffoldDir(source.Path, true)
 }
 
-// freshItems projects the importable (creatable / refreshable-under-overwrite)
-// plan rows into picker items. Non-importable statuses (exists/crossPath/empty/
-// invalid) are not shown — PR3 selects only fresh items; conflict rows are
-// AUR-529.
-func freshItems(plan []planItem) []importtui.Item {
+// pickerItems projects the user-actionable plan rows into picker items, carrying
+// each row's conflict kind so the picker renders the right glyph and selectability:
+//   - planImportable, fresh create (no existing target) → ConflictNone;
+//   - planImportable, existing target → a refresh authorized by the CLI --overwrite
+//     flag (the only way an existing target classifies importable): shown as a
+//     pre-armed ConflictExactTarget so the glyph/counter report the overwrite
+//     truthfully rather than as a fresh create (completes AUR-528 D10's deferral);
+//   - planExists     → ConflictExactTarget (skip-by-default; check to arm overwrite);
+//   - planCrossPath  → ConflictCrossPath (non-selectable; shows the conflicting path).
+//
+// planEmptyBody / planInvalidID / planClassifyError are NOT shown: they are
+// degenerate or internal skips outside the conflict-review vocabulary (a classify
+// error still aborts the run via the writer path, not the picker).
+func pickerItems(plan []planItem) []importtui.Item {
 	items := make([]importtui.Item, 0, len(plan))
 	for _, p := range plan {
-		if p.status == planImportable {
-			items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase})
+		switch p.status {
+		case planImportable:
+			if p.targetExisted {
+				items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase, Conflict: importtui.ConflictExactTarget, Armed: true})
+			} else {
+				items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase, Conflict: importtui.ConflictNone})
+			}
+		case planExists:
+			items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase, Conflict: importtui.ConflictExactTarget})
+		case planCrossPath:
+			items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase, Conflict: importtui.ConflictCrossPath, Blocker: p.blocker})
 		}
 	}
 	return items
@@ -268,24 +289,25 @@ func freshItems(plan []planItem) []importtui.Item {
 // never the planned status — the O_EXCL create-race turns a planned create into an
 // idempotent skip at execution time.
 //
-// selected is the interactive selection filter. nil imports every item
-// (byte-identical to the non-interactive path). A non-nil set means interactive
-// mode: re-classify each snippet and let only two kinds reach executePlanItem — a
-// still-importable row the user confirmed (→ written) and a genuine classify
-// error (→ surfaced). Everything else is skipped: a deselected row, or one that
-// re-classified to a §4 cross-path duplicate / already-exists / empty / invalid
-// while the picker was open. So a confirmed import never becomes a §4 hard error
-// the user could not act on (conflict review is AUR-529), and the behavior is the
-// same whether a conflict was pre-existing or appeared concurrently. confirm-all
-// therefore writes the same fresh-item bytes as a non-interactive run when no
-// conflicts exist; where they do, interactive skips them instead of hard-erroring.
-func importSnippets(deps Deps, source promptsource.Source, collisionSources []promptsource.Source, snippets []wispr.Snippet, flags importWisprFlags, selected map[string]bool) (imported, skipped int, err error) {
+// sel is the interactive selection filter. nil imports every item (byte-identical
+// to the non-interactive path). A non-nil sel means interactive mode: re-classify
+// each snippet (folding in per-item overwrite arming) and let only what
+// interactiveReachesExecute allows reach executePlanItem — a confirmed importable
+// row (→ written, possibly an overwrite), an explicitly-armed row (→ written, or
+// surfaced as the §4 hard error if it resolved to a cross-path), and a genuine
+// classify error. Everything else is skipped: a deselected/unarmed row, or a
+// non-armed row that re-classified to a §4 cross-path / already-exists / empty /
+// invalid while the picker was open. So a non-armed confirmed import never becomes
+// a §4 hard error the user could not act on, while an explicit overwrite intent
+// keeps the writer authoritative. confirm-all therefore writes the same fresh-item
+// bytes as a non-interactive run when no conflicts exist.
+func importSnippets(deps Deps, source promptsource.Source, collisionSources []promptsource.Source, snippets []wispr.Snippet, flags importWisprFlags, sel *importSelection) (imported, skipped int, err error) {
 	claimed := map[string]bool{}
-	interactive := selected != nil
+	interactive := sel != nil
 	destReady := false
 	for _, snip := range snippets {
-		item := classifySnippet(source, collisionSources, snip, flags, claimed)
-		if interactive && !interactiveReachesExecute(item, selected) {
+		item := classifySnippet(source, collisionSources, snip, flags, claimed, sel)
+		if interactive && !interactiveReachesExecute(item, sel) {
 			skipped++
 			continue
 		}
@@ -311,16 +333,34 @@ func importSnippets(deps Deps, source promptsource.Source, collisionSources []pr
 }
 
 // interactiveReachesExecute reports whether a re-classified item should reach
-// executePlanItem in interactive mode. Only two do: a still-importable row the
-// user confirmed (→ written), and a genuine classify error (→ surfaced/aborted).
-// Everything else is skipped, so a row that re-classified to a conflict / exists
-// / empty / invalid while the picker was open never aborts the run and the user
-// only ever writes what they saw and confirmed.
-func interactiveReachesExecute(item planItem, selected map[string]bool) bool {
+// executePlanItem in interactive mode. Three reach it:
+//   - a genuine classify error (→ surfaced/aborted, never swallowed);
+//   - an explicitly ARMED overwrite (sel.overwrite[id]) regardless of status — so an
+//     armed id that resolved to a cross-path duplicate surfaces the §34 hard error
+//     (exit 3) via executePlanItem's planCrossPath case rather than silently
+//     skipping. This keeps the writer authoritative: per-item overwrite cannot
+//     create a §4/§18 duplicate. A cross-path is never armed through the picker (it
+//     renders non-selectable), so this is reachable only when arming an exact-target
+//     turns up an other-path duplicate at write time: either a race, or a PRE-EXISTING
+//     same-id duplicate the cheap exact-target skip-path did not surface at
+//     picker-build. Both are genuine §4 violations, and arming an overwrite is the
+//     same intent as the CLI --overwrite, which also hard-errors (exit 3) here — so
+//     surfacing it (with the conflicting path named) is correct and consistent;
+//   - a confirmed still-importable row (→ written).
+//
+// Everything else is skipped: a deselected/unarmed row, or a NON-armed row that
+// merely raced to a conflict / exists / empty / invalid while the picker was open.
+// Only explicit overwrite intent escalates a cross-path to the hard error; a plain
+// fresh row that raced is still skipped (AUR-528 race-safety), so the user only ever
+// writes what they saw and confirmed.
+func interactiveReachesExecute(item planItem, sel *importSelection) bool {
 	if item.status == planClassifyError {
 		return true
 	}
-	return item.status == planImportable && selected[item.id]
+	if sel.overwrite[item.id] {
+		return true
+	}
+	return item.status == planImportable && sel.write[item.id]
 }
 
 // reportOutcome emits the per-snippet line for one executed outcome and returns
@@ -377,6 +417,7 @@ type planItem struct {
 	content       []byte        // markdown to write (planImportable only)
 	target        string        // absolute destination path (planImportable/planExists)
 	targetExisted bool          // exact target existed at classify time (overwrite vs create)
+	overwrite     bool          // effective overwrite for this id (flags.overwrite OR per-item armed)
 	status        planStatus
 	blocker       string // blocking path for planExists/planCrossPath
 	err           error  // captured error for planClassifyError
@@ -394,9 +435,21 @@ func dryRunPlan(source promptsource.Source, collisionSources []promptsource.Sour
 	claimed := map[string]bool{}
 	plan := make([]planItem, 0, len(snippets))
 	for _, snip := range snippets {
-		plan = append(plan, classifySnippet(source, collisionSources, snip, flags, claimed))
+		// nil selection: the picker has no per-item arming yet at plan-build time, so
+		// exact-targets classify under flags.overwrite and render as [=] (skip-by-default)
+		// unless the CLI --overwrite already made them importable refreshes.
+		plan = append(plan, classifySnippet(source, collisionSources, snip, flags, claimed, nil))
 	}
 	return plan
+}
+
+// importSelection is the interactive picker's confirmed choices, threaded into the
+// write replay. write is every id to write (fresh creates plus armed exact-target
+// overwrites); overwrite is the subset armed for a per-item overwrite. A nil
+// *importSelection means a non-interactive run (import everything, byte-identical).
+type importSelection struct {
+	write     map[string]bool
+	overwrite map[string]bool
 }
 
 // classifySnippet maps and classifies a single snippet without writing, applying
@@ -404,7 +457,14 @@ func dryRunPlan(source promptsource.Source, collisionSources []promptsource.Sour
 // claimed-map mutation order matches the original importer exactly: an empty-body
 // snippet returns before disambiguateID so it never claims a slug, while an
 // invalid-id snippet returns after, having already consumed its disambiguated slot.
-func classifySnippet(source promptsource.Source, collisionSources []promptsource.Source, snip wispr.Snippet, flags importWisprFlags, claimed map[string]bool) planItem {
+//
+// sel carries the interactive per-item overwrite arming: an id the user armed gets
+// an effective overwrite of true even when --overwrite was not passed. This is the
+// only way per-item overwrite enters the pipeline, and it still routes through the
+// same promptCollision check, so an armed id with a same-id prompt at another path
+// stays planCrossPath — arming cannot create a §4/§18 duplicate. sel == nil
+// (non-interactive) leaves the effective overwrite at flags.overwrite, byte-identical.
+func classifySnippet(source promptsource.Source, collisionSources []promptsource.Source, snip wispr.Snippet, flags importWisprFlags, claimed map[string]bool, sel *importSelection) planItem {
 	id, content, ok := snip.ToPrompt(flags.tag)
 	if !ok {
 		// A skipped (empty-body) snippet is never written, so it must not claim a
@@ -423,8 +483,9 @@ func classifySnippet(source promptsource.Source, collisionSources []promptsource
 		return planItem{snippet: snip, id: id, status: planClassifyError, err: fmt.Errorf("resolve prompt file path: %w", err)}
 	}
 
+	overwrite := flags.overwrite || (sel != nil && sel.overwrite[id])
 	targetExisted := pathExists(target)
-	blocker, err := promptCollision(target, collisionSources, source.Scope, id, targetExisted, flags.overwrite)
+	blocker, err := promptCollision(target, collisionSources, source.Scope, id, targetExisted, overwrite)
 	if err != nil {
 		return planItem{snippet: snip, id: id, status: planClassifyError, err: err}
 	}
@@ -434,18 +495,18 @@ func classifySnippet(source promptsource.Source, collisionSources []promptsource
 			// failure, so re-runs stay idempotent — and cheap. promptCollision
 			// short-circuits here on a single stat, so an idempotent re-run never walks
 			// the store (no quadratic scan, no spurious walk-error aborts).
-			return planItem{snippet: snip, id: id, target: target, targetExisted: targetExisted, status: planExists, blocker: blocker}
+			return planItem{snippet: snip, id: id, target: target, targetExisted: targetExisted, overwrite: overwrite, status: planExists, blocker: blocker}
 		}
 		// A same-id prompt at ANOTHER path in scope means this write would CREATE a
-		// §4/§18 duplicate that --overwrite cannot resolve in place, so refuse it.
-		// This walk runs only when the exact target is absent (or --overwrite), so
-		// idempotent re-runs skip above without it. A duplicate that already coexists
-		// with the exact target is a pre-existing store-level §4 violation surfaced by
+		// §4/§18 duplicate that overwrite cannot resolve in place, so refuse it. This
+		// walk runs only when the exact target is absent (or overwrite), so idempotent
+		// re-runs skip above without it. A duplicate that already coexists with the
+		// exact target is a pre-existing store-level §4 violation surfaced by
 		// list/send/doctor — import guards against CREATING duplicates, it does not
 		// re-audit the whole store on a no-op skip.
-		return planItem{snippet: snip, id: id, status: planCrossPath, blocker: blocker}
+		return planItem{snippet: snip, id: id, overwrite: overwrite, status: planCrossPath, blocker: blocker}
 	}
-	return planItem{snippet: snip, id: id, content: content, target: target, targetExisted: targetExisted, status: planImportable}
+	return planItem{snippet: snip, id: id, content: content, target: target, targetExisted: targetExisted, overwrite: overwrite, status: planImportable}
 }
 
 // executePlanItem performs the write half for one classified item, returning the
@@ -457,9 +518,9 @@ func classifySnippet(source promptsource.Source, collisionSources []promptsource
 //
 // It trusts item as classified: the non-interactive caller (importSnippets)
 // classifies each snippet immediately before calling this, so item reflects the
-// store at the write moment (including item.targetExisted, which decides overwrite
-// vs create). The interactive TUI, which holds a batch plan across user
-// interaction, must re-classify before writing (AUR-528).
+// store at the write moment (including item.overwrite && item.targetExisted, which
+// together decide atomic-replace vs O_EXCL create). The interactive TUI, which
+// holds a batch plan across user interaction, must re-classify before writing (AUR-528).
 func executePlanItem(item planItem, flags importWisprFlags) (snippetOutcome, error) {
 	switch item.status {
 	case planEmptyBody:
@@ -480,10 +541,11 @@ func executePlanItem(item planItem, flags importWisprFlags) (snippetOutcome, err
 		// Environmental write failures are surfaced by the real run.
 		if !flags.dryRun {
 			// Overwrite (atomic replace) only when the exact target existed at classify
-			// time and --overwrite was given; otherwise the O_EXCL create path turns a
-			// target that appeared since classification into an idempotent skip rather
-			// than clobbering it.
-			if err := writePromptContent(item.id, item.target, item.content, flags.overwrite && item.targetExisted); err != nil {
+			// time and an overwrite was effective for this id (the CLI --overwrite flag
+			// or a per-item arm); otherwise the O_EXCL create path turns a target that
+			// appeared since classification into an idempotent skip rather than
+			// clobbering it.
+			if err := writePromptContent(item.id, item.target, item.content, item.overwrite && item.targetExisted); err != nil {
 				// A concurrent writer can win the O_EXCL create race in the window
 				// between classification and this write. Skip-existing is a write
 				// refusal, not a failure, so treat that as an idempotent skip rather

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hsadler/tprompt/internal/importtui"
+	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/wispr"
 )
 
@@ -34,14 +35,42 @@ func withImportRenderer(deps Deps, r importtui.Renderer) Deps {
 	return deps
 }
 
-// confirmAll selects every fresh id the picker was shown — the stub equivalent
-// of opening the picker and pressing Enter with the pre-checked defaults.
+// confirmAll selects every id the picker was shown — the stub equivalent of
+// opening the picker and pressing Enter with the pre-checked defaults. (It echoes
+// every id, including non-selectable rows, to exercise the writer's own filter;
+// the model is unit-tested separately for real selectability.)
 func confirmAll(items []importtui.Item) importtui.Result {
 	ids := make([]string, len(items))
 	for i, it := range items {
 		ids[i] = it.ID
 	}
 	return importtui.Result{Action: importtui.ActionConfirm, SelectedIDs: ids}
+}
+
+// confirmAllArmingOverwrites simulates a user who checks every selectable row and
+// arms each exact-target conflict for overwrite (cross-path rows stay unselected).
+func confirmAllArmingOverwrites(items []importtui.Item) importtui.Result {
+	var selected, overwrite []string
+	for _, it := range items {
+		switch it.Conflict {
+		case importtui.ConflictNone:
+			selected = append(selected, it.ID)
+		case importtui.ConflictExactTarget:
+			selected = append(selected, it.ID)
+			overwrite = append(overwrite, it.ID)
+		}
+	}
+	return importtui.Result{Action: importtui.ActionConfirm, SelectedIDs: selected, OverwriteIDs: overwrite}
+}
+
+// findItem returns the picker item with the given id, or nil.
+func findItem(items []importtui.Item, id string) *importtui.Item {
+	for i := range items {
+		if items[i].ID == id {
+			return &items[i]
+		}
+	}
+	return nil
 }
 
 // TestImportWispr_Interactive_ConfirmAllMatchesNonInteractive pins the locked
@@ -162,10 +191,12 @@ func TestImportWispr_Interactive_DeselectHonorsDisambiguatedID(t *testing.T) {
 	}
 }
 
-// TestImportWispr_Interactive_OverwriteShowsRefreshAsFresh pins D10: under
-// --overwrite an existing target classifies planImportable, so it appears as a
-// selectable fresh row and confirm-all refreshes it.
-func TestImportWispr_Interactive_OverwriteShowsRefreshAsFresh(t *testing.T) {
+// TestImportWispr_Interactive_OverwriteShowsRefreshAsArmed pins the AUR-528 D10
+// behavior as completed by AUR-529: under --overwrite an existing target
+// classifies planImportable, and the picker shows it as a PRE-ARMED exact-target
+// overwrite (not a fresh create), so the glyph/counter report the refresh
+// truthfully; confirm-all refreshes it.
+func TestImportWispr_Interactive_OverwriteShowsRefreshAsArmed(t *testing.T) {
 	dir := t.TempDir()
 	stale := filepath.Join(dir, "code-review.md")
 	if err := os.WriteFile(stale, []byte("STALE content\n"), 0o600); err != nil {
@@ -177,10 +208,13 @@ func TestImportWispr_Interactive_OverwriteShowsRefreshAsFresh(t *testing.T) {
 	if _, _, err := executeRootWith(t, deps, "import", "wispr", "--db-path", "x", "-i", "--overwrite"); err != nil {
 		t.Fatalf("interactive overwrite: %v", err)
 	}
-	// The refresh row was offered alongside the create.
-	ids := []string{rec.gotItems[0].ID, rec.gotItems[1].ID}
-	if !contains(ids, "code-review") {
-		t.Errorf("picker items = %v, want code-review offered as a refresh row", ids)
+	// The refresh row was offered as a pre-armed exact-target overwrite.
+	refresh := findItem(rec.gotItems, "code-review")
+	if refresh == nil {
+		t.Fatalf("picker items = %+v, want code-review offered as a refresh row", rec.gotItems)
+	}
+	if refresh.Conflict != importtui.ConflictExactTarget || !refresh.Armed {
+		t.Errorf("code-review = %+v, want a pre-armed ConflictExactTarget refresh", *refresh)
 	}
 	body, err := os.ReadFile(stale)
 	if err != nil {
@@ -191,33 +225,43 @@ func TestImportWispr_Interactive_OverwriteShowsRefreshAsFresh(t *testing.T) {
 	}
 }
 
-// TestImportWispr_Interactive_HiddenConflictDoesNotAbort pins that a snippet the
-// picker never showed (a cross-path duplicate) does not abort an interactive
-// import: it is skipped, not hard-errored, because the user could not see or
-// deselect it (conflict review is AUR-529). The selected fresh snippet still
-// imports and the run exits 0.
-func TestImportWispr_Interactive_HiddenConflictDoesNotAbort(t *testing.T) {
+// TestImportWispr_Interactive_CrossPathShownButWritesNothing pins that a
+// cross-path duplicate is now SHOWN in the picker (AUR-529) as a non-selectable
+// row carrying the conflicting path, but confirming around it writes nothing and
+// does not abort: the fresh snippet still imports and the run exits 0.
+func TestImportWispr_Interactive_CrossPathShownButWritesNothing(t *testing.T) {
 	dir := t.TempDir()
 	// Seed a same-stem prompt at another path so `code-review` classifies as a
-	// cross-path duplicate (never shown in the picker).
+	// cross-path duplicate.
 	sub := filepath.Join(dir, "agents")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(sub, "code-review.md"), []byte("---\ntitle: x\n---\n\nbody\n"), 0o600); err != nil {
+	conflictPath := filepath.Join(sub, "code-review.md")
+	if err := os.WriteFile(conflictPath, []byte("---\ntitle: x\n---\n\nbody\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rec := &recordingImportRenderer{decide: confirmAll}
+	// Real picker behavior: confirm only the selectable fresh row; the cross-path
+	// row cannot be checked, so its id is not returned.
+	rec := &recordingImportRenderer{decide: func(items []importtui.Item) importtui.Result {
+		return importtui.Result{Action: importtui.ActionConfirm, SelectedIDs: []string{"organize-thoughts-prompt"}}
+	}}
 	deps := withImportRenderer(importCmdDeps(t, dir, &fakeWisprReader{snippets: liveSnippets()}), rec)
 
 	_, _, err := executeRootWith(t, deps, "import", "wispr", "--db-path", "x", "-i")
 	if err != nil {
-		t.Fatalf("hidden cross-path conflict aborted interactive import: %v", err)
+		t.Fatalf("cross-path conflict aborted interactive import: %v", err)
 	}
-	// Only the fresh snippet was shown, and it imported; the cross-path snippet
-	// was skipped, not written, not aborted.
-	if len(rec.gotItems) != 1 || rec.gotItems[0].ID != "organize-thoughts-prompt" {
-		t.Fatalf("picker items = %+v, want only the fresh organize-thoughts-prompt", rec.gotItems)
+	// Both rows were shown; the cross-path row carries its kind and the blocker.
+	cross := findItem(rec.gotItems, "code-review")
+	if cross == nil {
+		t.Fatalf("picker items = %+v, want code-review shown as a cross-path row", rec.gotItems)
+	}
+	if cross.Conflict != importtui.ConflictCrossPath {
+		t.Errorf("code-review Conflict = %v, want ConflictCrossPath", cross.Conflict)
+	}
+	if cross.Blocker != conflictPath {
+		t.Errorf("code-review Blocker = %q, want the conflicting path %q", cross.Blocker, conflictPath)
 	}
 	if !pathExists(filepath.Join(dir, "organize-thoughts-prompt.md")) {
 		t.Error("selected fresh snippet was not imported")
@@ -491,11 +535,146 @@ func TestNewImportRenderer_TTYGate(t *testing.T) {
 	})
 }
 
-func contains(ids []string, want string) bool {
-	for _, id := range ids {
-		if id == want {
-			return true
-		}
+// TestImportWispr_Interactive_PerItemOverwriteRefreshesExisting pins that arming
+// an exact-target conflict (without the CLI --overwrite flag) routes through the
+// existing overwrite write-path: the existing file is refreshed from the snippet,
+// while a fresh row in the same run is created. Exact-target-only per-item overwrite.
+func TestImportWispr_Interactive_PerItemOverwriteRefreshesExisting(t *testing.T) {
+	dir := t.TempDir()
+	stale := filepath.Join(dir, "code-review.md")
+	if err := os.WriteFile(stale, []byte("STALE content\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	return false
+	rec := &recordingImportRenderer{decide: confirmAllArmingOverwrites}
+	deps := withImportRenderer(importCmdDeps(t, dir, &fakeWisprReader{snippets: liveSnippets()}), rec)
+
+	if _, _, err := executeRootWith(t, deps, "import", "wispr", "--db-path", "x", "-i"); err != nil {
+		t.Fatalf("per-item overwrite import: %v", err)
+	}
+	// code-review was offered as an exact-target conflict, armed, and refreshed.
+	if it := findItem(rec.gotItems, "code-review"); it == nil || it.Conflict != importtui.ConflictExactTarget {
+		t.Fatalf("code-review item = %+v, want ConflictExactTarget", it)
+	}
+	body, err := os.ReadFile(stale)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if strings.Contains(string(body), "STALE") {
+		t.Errorf("armed exact-target was not overwritten: %q", body)
+	}
+	if !strings.Contains(string(body), "Review this code.") {
+		t.Errorf("refreshed file missing snippet body: %q", body)
+	}
+	// The fresh row in the same run was still created.
+	if !pathExists(filepath.Join(dir, "organize-thoughts-prompt.md")) {
+		t.Error("fresh row was not imported alongside the armed overwrite")
+	}
+}
+
+// TestImportWispr_Interactive_ForcedCrossPathOverwriteIsHardError pins that the
+// writer stays authoritative: even when a cross-path id is FORCED into the
+// overwrite set (bypassing the picker's non-selectability), per-item overwrite
+// cannot create a §4/§18 duplicate — the write is refused with a prompt-store hard
+// error (exit 3) and nothing is written at the exact target.
+func TestImportWispr_Interactive_ForcedCrossPathOverwriteIsHardError(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "agents")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Same-id prompt at another path; the exact target dir/code-review.md is absent.
+	if err := os.WriteFile(filepath.Join(sub, "code-review.md"), []byte("---\ntitle: x\n---\n\nbody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	onlyCodeReview := []wispr.Snippet{{ID: "uuid-2", Phrase: "code review", Replacement: "Review this code."}}
+	rec := &recordingImportRenderer{decide: func(items []importtui.Item) importtui.Result {
+		// Force the cross-path row into both the write and overwrite sets.
+		return importtui.Result{Action: importtui.ActionConfirm, SelectedIDs: []string{"code-review"}, OverwriteIDs: []string{"code-review"}}
+	}}
+	deps := withImportRenderer(importCmdDeps(t, dir, &fakeWisprReader{snippets: onlyCodeReview}), rec)
+
+	_, _, err := executeRootWith(t, deps, "import", "wispr", "--db-path", "x", "-i")
+	var exists *PromptFileExistsError
+	if !errors.As(err, &exists) {
+		t.Fatalf("err = %v, want PromptFileExistsError (writer refuses a forced cross-path)", err)
+	}
+	if got := ExitCode(err); got != ExitPrompt {
+		t.Errorf("exit code = %d, want %d", got, ExitPrompt)
+	}
+	if pathExists(filepath.Join(dir, "code-review.md")) {
+		t.Error("a forced cross-path overwrite wrote a duplicate at the exact target")
+	}
+}
+
+// TestImportWispr_Interactive_IdempotentReRunAllSkip pins that re-running an
+// interactive import over already-imported prompts defaults to all-skip: every
+// row is now an exact-target conflict (skip-by-default), so confirm-all without
+// arming writes nothing and leaves the files untouched.
+func TestImportWispr_Interactive_IdempotentReRunAllSkip(t *testing.T) {
+	dir := t.TempDir()
+	rec := &recordingImportRenderer{decide: confirmAll}
+	deps := withImportRenderer(importCmdDeps(t, dir, &fakeWisprReader{snippets: liveSnippets()}), rec)
+
+	if _, _, err := executeRootWith(t, deps, "import", "wispr", "--db-path", "x", "-i"); err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+	created := filepath.Join(dir, "code-review.md")
+	before, err := os.ReadFile(created)
+	if err != nil {
+		t.Fatalf("read after first import: %v", err)
+	}
+
+	// Re-run: every row is now an exact-target conflict; confirm-all does not arm.
+	rec2 := &recordingImportRenderer{decide: confirmAll}
+	deps2 := withImportRenderer(importCmdDeps(t, dir, &fakeWisprReader{snippets: liveSnippets()}), rec2)
+	stdout, _, err := executeRootWith(t, deps2, "import", "wispr", "--db-path", "x", "-i")
+	if err != nil {
+		t.Fatalf("re-run import: %v", err)
+	}
+	if it := findItem(rec2.gotItems, "code-review"); it == nil || it.Conflict != importtui.ConflictExactTarget {
+		t.Fatalf("re-run code-review item = %+v, want ConflictExactTarget", it)
+	}
+	if stdout != "" {
+		t.Errorf("re-run created paths = %q, want none (all skipped)", stdout)
+	}
+	after, err := os.ReadFile(created)
+	if err != nil {
+		t.Fatalf("read after re-run: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("re-run modified an existing prompt: before=%q after=%q", before, after)
+	}
+}
+
+// TestClassifySnippet_ArmedExactTargetBecomesImportable pins the classification
+// transition per-item overwrite relies on: an exact-target whose id is armed
+// (in sel.overwrite) classifies planImportable with overwrite=true — NOT planExists
+// — so it overwrites rather than skips. Without arming the same snippet is planExists.
+func TestClassifySnippet_ArmedExactTargetBecomesImportable(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "code-review.md")
+	if err := os.WriteFile(target, []byte("STALE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := promptsource.Source{Path: dir, Scope: promptsource.ScopeGlobal}
+	sources := []promptsource.Source{source}
+	snip := wispr.Snippet{ID: "uuid-2", Phrase: "code review", Replacement: "Review this code."}
+	flags := importWisprFlags{tag: defaultWisprTag}
+
+	unarmed := classifySnippet(source, sources, snip, flags, map[string]bool{}, nil)
+	if unarmed.status != planExists {
+		t.Fatalf("unarmed status = %v, want planExists", unarmed.status)
+	}
+
+	sel := &importSelection{write: map[string]bool{"code-review": true}, overwrite: map[string]bool{"code-review": true}}
+	armed := classifySnippet(source, sources, snip, flags, map[string]bool{}, sel)
+	if armed.status != planImportable {
+		t.Fatalf("armed status = %v, want planImportable", armed.status)
+	}
+	if !armed.overwrite {
+		t.Error("armed item.overwrite = false, want true")
+	}
+	if !armed.targetExisted {
+		t.Error("armed item.targetExisted = false, want true (overwrite, not create)")
+	}
 }

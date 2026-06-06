@@ -10,9 +10,10 @@ import (
 )
 
 // footerLines is the fixed chrome subtracted from terminal height to compute
-// rowsPerFrame: a single key-hint line. The header is one title line, counted
-// dynamically via headerLines so the viewport math stays exact if it ever wraps.
-const footerLines = 1
+// rowsPerFrame: a counter line (selected/overwrite/blocked) plus a confirm +
+// key-hint line. The header is one title line, counted dynamically via
+// headerLines so the viewport math stays exact if it ever wraps.
+const footerLines = 2
 
 // Model is the bubbletea model for the import picker: a checkbox list of fresh
 // items. selected is keyed by item id and starts fully checked (locked decision
@@ -28,11 +29,15 @@ type Model struct {
 	result       Result
 }
 
-// NewModel seeds a Model from State with every item pre-checked.
+// NewModel seeds a Model from State, pre-checking by conflict kind: fresh
+// (ConflictNone) items start selected (locked decision: fresh pre-checked);
+// exact-target conflicts start unchecked (§34 skip-by-default — check to arm an
+// overwrite) unless Armed (a CLI --overwrite refresh, pre-armed); cross-path
+// duplicates start unchecked and are never selectable.
 func NewModel(state State) Model {
 	selected := make(map[string]bool, len(state.Items))
 	for _, it := range state.Items {
-		selected[it.ID] = true
+		selected[it.ID] = it.Conflict == ConflictNone || it.Armed
 	}
 	return Model{items: state.Items, selected: selected}
 }
@@ -65,7 +70,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.result = Result{Action: ActionCancel}
 		return m, tea.Quit
 	case msg.Type == tea.KeyEnter:
-		m.result = Result{Action: ActionConfirm, SelectedIDs: m.selectedIDs()}
+		m.result = Result{Action: ActionConfirm, SelectedIDs: m.selectedIDs(), OverwriteIDs: m.overwriteIDs()}
 		return m, tea.Quit
 	case msg.Type == tea.KeyUp:
 		return m.moveCursor(-1), nil
@@ -102,26 +107,35 @@ func (m Model) moveCursor(delta int) Model {
 	return m
 }
 
-// toggleCurrent flips the checkbox under the cursor.
+// toggleCurrent flips the checkbox under the cursor. A cross-path duplicate is
+// non-selectable (the importer cannot create it), so toggling it is a no-op.
 func (m Model) toggleCurrent() Model {
 	if m.cursor < 0 || m.cursor >= len(m.items) {
 		return m
 	}
-	id := m.items[m.cursor].ID
-	m.selected[id] = !m.selected[id]
+	it := m.items[m.cursor]
+	if it.Conflict == ConflictCrossPath {
+		return m
+	}
+	m.selected[it.ID] = !m.selected[it.ID]
 	return m
 }
 
-// selectAll re-checks every item (the inverse of deselecting via Space).
+// selectAll resets the selection to NewModel's initial safe default: every fresh
+// item checked, every CLI-authorized refresh (Armed) kept armed, and every other
+// conflict at skip-by-default (ad-hoc per-row overwrite arms cleared, cross-path
+// unselected). Pressing `a` always yields the same predictable state — it never
+// leaves a surprise per-row overwrite armed, yet it preserves the overwrites the
+// CLI --overwrite flag authorized (which would otherwise be silently skipped).
 func (m Model) selectAll() Model {
 	for _, it := range m.items {
-		m.selected[it.ID] = true
+		m.selected[it.ID] = it.Conflict == ConflictNone || it.Armed
 	}
 	return m
 }
 
-// selectedIDs returns the checked item ids in item order — the order the writer
-// replays, so the confirmed set matches the rows the user saw.
+// selectedIDs returns the checked item ids in item order — the write set the
+// writer replays, so the confirmed set matches the rows the user saw.
 func (m Model) selectedIDs() []string {
 	ids := make([]string, 0, len(m.items))
 	for _, it := range m.items {
@@ -130,6 +144,30 @@ func (m Model) selectedIDs() []string {
 		}
 	}
 	return ids
+}
+
+// overwriteIDs returns the checked exact-target ids in item order: the per-item
+// overwrite set (a subset of selectedIDs) the caller arms on the replayed write.
+func (m Model) overwriteIDs() []string {
+	ids := make([]string, 0, len(m.items))
+	for _, it := range m.items {
+		if it.Conflict == ConflictExactTarget && m.selected[it.ID] {
+			ids = append(ids, it.ID)
+		}
+	}
+	return ids
+}
+
+// blockedCount is how many rows are cross-path duplicates the importer cannot
+// create (the footer's K) — shown for context but never written.
+func (m Model) blockedCount() int {
+	n := 0
+	for _, it := range m.items {
+		if it.Conflict == ConflictCrossPath {
+			n++
+		}
+	}
+	return n
 }
 
 // rowsPerFrame returns how many row lines fit in the viewport. Returns 0
@@ -209,7 +247,8 @@ func (m Model) visibleRowRange() (int, int) {
 
 // View renders header + visible rows + footer. Structure mirrors the board:
 // header has no trailing newline, each row carries its own newline, and the
-// footer closes without one — so total lines == headerLines + rowsPerFrame + 1.
+// footer (its own lines joined by, but not ending in, a newline) closes without
+// one — so total lines == headerLines + rowsPerFrame + footerLines.
 func (m Model) View() string {
 	width := m.viewWidth()
 	var sb strings.Builder
@@ -235,8 +274,16 @@ func (m Model) renderHeader() string {
 	return headerStyle.Render(truncateToWidth(header, m.viewWidth()))
 }
 
+// footer renders two lines: a faint counter (selected / armed-overwrite / blocked)
+// and a confirm + key-hint line. Each line is plain-text-truncated to width before
+// styling (mirrors renderHeader) so the no-wrap, one-line-per-row viewport math
+// holds; the two are joined by — but do not end in — a newline.
 func (m Model) footer() string {
-	return truncateToWidth("space toggle · a all · enter import · esc cancel", m.viewWidth())
+	w := m.viewWidth()
+	n := len(m.selectedIDs())
+	counter := fmt.Sprintf("%d selected · %d overwrite · %d blocked", n, len(m.overwriteIDs()), m.blockedCount())
+	confirm := fmt.Sprintf("write %d prompts? enter confirm · space toggle · a all · esc cancel", n)
+	return headerStyle.Render(truncateToWidth(counter, w)) + "\n" + truncateToWidth(confirm, w)
 }
 
 var (
@@ -244,17 +291,14 @@ var (
 	headerStyle   = lipgloss.NewStyle().Faint(true)
 )
 
-// renderRow formats one checkbox row: "[x] id  title". Both the id and title
-// columns are width-bounded so the row never exceeds the terminal width: an
-// over-long id is truncated (not wrapped, which would push the row onto a second
-// physical line and desync the one-line-per-row viewport math). The id column
-// wins the available space over the title, since the id is what identifies the
-// row.
+// renderRow formats one row: "<glyph> id  label". Both the id and label columns
+// are width-bounded so the row never exceeds the terminal width: an over-long id
+// is truncated (not wrapped, which would push the row onto a second physical line
+// and desync the one-line-per-row viewport math). The id column wins the available
+// space over the label, since the id is what identifies the row. A cross-path row
+// shows the conflicting path in place of the phrase (the actionable reason it is
+// blocked); other rows show the sanitized snippet phrase.
 func renderRow(item Item, checked bool, idWidth, width int) string {
-	box := "[ ]"
-	if checked {
-		box = "[x]"
-	}
 	const boxCol = 3 // "[x]"
 	const padding = 2
 	maxID := width - boxCol - padding*2
@@ -264,16 +308,40 @@ func renderRow(item Item, checked bool, idWidth, width int) string {
 	if idWidth > maxID {
 		idWidth = maxID
 	}
-	titleCol := width - boxCol - idWidth - padding*2
-	if titleCol < 0 {
-		titleCol = 0
+	labelCol := width - boxCol - idWidth - padding*2
+	if labelCol < 0 {
+		labelCol = 0
 	}
 	id := padRight(truncateToWidth(item.ID, idWidth), idWidth)
-	title := truncateToWidth(sanitizeLabel(item.Title), titleCol)
-	// Cap the composed line too: the fixed checkbox + column gaps are 7 cells, so
-	// a terminal narrower than that would otherwise wrap the row and desync the
+	label := sanitizeLabel(item.Title)
+	if item.Conflict == ConflictCrossPath {
+		label = "also at " + sanitizeLabel(item.Blocker)
+	}
+	label = truncateToWidth(label, labelCol)
+	// Cap the composed line too: the fixed glyph + column gaps are 7 cells, so a
+	// terminal narrower than that would otherwise wrap the row and desync the
 	// one-line-per-row viewport math. Truncating keeps the invariant at any width.
-	return truncateToWidth(fmt.Sprintf("%s  %s  %s", box, id, title), width)
+	return truncateToWidth(fmt.Sprintf("%s  %s  %s", glyphFor(item, checked), id, label), width)
+}
+
+// glyphFor returns the 3-cell status box for a row: cross-path is always [!]
+// (non-selectable); an exact-target is [=] until armed, then [x] (it will be
+// overwritten); a fresh row is [ ]/[x].
+func glyphFor(item Item, checked bool) string {
+	switch item.Conflict {
+	case ConflictCrossPath:
+		return "[!]"
+	case ConflictExactTarget:
+		if checked {
+			return "[x]"
+		}
+		return "[=]"
+	default:
+		if checked {
+			return "[x]"
+		}
+		return "[ ]"
+	}
 }
 
 // sanitizeLabel makes a snippet phrase safe for a single-line row: every control
