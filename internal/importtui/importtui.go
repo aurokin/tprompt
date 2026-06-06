@@ -18,11 +18,38 @@ package importtui
 
 import "io"
 
-// Item is one selectable fresh snippet row: its disambiguated prompt id (the id
-// the writer will use) and the snippet phrase shown as the title.
+// ConflictKind classifies an import row against the prompt store, so the picker
+// can render the right glyph and decide whether the row is selectable. It mirrors
+// the importable / exists / cross-path plan statuses the caller computes.
+type ConflictKind int
+
+const (
+	// ConflictNone is a fresh, importable row: pre-checked, toggle to import.
+	// It is the zero value so an Item with no Conflict set behaves as before.
+	ConflictNone ConflictKind = iota
+	// ConflictExactTarget is a prompt whose id already exists at the exact target:
+	// skip-by-default (§34), checking it arms a per-item overwrite (refresh).
+	ConflictExactTarget
+	// ConflictCrossPath is a same-id prompt at ANOTHER path in scope: a §4/§18
+	// duplicate the importer cannot create. Shown but never selectable.
+	ConflictCrossPath
+)
+
+// Item is one selectable import row: its disambiguated prompt id (the id the
+// writer will use), the snippet phrase shown as the title, and its conflict
+// classification. Blocker holds the conflicting path for a ConflictCrossPath row
+// (empty otherwise) so the picker can show why the row is blocked.
+//
+// Armed pre-checks an otherwise skip-by-default ConflictExactTarget row: it marks a
+// refresh the caller has already authorized (the CLI --overwrite flag), so the row
+// starts armed and the glyph/counter report the overwrite truthfully instead of
+// presenting it as a fresh create.
 type Item struct {
-	ID    string
-	Title string
+	ID       string
+	Title    string
+	Conflict ConflictKind
+	Blocker  string
+	Armed    bool
 }
 
 // Action is the user's picker outcome.
@@ -40,11 +67,15 @@ type State struct {
 	Items []Item
 }
 
-// Result is what Run returns after the picker closes. SelectedIDs is populated
-// (in item order) only when Action == ActionConfirm.
+// Result is what Run returns after the picker closes, populated (in item order)
+// only when Action == ActionConfirm. SelectedIDs is every checked id — the write
+// set (fresh creates plus armed exact-target overwrites). OverwriteIDs is the
+// subset of SelectedIDs that are ConflictExactTarget rows the user armed: the
+// per-item overwrite set the caller folds into the replayed write.
 type Result struct {
-	Action      Action
-	SelectedIDs []string
+	Action       Action
+	SelectedIDs  []string
+	OverwriteIDs []string
 }
 
 // Renderer drives one interactive selection session.
