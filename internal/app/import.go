@@ -120,13 +120,24 @@ func runImportWispr(deps Deps, flags importWisprFlags) error {
 	return nil
 }
 
-// importSnippets writes (or, under --dry-run, previews) each snippet to the
-// resolved source and returns the imported/skipped tallies. Created paths go to
-// stdout (real runs) or `would create:`/`would skip:` lines to stderr (dry-run).
+// importSnippets executes (or, under --dry-run, previews) the batch import,
+// returning the imported/skipped tallies. It classifies and writes each snippet
+// adjacently — the original single-pass structure — so every collision decision is
+// made against the store as it is at that snippet's write moment, never a stale
+// batch snapshot (which could skip a freed target, abort on a removed duplicate, or
+// clobber a target that appeared after planning). dryRunPlan is the batch
+// counterpart the interactive import TUI renders up front (AUR-528); it shares
+// classifySnippet, so the displayed classification matches what the writer does.
+//
+// Created paths go to stdout (real runs) or `would create:`/`would skip:` lines to
+// stderr (dry-run). The imported-vs-skipped branch keys off the executed outcome,
+// never the planned status — the O_EXCL create-race turns a planned create into an
+// idempotent skip at execution time.
 func importSnippets(deps Deps, source promptsource.Source, collisionSources []promptsource.Source, snippets []wispr.Snippet, flags importWisprFlags) (imported, skipped int, err error) {
 	claimed := map[string]bool{}
 	for _, snip := range snippets {
-		outcome, writeErr := importOneSnippet(source, collisionSources, snip, flags, claimed)
+		item := classifySnippet(source, collisionSources, snip, flags, claimed)
+		outcome, writeErr := executePlanItem(item, flags)
 		if writeErr != nil {
 			return imported, skipped, writeErr
 		}
@@ -155,33 +166,83 @@ type snippetOutcome struct {
 	skipNote string
 }
 
-// importOneSnippet maps and writes a single snippet, applying intra-batch id
-// disambiguation and the skip-existing policy. It returns the created/would-create
-// path, or a skip with a human-readable note. Only a genuine write failure (not a
-// collision) is returned as an error.
-func importOneSnippet(source promptsource.Source, collisionSources []promptsource.Source, snip wispr.Snippet, flags importWisprFlags, claimed map[string]bool) (snippetOutcome, error) {
+// planStatus classifies what importing one snippet would do, computed write-free
+// (read-only stat/walk). executePlanItem turns each status into the same
+// observable outcome the original single-pass importer produced.
+type planStatus int
+
+const (
+	planImportable    planStatus = iota // would be created (or refreshed under --overwrite)
+	planEmptyBody                       // no usable body → skip (claims no slug)
+	planInvalidID                       // minted id failed validation → skip (defensive)
+	planExists                          // exact target already exists → idempotent skip
+	planCrossPath                       // same-id prompt at another path → §4/§18 hard error
+	planClassifyError                   // the read-only collision check errored (walk/abs)
+)
+
+// planItem is the write-free classification of one snippet, produced by
+// classifySnippet. The non-interactive importer classifies and writes each item
+// adjacently (importSnippets); the interactive import TUI (AUR-528) renders a whole
+// batch of these — via dryRunPlan — before the user selects what to write. Because
+// the TUI's plan can be stale by the time the user confirms, the TUI re-classifies
+// at write time; the non-interactive path does not need to, since it never holds a
+// plan across a gap.
+type planItem struct {
+	snippet       wispr.Snippet // source snippet (title via .Phrase; tag source for the TUI)
+	id            string        // minted/disambiguated id (natural id for planEmptyBody)
+	content       []byte        // markdown to write (planImportable only)
+	target        string        // absolute destination path (planImportable/planExists)
+	targetExisted bool          // exact target existed at classify time (overwrite vs create)
+	status        planStatus
+	blocker       string // blocking path for planExists/planCrossPath
+	err           error  // captured error for planClassifyError
+}
+
+// dryRunPlan classifies every snippet in the batch write-free, in order, threading
+// the intra-batch id-disambiguation state (claimed) exactly as the single-pass
+// importer does. It is the batch entry point the interactive import TUI (AUR-528)
+// renders; the non-interactive importer instead classifies each snippet immediately
+// before writing it (importSnippets), so it never relies on a batch snapshot. A
+// classification error (collision walk failure, path resolution) is captured on its
+// item as planClassifyError, so a full plan always exists for the TUI to show rather
+// than aborting plan construction.
+func dryRunPlan(source promptsource.Source, collisionSources []promptsource.Source, snippets []wispr.Snippet, flags importWisprFlags) []planItem {
+	claimed := map[string]bool{}
+	plan := make([]planItem, 0, len(snippets))
+	for _, snip := range snippets {
+		plan = append(plan, classifySnippet(source, collisionSources, snip, flags, claimed))
+	}
+	return plan
+}
+
+// classifySnippet maps and classifies a single snippet without writing, applying
+// intra-batch id disambiguation and the skip-existing / cross-path policy. The
+// claimed-map mutation order matches the original importer exactly: an empty-body
+// snippet returns before disambiguateID so it never claims a slug, while an
+// invalid-id snippet returns after, having already consumed its disambiguated slot.
+func classifySnippet(source promptsource.Source, collisionSources []promptsource.Source, snip wispr.Snippet, flags importWisprFlags, claimed map[string]bool) planItem {
 	id, content, ok := snip.ToPrompt(flags.tag)
 	if !ok {
 		// A skipped (empty-body) snippet is never written, so it must not claim a
 		// slug — otherwise a later valid sibling with the same phrase would be
 		// suffixed even though the clean slug is free.
-		return snippetOutcome{skipNote: id + " (empty body)"}, nil
+		return planItem{snippet: snip, id: id, status: planEmptyBody}
 	}
 	id = disambiguateID(id, snip, claimed)
 	// slugID + fallback always yield a valid id; this is a defensive backstop so
 	// an invalid id is never written as a hidden/undiscoverable file.
 	if validateNewID(id) != nil {
-		return snippetOutcome{skipNote: id + " (invalid id)"}, nil
+		return planItem{snippet: snip, id: id, status: planInvalidID}
 	}
 	target, err := filepath.Abs(filepath.Join(source.Path, id+".md"))
 	if err != nil {
-		return snippetOutcome{}, fmt.Errorf("resolve prompt file path: %w", err)
+		return planItem{snippet: snip, id: id, status: planClassifyError, err: fmt.Errorf("resolve prompt file path: %w", err)}
 	}
 
 	targetExisted := pathExists(target)
 	blocker, err := promptCollision(target, collisionSources, source.Scope, id, targetExisted, flags.overwrite)
 	if err != nil {
-		return snippetOutcome{}, err
+		return planItem{snippet: snip, id: id, status: planClassifyError, err: err}
 	}
 	if blocker != "" {
 		if blocker == target {
@@ -189,7 +250,7 @@ func importOneSnippet(source promptsource.Source, collisionSources []promptsourc
 			// failure, so re-runs stay idempotent — and cheap. promptCollision
 			// short-circuits here on a single stat, so an idempotent re-run never walks
 			// the store (no quadratic scan, no spurious walk-error aborts).
-			return snippetOutcome{skipNote: blocker + " (exists)"}, nil
+			return planItem{snippet: snip, id: id, target: target, targetExisted: targetExisted, status: planExists, blocker: blocker}
 		}
 		// A same-id prompt at ANOTHER path in scope means this write would CREATE a
 		// §4/§18 duplicate that --overwrite cannot resolve in place, so refuse it.
@@ -198,28 +259,64 @@ func importOneSnippet(source promptsource.Source, collisionSources []promptsourc
 		// with the exact target is a pre-existing store-level §4 violation surfaced by
 		// list/send/doctor — import guards against CREATING duplicates, it does not
 		// re-audit the whole store on a no-op skip.
-		return snippetOutcome{}, &PromptFileExistsError{ID: id, Path: blocker}
+		return planItem{snippet: snip, id: id, status: planCrossPath, blocker: blocker}
 	}
-	// Dry-run previews the import PLAN — which ids would be created vs skipped, plus
-	// any id/collision/duplicate errors resolved above, all determined without
-	// writing. It deliberately does NOT probe write permissions or disk space:
-	// surfacing those would need a mutating probe (violating "write nothing") or a
-	// racy, platform-specific access check that still would not guarantee the real
-	// write. Environmental write failures are surfaced by the real run instead.
-	if !flags.dryRun {
-		if err := writePromptContent(id, target, content, flags.overwrite && targetExisted); err != nil {
-			// A concurrent writer can win the O_EXCL create race in the window
-			// between the check above and this write. Skip-existing is a write
-			// refusal, not a failure, so treat that as an idempotent skip rather
-			// than aborting the whole import.
-			var exists *PromptFileExistsError
-			if errors.As(err, &exists) {
-				return snippetOutcome{skipNote: exists.Path + " (exists)"}, nil
+	return planItem{snippet: snip, id: id, content: content, target: target, targetExisted: targetExisted, status: planImportable}
+}
+
+// executePlanItem performs the write half for one classified item, returning the
+// snippetOutcome / typed error the original single-pass importer produced. Terminal
+// statuses (skips, cross-path duplicate, classification error) are returned BEFORE
+// the dry-run gate, so a dry-run still aborts on a §4/§18 cross-path duplicate
+// exactly as a real run does — the dry-run gate only ever suppressed the write, not
+// the policy. Only planImportable consults flags.dryRun.
+//
+// It trusts item as classified: the non-interactive caller (importSnippets)
+// classifies each snippet immediately before calling this, so item reflects the
+// store at the write moment (including item.targetExisted, which decides overwrite
+// vs create). The interactive TUI, which holds a batch plan across user
+// interaction, must re-classify before writing (AUR-528).
+func executePlanItem(item planItem, flags importWisprFlags) (snippetOutcome, error) {
+	switch item.status {
+	case planEmptyBody:
+		return snippetOutcome{skipNote: item.id + " (empty body)"}, nil
+	case planInvalidID:
+		return snippetOutcome{skipNote: item.id + " (invalid id)"}, nil
+	case planExists:
+		return snippetOutcome{skipNote: item.blocker + " (exists)"}, nil
+	case planCrossPath:
+		return snippetOutcome{}, &PromptFileExistsError{ID: item.id, Path: item.blocker}
+	case planClassifyError:
+		return snippetOutcome{}, item.err
+	case planImportable:
+		// Dry-run previews the plan as classified — which ids would be created vs
+		// skipped — without writing. It deliberately does NOT probe write permissions
+		// or disk space: that would need a mutating probe (violating "write nothing")
+		// or a racy access check that still would not guarantee the real write.
+		// Environmental write failures are surfaced by the real run.
+		if !flags.dryRun {
+			// Overwrite (atomic replace) only when the exact target existed at classify
+			// time and --overwrite was given; otherwise the O_EXCL create path turns a
+			// target that appeared since classification into an idempotent skip rather
+			// than clobbering it.
+			if err := writePromptContent(item.id, item.target, item.content, flags.overwrite && item.targetExisted); err != nil {
+				// A concurrent writer can win the O_EXCL create race in the window
+				// between classification and this write. Skip-existing is a write
+				// refusal, not a failure, so treat that as an idempotent skip rather
+				// than aborting the whole import.
+				var exists *PromptFileExistsError
+				if errors.As(err, &exists) {
+					return snippetOutcome{skipNote: exists.Path + " (exists)"}, nil
+				}
+				return snippetOutcome{}, err
 			}
-			return snippetOutcome{}, err
 		}
+		return snippetOutcome{imported: true, path: item.target}, nil
+	default:
+		// Unreachable: every planStatus is handled above. A new status that reaches
+		// here is a programming error, surfaced rather than silently skipped.
+		return snippetOutcome{}, fmt.Errorf("import: unhandled plan status %d for id %q", item.status, item.id)
 	}
-	return snippetOutcome{imported: true, path: target}, nil
 }
 
 // disambiguateID resolves intra-batch id collisions deterministically: the first

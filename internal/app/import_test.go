@@ -397,6 +397,67 @@ func TestImportWispr_CrossPathDuplicateIsHardError(t *testing.T) {
 	}
 }
 
+func TestImportWispr_DryRunStillAbortsOnCrossPath(t *testing.T) {
+	// A cross-path duplicate is a §4/§18 hard error even under --dry-run: the
+	// dry-run gate only ever suppressed the write, not the policy. The preview must
+	// surface the same exit-3 error a real run would, not a silent "would skip".
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agents", "code-review.md"), []byte("---\ntitle: x\n---\n\nbody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps := importCmdDeps(t, dir, &fakeWisprReader{snippets: []wispr.Snippet{
+		{ID: "u1", Phrase: "code review", Replacement: "body"},
+	}})
+
+	_, _, err := executeRootWith(t, deps, "import", "wispr", "--db-path", "x", "--dry-run")
+	var exists *PromptFileExistsError
+	if !errors.As(err, &exists) {
+		t.Fatalf("err = %T %v, want *PromptFileExistsError under --dry-run", err, err)
+	}
+	if ExitCode(err) != ExitPrompt {
+		t.Errorf("ExitCode = %d, want %d", ExitCode(err), ExitPrompt)
+	}
+}
+
+func TestImportWispr_PartialProgressThenCrossPathAbort(t *testing.T) {
+	// Byte-identical partial-progress semantics: the importer writes/prints each
+	// snippet as it goes and aborts at the FIRST cross-path duplicate. Snippet 1
+	// (fresh) must be created and printed to stdout BEFORE the abort at snippet 2
+	// (cross-path) — the plan/execute split must not buffer output or roll back.
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-seed a same-id prompt at another path so the SECOND snippet is cross-path.
+	if err := os.WriteFile(filepath.Join(dir, "agents", "code-review.md"), []byte("---\ntitle: x\n---\n\nbody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps := importCmdDeps(t, dir, &fakeWisprReader{snippets: []wispr.Snippet{
+		{ID: "u1", Phrase: "organize thoughts prompt", Replacement: "first body"}, // fresh → imported
+		{ID: "u2", Phrase: "code review", Replacement: "second body"},             // cross-path → abort
+	}})
+
+	stdout, _, err := executeRootWith(t, deps, "import", "wispr", "--db-path", "x")
+	var exists *PromptFileExistsError
+	if !errors.As(err, &exists) {
+		t.Fatalf("err = %T %v, want *PromptFileExistsError (abort at snippet 2)", err, err)
+	}
+	if ExitCode(err) != ExitPrompt {
+		t.Errorf("ExitCode = %d, want %d", ExitCode(err), ExitPrompt)
+	}
+	// Snippet 1's side effects landed before the abort: file on disk AND path on stdout.
+	first := filepath.Join(dir, "organize-thoughts-prompt.md")
+	if !pathExists(first) {
+		t.Error("snippet 1 must be written before the abort at snippet 2")
+	}
+	if !strings.Contains(stdout, first) {
+		t.Errorf("snippet 1's created path must be printed before the abort:\n%s", stdout)
+	}
+}
+
 func TestImportWispr_PreExistingDuplicateSkippedNotReAudited(t *testing.T) {
 	// When the exact target ALSO exists, import skips (idempotent, no-op) and does
 	// not walk the store to re-detect a pre-existing cross-path duplicate. The
