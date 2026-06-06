@@ -67,6 +67,13 @@ tracker; planned work lives in Linear.
   (both usage errors, exit 2). `-i --overwrite` is allowed: the global flag is the
   all-or-nothing opt-in and pre-arms every refresh, while per-item arming is the
   finer choice when no flag is passed.
+- The interactive picker has a `/` **fuzzy search** that filters the snippet list
+  by id, title, and tags (e.g. `starred`) so it scales to large libraries. A
+  filter narrows which rows you toggle and which `a` (select-all) acts on, but the
+  selection itself and the `write N prompts?` count stay global, so confirming
+  imports your true selection across all snippets — not just the filtered view.
+  An applied filter is always shown in the header, and pressing `Esc` clears the
+  filter before it cancels the picker.
 - Importing never drops a snippet: two phrases that normalize to the same id are
   disambiguated with a short uuid suffix, and a phrase with no slug-able
   characters falls back to a `wispr-<uuid>` id (its phrase is still its title).

@@ -377,6 +377,23 @@ files. The contract is locked:
   *non-armed* row that races to a conflict while the picker is open is skipped (never a
   surprise hard error), while an *explicitly armed* overwrite that resolves to a
   cross-path surfaces the exit-3 — only deliberate overwrite intent escalates.
+- **Interactive `/`-search over a shared fuzzy core.** The `-i` picker has a `/`
+  fuzzy filter over each snippet's id, title, and tags (so `starred` finds starred
+  snippets) for large libraries. The scorer is **not forked** from the board TUI:
+  it lives in a dependency-free `internal/searchindex` package (generic over the
+  caller's row via `Fields` + a `tieKey`; `sahilm/fuzzy` confined there), which the
+  board (`internal/tui`) and the import picker (`internal/importtui`) both adapt to.
+  This fulfills the "promote a shared core" path anticipated when `importtui` was
+  made a dependency-free sibling of `tui`: the picker gains search **without**
+  importing `tui` (which would drag in store/clipboard/config), so its isolation
+  contract holds. The board's clip-row pinning and `(PromptID, Scope)` tiebreak are
+  preserved exactly by a thin adapter (zero behavior change; existing `tui` search
+  tests are the regression guard). Search is a **view filter, not a selection
+  mutation**: the selection set and the `write N prompts?` count stay **global**
+  (over all snippets) while `Space`/`a` act on the **visible** rows — except that
+  `a` disarms hidden ad-hoc overwrites globally, so a filter can never strand a
+  surprise destructive overwrite. An applied filter is shown in the header, and
+  `Esc` clears it before it cancels the picker.
 - **Additive and one-way.** Import only creates prompt files (or refreshes them
   under `--overwrite`). It never deletes prompts, never mutates Wispr, and does
   not establish any ongoing sync — the result is standalone prompt files. This is

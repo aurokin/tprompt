@@ -197,6 +197,31 @@ Assert:
 - a set `State.Banner` renders as a header line in both board and search modes
   and reserves matching viewport height; no banner leaves viewport math unchanged
 
+The fuzzy scorer itself lives in `internal/searchindex` (below), not in `tui`;
+`tui`'s `search_index.go` is a thin adapter over it, and the board search tests
+listed above run **unchanged** against that adapter — they are the behavior-
+preservation guard for the extraction.
+
+### Search Index (shared fuzzy core)
+
+Proof surface: pure unit tests (`internal/searchindex`), generic over a sample
+record so the tests exercise the seam (`Fields` + `tieKey`) the real callers use.
+This is the dependency-free core both `internal/tui` and `internal/importtui` adapt
+to; keeping its scoring pinned here means a ranking regression is caught in the core,
+not only positionally in a caller.
+
+Assert:
+
+- empty query returns the full catalog in `tieKey` order (Score 0)
+- a non-empty query with no fuzzy hit returns an empty (non-nil) result
+- field-weight priority: an id match outranks a title match, title outranks
+  description, description outranks tags (same raw fuzzy score)
+- a multi-field match outscores a single-field match at the same best priority
+- equal score + equal priority breaks ties by `tieKey` ascending (deterministic,
+  never map-iteration order)
+- the tags corpus is searchable
+- the index carries the caller's own item type back out in `Match` (generic seam)
+
 ### CLI And App Layer
 
 Proof surface: app-level tests with fake deps plus `testscript` for black-box
@@ -235,10 +260,11 @@ key handling, conflict-aware pre-check (fresh checked, exact-target skip-by-defa
 cross-path non-selectable, a CLI-authorized refresh pre-armed), status-glyph
 rendering (`[ ]`/`[x]`/`[=]`/`[!]`) and the cross-path blocker path, the footer
 counter (`N selected · M overwrite · K blocked`), select-all reset semantics
-(clears ad-hoc arms, keeps CLI-authorized refreshes), a viewport regression (rows
-never wrap or overflow the terminal height at any width, with the two-line footer),
-and label sanitization (a verbatim snippet phrase with a newline or ANSI escape can
-neither spill a row nor inject terminal control codes). The `-i` wiring is driven by
+(clears ad-hoc arms, keeps CLI-authorized refreshes), `/`-search filtering (over the
+shared `internal/searchindex` core), a viewport regression (rows never wrap or
+overflow the terminal height at any width, with the two-line footer), and label
+sanitization (a verbatim snippet phrase with a newline or ANSI escape can neither
+spill a row nor inject terminal control codes). The `-i` wiring is driven by
 a stub renderer selected via `TPROMPT_TEST_IMPORT_RENDERER` (a test-only env,
 mirroring `TPROMPT_TEST_RENDERER`) so the black-box testscript can run the picker
 over pipes.
@@ -274,6 +300,14 @@ Assert:
   pins armed exact-target → `planImportable` with `overwrite=true` (not `planExists`); a
   *forced* cross-path overwrite still yields the §4 hard error (exit 3) with nothing written
   at the exact target (writer stays authoritative); an idempotent re-run defaults to all-skip
+- interactive `/`-search (`-i`): `/` enters search and filters rows by id, title, and tags
+  (a `starred`-only hit proves the tags corpus is wired via `pickerItems`→`wispr.Snippet.Tags`);
+  in search mode every printable rune — `a`/`j`/`k`/space — is query text, not an action;
+  selection is keyed by id and survives entering/typing/clearing/leaving search; footer counts
+  and `write N prompts?` stay global while `Space`/`a` act on the visible set; `a` still disarms
+  a *hidden* ad-hoc overwrite (but keeps a hidden CLI-authorized refresh); a committed filter is
+  visible in the list header and `Esc` clears it before it cancels; the search view honors the
+  viewport (re-clamps as the cursor moves past the frame)
 - DB error taxonomy maps to exit codes: missing DB / no default location →
   usage (2); unreadable/garbage/locked DB → general (1)
 - the awkward-path DSN survives spaces and URI metacharacters in the db path

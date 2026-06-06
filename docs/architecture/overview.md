@@ -78,7 +78,7 @@ Responsibilities:
 - read the clipboard on keypress when the user selects the clipboard row
 - submit a handoff job and exit
 
-This is distinct from `internal/picker`, which only wraps the optional external `picker_command` used by `tprompt pick`. See `docs/commands/tui.md`.
+This is distinct from `internal/picker`, which only wraps the optional external `picker_command` used by `tprompt pick`. The fuzzy scorer itself lives in a dependency-free `internal/searchindex` core that the board and the `import wispr -i` picker both adapt to, so the two renderers share ranking without sharing dependencies. See `docs/commands/tui.md`.
 
 ## 8. Import (Wispr reader)
 

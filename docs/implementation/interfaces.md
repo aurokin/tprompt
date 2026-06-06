@@ -142,6 +142,7 @@ ImportItem {
   conflict: none | exact-target | cross-path   // glyph + selectability
   blocker: string                  // conflicting path (cross-path rows only)
   armed: bool                      // pre-arm an exact-target (a CLI --overwrite refresh)
+  tags: []string                   // provenance tags (search corpus only; never rendered)
 }
 
 ImportResult {
@@ -159,7 +160,31 @@ through the single `writePromptContent` overwrite path, so the writer still refu
 cross-path duplicate (exit 3); the picker surfaces policy, it cannot weaken it. The
 small pure scroll/viewport helpers are copied from `internal/tui` (noted in the
 package doc), and the renderer runs with alt-screen so the picker is torn down before
-the command prints created-path lines to stdout.
+the command prints created-path lines to stdout. Its `/`-search delegates to the
+shared `internal/searchindex` core (below) over the row's id, title, and tags — so the
+picker gains fuzzy filtering without importing `internal/tui`, keeping its dependency
+isolation intact.
+
+## Search index (shared fuzzy core)
+
+```text
+searchindex.Index[T]
+- New[T](items []T, fields func(T) Fields, tieKey func(T) string) -> *Index[T]
+- (*Index[T]) Query(q string) -> []Match[T]   // ""→catalog in tieKey order; else ranked
+
+Fields { id, title, description string; tags []string }   // four weighted corpuses
+Match[T] { item T; score float64 }
+```
+
+A dependency-free, generic fuzzy scorer (only `sahilm/fuzzy` + stdlib) shared by the
+board (`internal/tui`) and the import picker (`internal/importtui`). A caller adapts its
+row to the four weighted corpuses (`Fields`) and supplies a stable `tieKey`; the core
+ranks by best-matched-field priority, then weighted score, then `tieKey`, and returns
+the caller's own item type back in `Match`. It knows nothing about the board's clip row
+or Scope, or the picker's conflicts — those domain concerns stay in the callers'
+adapters (`tui` reproduces its exact `(PromptID, Scope)` ordering by passing
+`tieKey = PromptID+"\x00"+Scope`). This is the seam that lets two renderers share
+scoring without sharing dependencies.
 
 ## Keybind resolver
 
@@ -202,6 +227,9 @@ collision policy, summary, exit-code mapping — is provable without a real SQLi
 database. `Snippets()` returns the typed DB-error taxonomy
 (`DB{NotFound,PathRequired,Open}Error`) that `app.ExitCode` maps to exit codes.
 Snippet→prompt mapping is a pure method (`Snippet.ToPrompt(tag)`), tested directly.
+A snippet's tag set is itself a pure method (`Snippet.Tags(tag)` → `[tag]` plus
+`starred`), the single source of truth `ToPrompt` and the import picker's search
+corpus both consume, so frontmatter tags and search-matchable tags cannot drift.
 
 ## Why interfaces matter
 
