@@ -246,10 +246,10 @@ Frontmatter is YAML-marshaled (not string-templated), so a phrase containing `:`
 or quotes cannot corrupt the written file.
 
 Import is **idempotent**: a snippet whose id already exists as a prompt is
-**skipped** by default, so re-running never creates duplicates. Created file
-paths print to stdout (one per line, for scripting); an `imported N, skipped M`
-summary prints to stderr when stderr is a terminal (piped runs emit nothing on
-stderr).
+**skipped** by default, so re-running never creates duplicates (use `--overwrite`
+to refresh from Wispr, or `--dry-run` to preview). Created file paths print to
+stdout (one per line, for scripting); an `imported N, skipped M` summary prints
+to stderr when stderr is a terminal (piped runs emit nothing on stderr).
 
 Flags:
 
@@ -257,6 +257,27 @@ Flags:
   location (macOS `~/Library/Application Support/Wispr Flow/flow.sqlite`, Windows
   `%APPDATA%\Wispr Flow\flow.sqlite`); required where there is no default
   (e.g. Linux).
+- `--project` — write to the project overlay (`<gitroot>/tprompt`) instead of the
+  primary global prompts directory. Must be run inside a git tree.
+- `--dry-run` — preview without writing. `would create:` / `would skip:` lines go
+  to stderr and nothing is created; stdout stays empty. It previews the import
+  *plan* (which ids would be created or skipped, plus any id/duplicate errors); it
+  does not verify write permissions or disk space, which the real import validates.
+- `--overwrite` — refresh existing prompts from Wispr instead of skipping them
+  (replaces the body and frontmatter of a prompt whose id already exists).
+- `--tag <tag>` — provenance tag stamped on every imported prompt (default
+  `wispr`). A starred snippet still also gets `starred`.
+
+When two snippets' phrases normalize to the same id, the first keeps the bare
+slug and each later one gets a short `-<uuid-prefix>` suffix, so no snippet is
+dropped. A phrase with no slug-able characters falls back to a
+`wispr-<uuid-prefix>` id; the original phrase is still preserved verbatim as the
+title.
+
+Exit codes: a `--db-path` (or default) that does not exist, or an OS with no
+default location and no `--db-path`, is a **usage error** (exit 2). A database
+that exists but cannot be read (locked, or macOS Full Disk Access denied) is a
+**general error** (exit 1).
 
 ## Cancel semantics
 
@@ -265,6 +286,7 @@ When the user cancels an interactive flow (TUI `Esc`, `pick` external cancel), t
 ## Exit code guidance
 
 - `0` success **or** user cancellation
+- `1` general error (e.g. a Wispr database that exists but cannot be read)
 - `2` usage/config error
 - `3` prompt resolution error / clipboard validation error / sanitizer strict-mode rejection
 - `4` tmux environment error

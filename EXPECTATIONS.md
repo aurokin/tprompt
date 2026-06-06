@@ -44,7 +44,12 @@ tracker; planned work lives in Linear.
 - It reads **only snippets** (Wispr `Dictionary` rows that are snippets and not
   deleted); it never reads dictation History.
 - Import is idempotent and **skip-by-default**: a snippet whose id already
-  exists as a prompt is skipped, so re-runs never create duplicates.
+  exists as a prompt is skipped, so re-runs never create duplicates. `--overwrite`
+  refreshes existing prompts from Wispr; `--dry-run` previews without writing;
+  `--project` writes to the project overlay; `--tag` overrides the provenance tag.
+- Importing never drops a snippet: two phrases that normalize to the same id are
+  disambiguated with a short uuid suffix, and a phrase with no slug-able
+  characters falls back to a `wispr-<uuid>` id (its phrase is still its title).
 - Importing Wispr snippets produces standalone prompts — a one-way migration
   into the prompt store. This is unrelated to the "prompt snippets or
   composition" non-goal below: tprompt still has no in-tool snippet/composition
