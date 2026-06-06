@@ -132,9 +132,58 @@ func TestToPrompt_CustomTag(t *testing.T) {
 func TestToPrompt_EmptyReplacementNotImportable(t *testing.T) {
 	for _, replacement := range []string{"", "   ", "\n\t "} {
 		s := Snippet{ID: "id", Phrase: "x", Replacement: replacement}
-		if _, _, ok := s.ToPrompt("wispr"); ok {
+		id, _, ok := s.ToPrompt("wispr")
+		if ok {
 			t.Errorf("ToPrompt(replacement=%q) ok = true, want false", replacement)
 		}
+		// Even when skipped, ToPrompt reports a valid id (for skip reporting).
+		if id == "" {
+			t.Errorf("ToPrompt(replacement=%q) id = %q, want non-empty", replacement, id)
+		}
+	}
+}
+
+func TestToPrompt_UnsluggablePhraseFallsBackToUUID(t *testing.T) {
+	// A phrase with no sluggable characters yields a `wispr-<first8 uuid>` id,
+	// while the title still preserves the original phrase verbatim.
+	s := Snippet{ID: "9F8E7D6C-1111-2222-3333-444444444444", Phrase: "🔥🔥🔥", Replacement: "body"}
+	id, md, ok := s.ToPrompt("wispr")
+	if !ok {
+		t.Fatal("ok = false")
+	}
+	if id != "wispr-9f8e7d6c" {
+		t.Errorf("id = %q, want %q", id, "wispr-9f8e7d6c")
+	}
+	parsed, err := promptmeta.Parse(md)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if parsed.Meta.Title != "🔥🔥🔥" {
+		t.Errorf("title = %q, want the original phrase", parsed.Meta.Title)
+	}
+}
+
+func TestIDPrefix(t *testing.T) {
+	tests := []struct {
+		name string
+		id   string
+		n    int
+		want string
+	}{
+		{"uuid-first8", "9f8e7d6c-1111-2222-3333-444444444444", 8, "9f8e7d6c"},
+		{"uuid-first6", "9f8e7d6c-1111-2222-3333-444444444444", 6, "9f8e7d6c"[:6]},
+		{"hyphens-dropped", "ab-cd-ef", 4, "abcd"},
+		{"uppercase-lowered", "ABCDEF", 3, "abc"},
+		{"shorter-than-n", "ab", 8, "ab"},
+		{"non-hex-alnum-kept", "z9y8", 3, "z9y"},
+		{"empty", "", 6, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IDPrefix(tc.id, tc.n); got != tc.want {
+				t.Errorf("IDPrefix(%q, %d) = %q, want %q", tc.id, tc.n, got, tc.want)
+			}
+		})
 	}
 }
 

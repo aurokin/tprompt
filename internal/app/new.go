@@ -151,21 +151,37 @@ func runNew(deps Deps, id string, flags newFlags) error {
 // create refuses on any collision.
 func writePromptFile(target string, sources []promptsource.Source, scope promptsource.Scope, id string, content []byte, overwrite bool) error {
 	targetExisted := pathExists(target)
-	if targetExisted && !overwrite {
-		return &PromptFileExistsError{ID: id, Path: target}
-	}
-	other, err := findOtherPromptMatch(sources, scope, id, target)
+	blocker, err := promptCollision(target, sources, scope, id, targetExisted, overwrite)
 	if err != nil {
 		return err
 	}
-	if other != "" {
-		return &PromptFileExistsError{ID: id, Path: other}
+	if blocker != "" {
+		return &PromptFileExistsError{ID: id, Path: blocker}
 	}
 	// Overwrite (atomic rename) only when the target actually existed and
 	// overwrite was requested. A fresh create still goes through the O_EXCL path
 	// even under overwrite=true, so a concurrent creator racing in between the
 	// scan and the write is refused rather than silently clobbered.
 	return writePromptContent(id, target, content, overwrite && targetExisted)
+}
+
+// promptCollision returns the path of an existing prompt that blocks writing id
+// at target under the overwrite policy, or "" if the write may proceed. The exact
+// target blocks a non-overwrite write (targetExisted reports whether it already
+// exists, so callers stat once); a same-id file at any OTHER path in scope blocks
+// regardless of overwrite, since overwrite cannot resolve a duplicate in place.
+//
+// It is the shared collision predicate. `new` (via writePromptFile) treats any
+// non-empty result as a hard error. `import` distinguishes the two cases by the
+// returned path: a result equal to the exact target is an idempotent skip, while a
+// different path is a cross-path duplicate it must refuse. The exact-target
+// short-circuit (returning before the tree walk) means an idempotent import re-run
+// skips with a single stat, without walking the store.
+func promptCollision(target string, sources []promptsource.Source, scope promptsource.Scope, id string, targetExisted, overwrite bool) (string, error) {
+	if targetExisted && !overwrite {
+		return target, nil
+	}
+	return findOtherPromptMatch(sources, scope, id, target)
 }
 
 // pathExists reports whether p names an existing filesystem entry. Lstat (not

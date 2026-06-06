@@ -309,3 +309,62 @@ The old daemon lifecycle (`daemon start`, `daemon run`, `daemon status`,
 apply to the CLI binary only, not to detached daemon operation.
 
 Rationale and library choices are detailed in `docs/implementation/tech-stack.md`.
+
+### 34. Wispr Flow snippet import
+
+`tprompt import wispr` ingests local Wispr Flow snippets as ordinary prompt
+files. The contract is locked:
+
+- **Driver.** Wispr's `flow.sqlite` is read with `modernc.org/sqlite`, a pure-Go
+  (CGO-free) driver, so the import path keeps §32's single-static-binary,
+  no-toolchain-C property. The dependency is **isolated to `internal/wispr`**;
+  no other package imports a SQL driver.
+- **Read-only, snippets-only.** The database is opened `mode=ro` and is **never**
+  written — tprompt is not a Wispr management tool. It reads **only** snippet rows
+  (`Dictionary` where the snippet flag is set and the deleted flag is not); it
+  never reads dictation history. The open must not leave a `-wal`/`-shm` sidecar.
+- **Mapping.** Per snippet: `phrase` → `title:` (verbatim) **and** the slug used
+  for the filename id; `replacement` → the markdown body (byte-for-byte through
+  the §9 trim contract); a starred snippet appends a `starred` tag. Every prompt
+  carries a provenance tag (`wispr` by default, `--tag` overrides). Frontmatter is
+  YAML-marshaled, never string-templated, so a `:`/quote in a phrase cannot
+  corrupt the file.
+- **Id minting is generation-time and deterministic.** The id is `slugify(phrase)`.
+  A phrase that slugifies to empty falls back to `wispr-<first-8 of the snippet
+  uuid>`. When two snippets in one run mint the same id, the first keeps the bare
+  slug and each later one gets a `-<first-6 of its uuid>` suffix (extended with an
+  incrementing counter in the rare case two suffixes also collide), so the in-batch
+  id is always unique and no snippet is dropped because of a collision with another
+  snippet in the same run, nor written as a hidden/undiscoverable file. Minting
+  consults only the in-batch ids, never the on-disk store — a minted id that
+  happens to match a prompt already on disk is governed by skip-existing below, not
+  re-suffixed, because re-suffixing would make ids depend on filesystem state and
+  break idempotent re-runs. Order is stable (snippets are read `ORDER BY id`).
+- **Skip-existing is a write-refusal, not a §4/§18 relaxation.** A snippet whose id
+  already exists at the **exact target path** is skipped so re-runs stay idempotent;
+  this is the importer declining to write, **not** a softening of the duplicate-ID
+  hard error. The collision guard prevents *creating* a duplicate: when a snippet
+  *would* be written (the exact target is absent, or `--overwrite`) and a same-id
+  prompt exists at **another path in the same scope** (a subdirectory or another
+  global source), the write is refused as a §4/§18 **hard error** (exit 3) —
+  `--overwrite` cannot resolve a duplicate in place. A duplicate that *already*
+  coexists with the exact target is a pre-existing store-level §4 violation surfaced
+  by `list`/`send`/`doctor`, not re-detected on import's no-op skip (which keeps
+  idempotent re-runs a stat per snippet, not a full store walk). `--overwrite` is
+  the explicit opt-in to refresh an existing prompt from Wispr; `--dry-run` previews
+  without writing.
+- **Additive and one-way.** Import only creates prompt files (or refreshes them
+  under `--overwrite`). It never deletes prompts, never mutates Wispr, and does
+  not establish any ongoing sync — the result is standalone prompt files. This is
+  unrelated to the "no in-tool snippet/composition" non-goal.
+- **Command shape.** `tprompt import` is a source-dispatch parent (bare form
+  prints help); `tprompt import wispr` carries `--db-path`, `--project`,
+  `--dry-run`, `--overwrite`, `--tag`. Created paths print to stdout (one per
+  line, scriptable); the human summary is tty-gated to stderr. The DB location is
+  the conventional OS path (macOS/Windows have defaults); an OS with no default
+  requires `--db-path`.
+- **Error taxonomy → exit codes.** A missing DB path, or no default location and
+  no `--db-path`, is a **usage error** (exit 2), mirroring a missing prompts
+  directory. A DB that exists but cannot be opened/read (locked, or macOS Full
+  Disk Access denied) is a **general error** (exit 1). Errors name the actionable
+  fix (`--db-path`, quit Wispr Flow, grant Full Disk Access).

@@ -1,0 +1,55 @@
+# AUR-525: the import flags, end-to-end against the real fixture DB.
+#   --dry-run   previews to stderr and writes nothing
+#   --overwrite refreshes an existing prompt from Wispr (skip-existing is default)
+#   --tag       overrides the provenance tag stamped on each prompt
+
+mkdir prompts
+cp $WISPR_FIXTURE flow.sqlite
+
+# --dry-run previews would-create lines to stderr, prints nothing to stdout, and
+# leaves the prompts directory empty.
+tprompt import wispr --db-path flow.sqlite --config config.toml --dry-run
+! stdout .
+stderr 'would create: .*organize-thoughts-prompt\.md'
+stderr 'would create: .*code-review\.md'
+! exists prompts/organize-thoughts-prompt.md
+! exists prompts/code-review.md
+
+# A real import then creates them (created paths on stdout).
+tprompt import wispr --db-path flow.sqlite --config config.toml
+stdout 'prompts/code-review\.md'
+exists prompts/code-review.md
+
+# Wreck one prompt locally to prove the overwrite semantics below.
+cp wreck.md prompts/code-review.md
+tprompt show code-review --config config.toml
+stdout 'WRECKED body'
+
+# Default skip-existing: a plain re-run never touches the wrecked file.
+tprompt import wispr --db-path flow.sqlite --config config.toml
+! stdout .
+tprompt show code-review --config config.toml
+stdout 'WRECKED body'
+
+# --overwrite refreshes the prompt from Wispr: path is reported, stale body gone.
+tprompt import wispr --db-path flow.sqlite --config config.toml --overwrite
+stdout 'prompts/code-review\.md'
+tprompt show code-review --config config.toml
+! stdout 'WRECKED'
+stdout 'Review this code for correctness'
+
+# --tag overrides the default provenance tag; the starred tag is still appended.
+rm prompts/code-review.md
+tprompt import wispr --db-path flow.sqlite --config config.toml --tag imported
+tprompt show code-review --config config.toml
+stdout 'Tags: imported, starred'
+
+-- config.toml --
+prompts_dir = "prompts"
+-- wreck.md --
+---
+title: code review
+tags: [wispr, starred]
+---
+
+WRECKED body

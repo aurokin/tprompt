@@ -2,6 +2,7 @@ package wispr
 
 import (
 	"database/sql"
+	"errors"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -111,10 +112,62 @@ func TestReader_OpensReadOnlyAndNeverWrites(t *testing.T) {
 	}
 }
 
-func TestReader_MissingDBErrors(t *testing.T) {
+func TestReader_MissingDBIsDBNotFoundError(t *testing.T) {
 	_, err := NewReader(filepath.Join(t.TempDir(), "nope.sqlite")).Snippets()
-	if err == nil {
-		t.Fatal("Snippets on a missing DB = nil error, want error")
+	var notFound *DBNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("err = %T %v, want *DBNotFoundError", err, err)
+	}
+}
+
+func TestReader_UnreadableDBIsDBOpenError(t *testing.T) {
+	// A path that exists but is not a usable SQLite database (here, a directory)
+	// is a DBOpenError, not DBNotFoundError — it maps to the general exit code.
+	dir := t.TempDir()
+	_, err := NewReader(dir).Snippets()
+	var openErr *DBOpenError
+	if !errors.As(err, &openErr) {
+		t.Fatalf("err = %T %v, want *DBOpenError", err, err)
+	}
+}
+
+func TestReader_GarbageFileIsDBOpenError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "flow.sqlite")
+	if err := os.WriteFile(path, []byte("not a sqlite database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewReader(path).Snippets()
+	var openErr *DBOpenError
+	if !errors.As(err, &openErr) {
+		t.Fatalf("err = %T %v, want *DBOpenError", err, err)
+	}
+}
+
+func TestReader_NullReplacementScansEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "flow.sqlite")
+	db, err := sql.Open("sqlite", writableDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE Dictionary (id TEXT, phrase TEXT, replacement TEXT, isSnippet INTEGER, isDeleted INTEGER, isStarred INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	// replacement is NULL.
+	if _, err := db.Exec(`INSERT INTO Dictionary (id, phrase, replacement, isSnippet, isDeleted, isStarred) VALUES ('u', 'p', NULL, 1, 0, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+
+	snips, err := NewReader(path).Snippets()
+	if err != nil {
+		t.Fatalf("Snippets: %v", err)
+	}
+	if len(snips) != 1 || snips[0].Replacement != "" {
+		t.Fatalf("NULL replacement should scan to empty string, got %+v", snips)
+	}
+	// And such a snippet is not importable (no body).
+	if _, _, ok := snips[0].ToPrompt("wispr"); ok {
+		t.Errorf("NULL-replacement snippet ToPrompt ok = true, want false")
 	}
 }
 

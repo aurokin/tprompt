@@ -41,14 +41,18 @@ type frontmatter struct {
 // content. tag is the provenance tag stamped on every imported prompt (default
 // "wispr"); a starred snippet also gets a "starred" tag.
 //
-// ok is false when the snippet has no usable body (empty/whitespace-only
-// replacement): a bodyless prompt delivers nothing, so the importer skips it.
+// id is always a valid store id (the phrase slug, or a deterministic
+// `wispr-<uuid>` fallback when the phrase has no sluggable characters), so a
+// caller can report it even when the snippet is skipped. ok is false when the
+// snippet has no usable body (empty/whitespace-only replacement): a bodyless
+// prompt delivers nothing, so the importer skips it.
 //
-// The title always preserves the original phrase verbatim, even when the slug
-// derives a different id.
+// The title always preserves the original phrase verbatim, even when the id
+// falls back to a UUID-derived form.
 func (s Snippet) ToPrompt(tag string) (id string, markdown []byte, ok bool) {
+	id = s.slugID()
 	if strings.TrimSpace(s.Replacement) == "" {
-		return "", nil, false
+		return id, nil, false
 	}
 	tags := []string{tag}
 	if s.Starred {
@@ -74,7 +78,35 @@ func (s Snippet) ToPrompt(tag string) (id string, markdown []byte, ok bool) {
 	b.WriteString("\n")
 	b.WriteString(s.Replacement)
 	b.WriteString("\n")
-	return slugify(s.Phrase), []byte(b.String()), true
+	return id, []byte(b.String()), true
+}
+
+// slugID is the prompt id derived from the phrase: its slug, or a deterministic
+// `wispr-<first 8 of the UUID>` fallback when the phrase slugifies to nothing
+// (all punctuation / non-ASCII). The fallback keeps such snippets importable
+// under a synthetic but stable id; the title still preserves the original phrase.
+func (s Snippet) slugID() string {
+	if slug := slugify(s.Phrase); slug != "" {
+		return slug
+	}
+	return "wispr-" + IDPrefix(s.ID, 8)
+}
+
+// IDPrefix returns the first n slug-safe characters of a Wispr UUID (lowercased,
+// non-`[a-z0-9]` runes dropped). It is the disambiguation seed for empty-slug
+// fallbacks and intra-batch id collisions, and is stable across runs because the
+// UUID is stable. A UUID with fewer than n slug-safe characters yields all of them.
+func IDPrefix(id string, n int) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(id) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+		if b.Len() == n {
+			break
+		}
+	}
+	return b.String()
 }
 
 // slugify derives a filename-stem id from a free-text phrase: lowercase, map
