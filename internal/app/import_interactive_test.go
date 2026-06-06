@@ -349,6 +349,39 @@ func TestImportWispr_Interactive_ClassifyErrorStillSurfaces(t *testing.T) {
 	}
 }
 
+// TestImportWispr_Interactive_NonDirDestinationFailsBeforePicker pins that an
+// auto-create destination occupied by a regular file is surfaced eagerly (before
+// the picker opens), not deferred to confirm — so a cancel can't hide an
+// unusable destination. The picker's Run is never reached.
+func TestImportWispr_Interactive_NonDirDestinationFailsBeforePicker(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	// Occupy the project overlay path with a regular file.
+	if err := os.WriteFile(filepath.Join(root, "tprompt"), []byte("not a dir\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	globalPrompts := filepath.Join(t.TempDir(), "global")
+	if err := os.Mkdir(globalPrompts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rec := &recordingImportRenderer{decide: confirmAll}
+	deps := withImportRenderer(importCmdDeps(t, globalPrompts, &fakeWisprReader{snippets: liveSnippets()}), rec)
+
+	_, _, err := executeRootWith(t, deps, "import", "wispr", "--db-path", "x", "--project", "-i")
+	if err == nil {
+		t.Fatal("expected an error for a non-directory destination")
+	}
+	if got := ExitCode(err); got != ExitUsage {
+		t.Errorf("exit code = %d, want %d", got, ExitUsage)
+	}
+	if rec.gotItems != nil {
+		t.Error("picker opened for an unusable destination; should fail before the picker")
+	}
+}
+
 func TestImportWispr_Interactive_DryRunConflictIsUsageError(t *testing.T) {
 	dir := t.TempDir()
 	deps := importCmdDeps(t, dir, &fakeWisprReader{snippets: liveSnippets()})

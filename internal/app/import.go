@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -146,16 +147,31 @@ func runImportWispr(deps Deps, flags importWisprFlags) error {
 // auto-create default global dir / project overlay is created only for a
 // non-interactive real run: --dry-run writes nothing, and an interactive run
 // defers creation until the user confirms (so a cancel leaves no directory —
-// runInteractiveImport handles it via ensureImportWriteDir). An explicit,
+// importSnippets handles it via ensureImportWriteDir). An explicit,
 // non-auto-create prompts_dir that is missing is surfaced eagerly in every mode,
 // so a real import never claims success — and a picker never opens — for a
 // destination it could not use.
+//
+// An interactive auto-create destination still validates an EXISTING path here
+// (without creating a missing one): a path occupied by a regular file can never
+// be a prompts directory, so surface that before the picker opens rather than
+// only after the user confirms (and never at all if they cancel).
 func prepareImportDest(source promptsource.Source, flags importWisprFlags, interactive bool) error {
 	if !source.AutoCreateOnAccess {
 		return ensureScaffoldDir(source.Path, false)
 	}
-	if flags.dryRun || interactive {
+	if flags.dryRun {
 		return nil
+	}
+	if interactive {
+		// Missing path → fine; created lazily on the first write. An existing path
+		// is validated via the create helper, which is a no-op for a real directory
+		// and surfaces a non-directory as PromptsDirCreateError — without creating
+		// anything new, since the path already exists.
+		if _, err := os.Stat(source.Path); errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return ensureScaffoldDir(source.Path, true)
 	}
 	return ensureScaffoldDir(source.Path, true)
 }

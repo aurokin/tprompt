@@ -134,7 +134,11 @@ func (m Model) selectedIDs() []string {
 // rowsPerFrame returns how many row lines fit in the viewport. Returns 0
 // pre-WindowSizeMsg (height == 0) or when chrome exceeds the window; View
 // treats 0 as "render all rows" so headless tests still see everything.
-// (Copied from internal/tui; see package doc.)
+// (Copied from internal/tui; see package doc.) The "chrome exceeds the window"
+// case (a 1-2 line terminal renders the whole list rather than clamping) is the
+// board's intentional, documented behavior, deliberately preserved here for
+// parity; the alt-screen picker always receives the real terminal height, so it
+// only arises in a pathological terminal.
 func (m Model) rowsPerFrame() int {
 	rpf := m.height - m.headerLines() - footerLines
 	if rpf <= 0 {
