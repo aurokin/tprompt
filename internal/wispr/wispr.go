@@ -120,6 +120,18 @@ func (s Snippet) ToPrompt(tag string) (id string, markdown []byte, ok bool) {
 	return id, []byte(b.String()), true
 }
 
+// Title is the snippet's human label — the original phrase, verbatim. It is what
+// the import picker renders as a row label. Provided so the import engine can treat
+// a snippet as a source-neutral record (see internal/app ImportRecord) without
+// reaching for the Phrase field directly.
+func (s Snippet) Title() string { return s.Phrase }
+
+// Disambiguator is the stable, non-empty seed the import engine appends to resolve
+// intra-batch id collisions (the first 6 slug-safe chars of the snippet's UUID).
+// It is stable across runs because the UUID is, so disambiguated ids are
+// deterministic. Part of the source-neutral record contract (ImportRecord).
+func (s Snippet) Disambiguator() string { return IDPrefix(s.ID, 6) }
+
 // slugID is the prompt id derived from the phrase: its slug, or a deterministic
 // `wispr-<first 8 of the UUID>` fallback when the phrase slugifies to nothing
 // (all punctuation / non-ASCII). The fallback keeps such snippets importable

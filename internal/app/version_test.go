@@ -36,7 +36,7 @@ func TestDispatchArgsPreservesVersionFlags(t *testing.T) {
 	tty := func() bool { return true }
 
 	for _, flag := range []string{"--version", "-v"} {
-		got := dispatchArgs(root, []string{flag}, env, tty)
+		got := dispatchArgs(root, []string{flag}, env, tty, tty, "wispr")
 		if len(got) != 1 || got[0] != flag {
 			t.Errorf("dispatchArgs([%s]) = %v, want [%s] unchanged", flag, got, flag)
 		}

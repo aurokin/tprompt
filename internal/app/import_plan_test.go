@@ -10,7 +10,7 @@ import (
 	"github.com/hsadler/tprompt/internal/wispr"
 )
 
-func planFor(t *testing.T, dir string, snippets []wispr.Snippet, flags importWisprFlags) []planItem {
+func planFor(t *testing.T, dir string, snippets []wispr.Snippet, flags importFlags) []planItem {
 	t.Helper()
 	src := promptsource.Source{Path: dir, Scope: promptsource.ScopeGlobal}
 	return dryRunPlan(src, []promptsource.Source{src}, snippets, flags)
@@ -25,7 +25,7 @@ func TestDryRunPlan_ClassifiesTheThreeConflictCases(t *testing.T) {
 
 	t.Run("importable (fresh id)", func(t *testing.T) {
 		dir := t.TempDir()
-		plan := planFor(t, dir, []wispr.Snippet{snip}, importWisprFlags{tag: defaultWisprTag})
+		plan := planFor(t, dir, []wispr.Snippet{snip}, importFlags{tag: defaultWisprTag})
 		if len(plan) != 1 || plan[0].status != planImportable {
 			t.Fatalf("status = %d, want planImportable (%d)", plan[0].status, planImportable)
 		}
@@ -43,7 +43,7 @@ func TestDryRunPlan_ClassifiesTheThreeConflictCases(t *testing.T) {
 		if err := os.WriteFile(target, []byte("---\ntitle: x\n---\n\nbody\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		plan := planFor(t, dir, []wispr.Snippet{snip}, importWisprFlags{tag: defaultWisprTag})
+		plan := planFor(t, dir, []wispr.Snippet{snip}, importFlags{tag: defaultWisprTag})
 		if plan[0].status != planExists {
 			t.Fatalf("status = %d, want planExists (%d)", plan[0].status, planExists)
 		}
@@ -62,7 +62,7 @@ func TestDryRunPlan_ClassifiesTheThreeConflictCases(t *testing.T) {
 		if err := os.WriteFile(other, []byte("---\ntitle: x\n---\n\nbody\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		plan := planFor(t, dir, []wispr.Snippet{snip}, importWisprFlags{tag: defaultWisprTag})
+		plan := planFor(t, dir, []wispr.Snippet{snip}, importFlags{tag: defaultWisprTag})
 		if plan[0].status != planCrossPath {
 			t.Fatalf("status = %d, want planCrossPath (%d)", plan[0].status, planCrossPath)
 		}
@@ -86,7 +86,7 @@ func TestDryRunPlan_ClaimOrdering(t *testing.T) {
 		{ID: "aaaaaaaa-0000-0000-0000-000000000000", Phrase: "code review", Replacement: ""},       // empty body → no claim
 		{ID: "bbbbbbbb-1111-0000-0000-000000000000", Phrase: "code review", Replacement: "body B"}, // importable → bare slug
 		{ID: "cccccccc-2222-0000-0000-000000000000", Phrase: "code-review", Replacement: "body C"}, // importable → suffixed
-	}, importWisprFlags{tag: defaultWisprTag})
+	}, importFlags{tag: defaultWisprTag})
 
 	if plan[0].status != planEmptyBody {
 		t.Fatalf("item 0 status = %d, want planEmptyBody (%d)", plan[0].status, planEmptyBody)
@@ -110,7 +110,7 @@ func TestPickerItems_PopulatesTags(t *testing.T) {
 		{ID: "u1", Phrase: "code review", Replacement: "body"},
 		{ID: "u2", Phrase: "deploy steps", Replacement: "body", Starred: true},
 	}
-	plan := planFor(t, dir, snips, importWisprFlags{tag: "imported"})
+	plan := planFor(t, dir, snips, importFlags{tag: "imported"})
 	items := pickerItems(plan, "imported")
 	if len(items) != 2 {
 		t.Fatalf("items = %d, want 2", len(items))

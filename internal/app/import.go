@@ -29,16 +29,25 @@ prompts. Pick a source subcommand:
   wispr   Import Wispr Flow snippets as prompts.`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			// Bare `tprompt import` (no source) prints help, mirroring root.
+			// Bare `tprompt import` (no source) prints help when not dispatched.
+			// In tmux+tty, dispatchArgs rewrites it to `import <default> -i`
+			// (DECISIONS §30/§34) before cobra runs; outside tmux/tty it lands
+			// here and prints help.
 			return c.Help()
 		},
 	}
-	cmd.AddCommand(newImportWisprCmd(deps))
+	// Each registered import source contributes its own subcommand. The engine
+	// downstream is source-agnostic (it consumes ImportRecords), so adding a source
+	// is a registry entry plus its implementer — see internal/app/import_source.go.
+	for _, src := range importSourceRegistry {
+		cmd.AddCommand(src.NewCommand(deps))
+	}
 	return cmd
 }
 
 func newImportWisprCmd(deps Deps) *cobra.Command {
-	flags := importWisprFlags{}
+	flags := importFlags{}
+	var dbPath string
 	cmd := &cobra.Command{
 		Use:   "wispr",
 		Short: "Import Wispr Flow snippets as prompts",
@@ -57,10 +66,12 @@ The Wispr database is found at its default OS location; pass --db-path to point
 at a copy or a non-default install.`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runImportWispr(deps, flags)
+			return runImportWispr(deps, dbPath, flags)
 		},
 	}
-	cmd.Flags().StringVar(&flags.dbPath, "db-path", "", "path to Wispr Flow flow.sqlite (overrides the OS default location)")
+	// --db-path is wispr-specific and stays out of the shared importFlags: the
+	// source resolves it before handing records to the source-agnostic engine.
+	cmd.Flags().StringVar(&dbPath, "db-path", "", "path to Wispr Flow flow.sqlite (overrides the OS default location)")
 	cmd.Flags().BoolVar(&flags.project, "project", false, "write to <gitroot>/tprompt instead of the global prompts directory")
 	cmd.Flags().BoolVar(&flags.dryRun, "dry-run", false, "preview what would be imported; write nothing")
 	cmd.Flags().BoolVar(&flags.overwrite, "overwrite", false, "replace existing prompts with the same id (refresh from Wispr)")
@@ -69,8 +80,10 @@ at a copy or a non-default install.`,
 	return cmd
 }
 
-type importWisprFlags struct {
-	dbPath      string
+// importFlags are the source-agnostic import flags shared by every import source's
+// subcommand and threaded through the engine. Source-specific flags (e.g. wispr's
+// --db-path) are bound separately by each source's command.
+type importFlags struct {
 	project     bool
 	dryRun      bool
 	overwrite   bool
@@ -96,10 +109,27 @@ func (*InteractiveDryRunConflictError) Error() string {
 	return "import wispr -i and --dry-run conflict: -i interactively selects what to write, --dry-run writes nothing"
 }
 
-func runImportWispr(deps Deps, flags importWisprFlags) error {
-	// Interactive preflight runs before any DB/store work so a flag contradiction
-	// or a non-tty environment fails obviously (exit 2) before side effects. A nil
-	// picker means a non-interactive run.
+// runImportWispr is the wispr source's run: it produces records (resolve the DB
+// path, read snippets read-only) and hands them to the source-agnostic engine.
+// The DB read is deferred into the producer so runImport's interactive preflight
+// still runs before any side effect.
+func runImportWispr(deps Deps, dbPath string, flags importFlags) error {
+	return runImport(deps, flags, func() ([]wispr.Snippet, error) {
+		resolved, err := resolveWisprDBPath(deps, dbPath)
+		if err != nil {
+			return nil, err
+		}
+		return deps.NewWisprReader(resolved).Snippets()
+	})
+}
+
+// runImport is the source-agnostic import engine. produce yields the source's
+// records lazily so the interactive preflight (a flag contradiction or a non-tty
+// environment) fails obviously (exit 2) BEFORE any source side effect such as
+// opening a database. A nil picker means a non-interactive run. The whole pipeline
+// — config, destination prep, classification, write, summary — is identical for any
+// source; only produce() varies, which is the seam.
+func runImport[R ImportRecord](deps Deps, flags importFlags, produce func() ([]R, error)) error {
 	picker, err := interactivePicker(deps, flags)
 	if err != nil {
 		return err
@@ -110,12 +140,7 @@ func runImportWispr(deps Deps, flags importWisprFlags) error {
 		return err
 	}
 
-	dbPath, err := resolveWisprDBPath(deps, flags.dbPath)
-	if err != nil {
-		return err
-	}
-
-	snippets, err := deps.NewWisprReader(dbPath).Snippets()
+	records, err := produce()
 	if err != nil {
 		return err
 	}
@@ -132,10 +157,10 @@ func runImportWispr(deps Deps, flags importWisprFlags) error {
 	}
 
 	if picker != nil {
-		return runInteractiveImport(deps, picker, source, collisionSources, snippets, flags)
+		return runInteractiveImport(deps, picker, source, collisionSources, records, flags)
 	}
 
-	imported, skipped, err := importSnippets(deps, source, collisionSources, snippets, flags, nil)
+	imported, skipped, err := importSnippets(deps, source, collisionSources, records, flags, nil)
 	if err != nil {
 		return err
 	}
@@ -156,7 +181,7 @@ func runImportWispr(deps Deps, flags importWisprFlags) error {
 // (without creating a missing one): a path occupied by a regular file can never
 // be a prompts directory, so surface that before the picker opens rather than
 // only after the user confirms (and never at all if they cancel).
-func prepareImportDest(source promptsource.Source, flags importWisprFlags, interactive bool) error {
+func prepareImportDest(source promptsource.Source, flags importFlags, interactive bool) error {
 	if !source.AutoCreateOnAccess {
 		return ensureScaffoldDir(source.Path, false)
 	}
@@ -182,7 +207,7 @@ func prepareImportDest(source promptsource.Source, flags importWisprFlags, inter
 // returns (nil, nil) for a non-interactive run. The renderer's factory carries
 // the tty gate (and the test stub bypasses it), so constructing it here rejects
 // piped `-i` before any DB/store work, regardless of import contents.
-func interactivePicker(deps Deps, flags importWisprFlags) (importtui.Renderer, error) {
+func interactivePicker(deps Deps, flags importFlags) (importtui.Renderer, error) {
 	if !flags.interactive {
 		return nil, nil
 	}
@@ -207,9 +232,9 @@ func interactivePicker(deps Deps, flags importWisprFlags) (importtui.Renderer, e
 // outcome — cancel, deselect-all, zero fresh rows, or a selection that all
 // re-classifies to a skip while the picker was open — leaves no empty directory
 // behind, honoring the cancel/no-op = "writes nothing" contract even under a race.
-func runInteractiveImport(deps Deps, picker importtui.Renderer, source promptsource.Source, collisionSources []promptsource.Source, snippets []wispr.Snippet, flags importWisprFlags) error {
+func runInteractiveImport[R ImportRecord](deps Deps, picker importtui.Renderer, source promptsource.Source, collisionSources []promptsource.Source, records []R, flags importFlags) error {
 	sel := &importSelection{write: map[string]bool{}, overwrite: map[string]bool{}}
-	if items := pickerItems(dryRunPlan(source, collisionSources, snippets, flags), flags.tag); len(items) > 0 {
+	if items := pickerItems(dryRunPlan(source, collisionSources, records, flags), flags.tag); len(items) > 0 {
 		result, err := picker.Run(importtui.State{Items: items})
 		if err != nil {
 			return err
@@ -225,7 +250,7 @@ func runInteractiveImport(deps Deps, picker importtui.Renderer, source promptsou
 		}
 	}
 
-	imported, skipped, err := importSnippets(deps, source, collisionSources, snippets, flags, sel)
+	imported, skipped, err := importSnippets(deps, source, collisionSources, records, flags, sel)
 	if err != nil {
 		return err
 	}
@@ -264,18 +289,19 @@ func ensureImportWriteDir(source promptsource.Source) error {
 func pickerItems(plan []planItem, tag string) []importtui.Item {
 	items := make([]importtui.Item, 0, len(plan))
 	for _, p := range plan {
-		tags := p.snippet.Tags(tag)
+		tags := p.record.Tags(tag)
+		title := p.record.Title()
 		switch p.status {
 		case planImportable:
 			if p.targetExisted {
-				items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase, Conflict: importtui.ConflictExactTarget, Armed: true, Tags: tags})
+				items = append(items, importtui.Item{ID: p.id, Title: title, Conflict: importtui.ConflictExactTarget, Armed: true, Tags: tags})
 			} else {
-				items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase, Conflict: importtui.ConflictNone, Tags: tags})
+				items = append(items, importtui.Item{ID: p.id, Title: title, Conflict: importtui.ConflictNone, Tags: tags})
 			}
 		case planExists:
-			items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase, Conflict: importtui.ConflictExactTarget, Tags: tags})
+			items = append(items, importtui.Item{ID: p.id, Title: title, Conflict: importtui.ConflictExactTarget, Tags: tags})
 		case planCrossPath:
-			items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase, Conflict: importtui.ConflictCrossPath, Blocker: p.blocker, Tags: tags})
+			items = append(items, importtui.Item{ID: p.id, Title: title, Conflict: importtui.ConflictCrossPath, Blocker: p.blocker, Tags: tags})
 		}
 	}
 	return items
@@ -307,12 +333,12 @@ func pickerItems(plan []planItem, tag string) []importtui.Item {
 // a §4 hard error the user could not act on, while an explicit overwrite intent
 // keeps the writer authoritative. confirm-all therefore writes the same fresh-item
 // bytes as a non-interactive run when no conflicts exist.
-func importSnippets(deps Deps, source promptsource.Source, collisionSources []promptsource.Source, snippets []wispr.Snippet, flags importWisprFlags, sel *importSelection) (imported, skipped int, err error) {
+func importSnippets[R ImportRecord](deps Deps, source promptsource.Source, collisionSources []promptsource.Source, records []R, flags importFlags, sel *importSelection) (imported, skipped int, err error) {
 	claimed := map[string]bool{}
 	interactive := sel != nil
 	destReady := false
-	for _, snip := range snippets {
-		item := classifySnippet(source, collisionSources, snip, flags, claimed, sel)
+	for _, rec := range records {
+		item := classifySnippet(source, collisionSources, rec, flags, claimed, sel)
 		if interactive && !interactiveReachesExecute(item, sel) {
 			skipped++
 			continue
@@ -320,7 +346,7 @@ func importSnippets(deps Deps, source promptsource.Source, collisionSources []pr
 		// Interactive runs defer creating the auto-create destination to here, the
 		// first real write, so a no-op selection (everything deselected, or a row
 		// that re-classified to a skip while the picker was open) leaves no empty
-		// directory. Non-interactive runs created it eagerly in runImportWispr.
+		// directory. Non-interactive runs created it eagerly in runImport.
 		if interactive && !destReady && item.status == planImportable && !flags.dryRun {
 			if dirErr := ensureImportWriteDir(source); dirErr != nil {
 				return imported, skipped, dirErr
@@ -418,12 +444,12 @@ const (
 // at write time; the non-interactive path does not need to, since it never holds a
 // plan across a gap.
 type planItem struct {
-	snippet       wispr.Snippet // source snippet (title via .Phrase; tag source for the TUI)
-	id            string        // minted/disambiguated id (natural id for planEmptyBody)
-	content       []byte        // markdown to write (planImportable only)
-	target        string        // absolute destination path (planImportable/planExists)
-	targetExisted bool          // exact target existed at classify time (overwrite vs create)
-	overwrite     bool          // effective overwrite for this id (flags.overwrite OR per-item armed)
+	record        ImportRecord // source record (title via .Title(); tag source for the TUI)
+	id            string       // minted/disambiguated id (natural id for planEmptyBody)
+	content       []byte       // markdown to write (planImportable only)
+	target        string       // absolute destination path (planImportable/planExists)
+	targetExisted bool         // exact target existed at classify time (overwrite vs create)
+	overwrite     bool         // effective overwrite for this id (flags.overwrite OR per-item armed)
 	status        planStatus
 	blocker       string // blocking path for planExists/planCrossPath
 	err           error  // captured error for planClassifyError
@@ -437,14 +463,14 @@ type planItem struct {
 // classification error (collision walk failure, path resolution) is captured on its
 // item as planClassifyError, so a full plan always exists for the TUI to show rather
 // than aborting plan construction.
-func dryRunPlan(source promptsource.Source, collisionSources []promptsource.Source, snippets []wispr.Snippet, flags importWisprFlags) []planItem {
+func dryRunPlan[R ImportRecord](source promptsource.Source, collisionSources []promptsource.Source, records []R, flags importFlags) []planItem {
 	claimed := map[string]bool{}
-	plan := make([]planItem, 0, len(snippets))
-	for _, snip := range snippets {
+	plan := make([]planItem, 0, len(records))
+	for _, rec := range records {
 		// nil selection: the picker has no per-item arming yet at plan-build time, so
 		// exact-targets classify under flags.overwrite and render as [=] (skip-by-default)
 		// unless the CLI --overwrite already made them importable refreshes.
-		plan = append(plan, classifySnippet(source, collisionSources, snip, flags, claimed, nil))
+		plan = append(plan, classifySnippet(source, collisionSources, rec, flags, claimed, nil))
 	}
 	return plan
 }
@@ -470,30 +496,30 @@ type importSelection struct {
 // same promptCollision check, so an armed id with a same-id prompt at another path
 // stays planCrossPath — arming cannot create a §4/§18 duplicate. sel == nil
 // (non-interactive) leaves the effective overwrite at flags.overwrite, byte-identical.
-func classifySnippet(source promptsource.Source, collisionSources []promptsource.Source, snip wispr.Snippet, flags importWisprFlags, claimed map[string]bool, sel *importSelection) planItem {
-	id, content, ok := snip.ToPrompt(flags.tag)
+func classifySnippet[R ImportRecord](source promptsource.Source, collisionSources []promptsource.Source, rec R, flags importFlags, claimed map[string]bool, sel *importSelection) planItem {
+	id, content, ok := rec.ToPrompt(flags.tag)
 	if !ok {
-		// A skipped (empty-body) snippet is never written, so it must not claim a
+		// A skipped (empty-body) record is never written, so it must not claim a
 		// slug — otherwise a later valid sibling with the same phrase would be
 		// suffixed even though the clean slug is free.
-		return planItem{snippet: snip, id: id, status: planEmptyBody}
+		return planItem{record: rec, id: id, status: planEmptyBody}
 	}
-	id = disambiguateID(id, snip, claimed)
+	id = disambiguateID(id, rec, claimed)
 	// slugID + fallback always yield a valid id; this is a defensive backstop so
 	// an invalid id is never written as a hidden/undiscoverable file.
 	if validateNewID(id) != nil {
-		return planItem{snippet: snip, id: id, status: planInvalidID}
+		return planItem{record: rec, id: id, status: planInvalidID}
 	}
 	target, err := filepath.Abs(filepath.Join(source.Path, id+".md"))
 	if err != nil {
-		return planItem{snippet: snip, id: id, status: planClassifyError, err: fmt.Errorf("resolve prompt file path: %w", err)}
+		return planItem{record: rec, id: id, status: planClassifyError, err: fmt.Errorf("resolve prompt file path: %w", err)}
 	}
 
 	overwrite := flags.overwrite || (sel != nil && sel.overwrite[id])
 	targetExisted := pathExists(target)
 	blocker, err := promptCollision(target, collisionSources, source.Scope, id, targetExisted, overwrite)
 	if err != nil {
-		return planItem{snippet: snip, id: id, status: planClassifyError, err: err}
+		return planItem{record: rec, id: id, status: planClassifyError, err: err}
 	}
 	if blocker != "" {
 		if blocker == target {
@@ -501,7 +527,7 @@ func classifySnippet(source promptsource.Source, collisionSources []promptsource
 			// failure, so re-runs stay idempotent — and cheap. promptCollision
 			// short-circuits here on a single stat, so an idempotent re-run never walks
 			// the store (no quadratic scan, no spurious walk-error aborts).
-			return planItem{snippet: snip, id: id, target: target, targetExisted: targetExisted, overwrite: overwrite, status: planExists, blocker: blocker}
+			return planItem{record: rec, id: id, target: target, targetExisted: targetExisted, overwrite: overwrite, status: planExists, blocker: blocker}
 		}
 		// A same-id prompt at ANOTHER path in scope means this write would CREATE a
 		// §4/§18 duplicate that overwrite cannot resolve in place, so refuse it. This
@@ -510,9 +536,9 @@ func classifySnippet(source promptsource.Source, collisionSources []promptsource
 		// exact target is a pre-existing store-level §4 violation surfaced by
 		// list/send/doctor — import guards against CREATING duplicates, it does not
 		// re-audit the whole store on a no-op skip.
-		return planItem{snippet: snip, id: id, overwrite: overwrite, status: planCrossPath, blocker: blocker}
+		return planItem{record: rec, id: id, overwrite: overwrite, status: planCrossPath, blocker: blocker}
 	}
-	return planItem{snippet: snip, id: id, content: content, target: target, targetExisted: targetExisted, overwrite: overwrite, status: planImportable}
+	return planItem{record: rec, id: id, content: content, target: target, targetExisted: targetExisted, overwrite: overwrite, status: planImportable}
 }
 
 // executePlanItem performs the write half for one classified item, returning the
@@ -527,7 +553,7 @@ func classifySnippet(source promptsource.Source, collisionSources []promptsource
 // store at the write moment (including item.overwrite && item.targetExisted, which
 // together decide atomic-replace vs O_EXCL create). The interactive TUI, which
 // holds a batch plan across user interaction, must re-classify before writing (AUR-528).
-func executePlanItem(item planItem, flags importWisprFlags) (snippetOutcome, error) {
+func executePlanItem(item planItem, flags importFlags) (snippetOutcome, error) {
 	switch item.status {
 	case planEmptyBody:
 		return snippetOutcome{skipNote: item.id + " (empty body)"}, nil
@@ -590,9 +616,9 @@ func executePlanItem(item planItem, flags importWisprFlags) (snippetOutcome, err
 // make ids depend on pre-existing files and break idempotent re-runs — so a
 // snippet whose deterministic id collides with an unrelated pre-existing prompt is
 // skipped, the unavoidable cost of idempotent, filesystem-independent minting.
-func disambiguateID(base string, snip wispr.Snippet, claimed map[string]bool) string {
+func disambiguateID(base string, rec ImportRecord, claimed map[string]bool) string {
 	id := base
-	suffix := wispr.IDPrefix(snip.ID, 6)
+	suffix := rec.Disambiguator()
 	for n := 1; claimed[id]; n++ {
 		if n == 1 {
 			id = base + "-" + suffix

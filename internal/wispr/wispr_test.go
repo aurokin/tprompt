@@ -146,6 +146,22 @@ func TestToPrompt_BodyEqualsReplacementByteForByte(t *testing.T) {
 	}
 }
 
+func TestSnippet_TitleAndDisambiguator(t *testing.T) {
+	// Title is the verbatim phrase; Disambiguator is the first 6 slug-safe chars
+	// of the UUID — the stable, non-empty seed the import engine appends to resolve
+	// intra-batch id collisions (part of the source-neutral ImportRecord contract).
+	s := Snippet{ID: "ABC-123-def-456", Phrase: "Organize my thoughts!"}
+	if got := s.Title(); got != "Organize my thoughts!" {
+		t.Errorf("Title() = %q, want the verbatim phrase", got)
+	}
+	if got := s.Disambiguator(); got != "abc123" {
+		t.Errorf("Disambiguator() = %q, want abc123 (IDPrefix(ID, 6))", got)
+	}
+	if s.Disambiguator() == "" {
+		t.Error("Disambiguator() must be non-empty for a real snippet")
+	}
+}
+
 func TestTags_ProvenanceAndStarred(t *testing.T) {
 	// Snippet.Tags is the single source of truth ToPrompt and the import picker
 	// both consume: the provenance tag always, plus "starred" only when starred.
