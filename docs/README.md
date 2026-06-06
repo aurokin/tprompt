@@ -23,6 +23,7 @@ belong in Linear milestones, not in the repo.
 - [TUI](commands/tui.md) - built-in board, search, clipboard row, and key behavior.
 - [TUI flow](commands/tui-flow.md) - popup-to-handoff delivery sequence.
 - [Paste command](commands/paste.md) - clipboard delivery behavior.
+- [Import from Wispr Flow](commands/cli.md#tprompt-import-wispr) - bring Wispr snippets in as prompts.
 - [Tmux bindings](../examples/tmux-bindings.md) - popup binding examples.
 
 ## I Want To Change Command Behavior
@@ -49,6 +50,15 @@ belong in Linear milestones, not in the repo.
 - [Tmux integration](tmux/integration.md) - environment assumptions.
 - [Error handling](implementation/error-handling.md) - tmux and delivery failure mapping.
 - [Testing harness](testing/harness.md) - fake runner and adapter test strategy.
+
+## I Want To Change Import (External Ingest)
+
+- [CLI commands](commands/cli.md#tprompt-import-wispr) - `import wispr` behavior, flags, and exit codes.
+- [Locked decisions §34](../DECISIONS.md#34-wispr-flow-snippet-import) - the import contract (read-only driver, id minting, skip-existing, error taxonomy).
+- [Behavior contract](../EXPECTATIONS.md#import) - user-visible import guarantees.
+- [Interfaces](implementation/interfaces.md#wispr-import-reader) - the `wispr.Reader` seam and `Deps.NewWisprReader` injection.
+- [Prompt store](storage/prompt-store.md) - the filename-stem IDs and frontmatter the importer writes into.
+- [Testing harness](testing/harness.md#import-wispr) - import proof surfaces (unit, app, testscript, fixture DB).
 
 ## I Want To Change Prompt Storage Or Config
 

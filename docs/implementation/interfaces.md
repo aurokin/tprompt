@@ -145,6 +145,22 @@ VerificationEngine
 - WaitUntilReady(target TargetContext, policy VerificationPolicy) -> VerificationResult
 ```
 
+## Wispr import reader
+
+```text
+Reader
+- Snippets() -> []Snippet, error
+```
+
+The `import wispr` command depends only on this one-method seam, injected through
+`Deps.NewWisprReader(dbPath) Reader`. Production wires `wispr.NewReader(path)` (a
+lazily-opened, read-only `flow.sqlite` reader); tests inject a fake returning fixed
+snippets or a typed error, so the whole import command — flag handling, id minting,
+collision policy, summary, exit-code mapping — is provable without a real SQLite
+database. `Snippets()` returns the typed DB-error taxonomy
+(`DB{NotFound,PathRequired,Open}Error`) that `app.ExitCode` maps to exit codes.
+Snippet→prompt mapping is a pure method (`Snippet.ToPrompt(tag)`), tested directly.
+
 ## Why interfaces matter
 
 They keep tmux process execution, clipboard reading, sanitization, keybind resolution, and UI rendering mockable for tests.

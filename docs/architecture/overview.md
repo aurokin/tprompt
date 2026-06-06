@@ -1,6 +1,6 @@
 # Architecture Overview
 
-`tprompt` is composed of seven major pieces.
+`tprompt` is composed of eight major pieces.
 
 ## 1. CLI layer
 
@@ -80,6 +80,16 @@ Responsibilities:
 
 This is distinct from `internal/picker`, which only wraps the optional external `picker_command` used by `tprompt pick`. See `docs/commands/tui.md`.
 
+## 8. Import (Wispr reader)
+
+Responsibilities:
+
+- read snippets from a local Wispr Flow `flow.sqlite`, opened **read-only** (it never writes to Wispr, never reads dictation history)
+- map each live snippet to a prompt id + markdown file (phrase → title + slug, replacement → body, starred → tag)
+- write through the same collision-checked, TOCTOU-safe prompt writer that `tprompt new` uses, applying skip-existing / `--overwrite` / `--dry-run` policy
+
+The SQLite driver (`modernc.org/sqlite`, pure-Go) is **isolated to `internal/wispr`** so the rest of the binary stays CGO-free. This is an offline, one-way ingest — not a sync — and is the only piece that reads an external tool's database. See `docs/commands/cli.md` and `DECISIONS.md` §34.
+
 ## Data flow summary
 
 ### Direct send (`tprompt send <id>`, `tprompt paste` from CLI)
@@ -100,6 +110,16 @@ This is distinct from `internal/picker`, which only wraps the optional external 
 7. Handoff worker verifies the target pane has returned to selection
 8. Sanitizer processes the content in the worker's context
 9. Adapter delivers
+
+### Import (`tprompt import wispr`)
+
+1. CLI resolves the Wispr `flow.sqlite` path (`--db-path` or the OS default; no default → usage error)
+2. The Wispr reader opens the DB read-only and returns the live snippets
+3. CLI resolves the write target (primary global dir, or `--project` overlay)
+4. Each snippet is mapped to a prompt id (slug, with deterministic uuid fallback/disambiguation) and markdown
+5. The shared prompt writer applies the collision/skip-existing/`--overwrite` policy and writes (or, under `--dry-run`, previews)
+
+No tmux adapter, sanitizer, or handoff is involved — import only touches the prompt store.
 
 ## Architectural priorities
 
