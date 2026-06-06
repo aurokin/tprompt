@@ -99,6 +99,19 @@ func TestExitCodeWisprDBErrors(t *testing.T) {
 	}
 }
 
+func TestExitCodeInteractiveImportErrors(t *testing.T) {
+	// Both `import wispr -i` preflight failures are usage errors (exit 2).
+	usage := []error{
+		&InteractiveRequiresTTYError{},
+		&InteractiveDryRunConflictError{},
+	}
+	for _, err := range usage {
+		if got := ExitCode(err); got != ExitUsage {
+			t.Errorf("ExitCode(%T) = %d, want %d", err, got, ExitUsage)
+		}
+	}
+}
+
 func TestExitCodePromptsDirCreate(t *testing.T) {
 	err := &store.PromptsDirCreateError{Path: "/nope", Err: errors.New("read-only fs")}
 	if got := ExitCode(err); got != ExitUsage {

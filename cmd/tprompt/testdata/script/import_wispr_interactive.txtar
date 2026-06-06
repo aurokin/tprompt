@@ -1,0 +1,60 @@
+# AUR-528: `tprompt import wispr -i` interactive selection.
+#   - Rejects `-i` without a tty and `-i --dry-run` as usage errors (exit 2):
+#     obvious failure over a silent non-interactive fallback.
+#   - A stub renderer (TPROMPT_TEST_IMPORT_RENDERER, never set in production)
+#     drives confirm/cancel so the scriptable confirm-all path is proven
+#     byte-for-byte identical to a non-interactive import, and cancel writes
+#     nothing. The stub bypasses the tty gate so this black-box run can drive
+#     `-i` over pipes.
+
+mkdir prompts-plain
+mkdir prompts-i
+mkdir prompts-cancel
+cp $WISPR_FIXTURE flow.sqlite
+
+# `-i --dry-run` is a contradiction (a picker that writes nothing) → usage error,
+# nothing written.
+! tprompt import wispr --db-path flow.sqlite --config plain.toml -i --dry-run
+stderr 'tprompt - error:'
+stderr 'and --dry-run conflict'
+! exists prompts-plain/code-review.md
+
+# `-i` without a tty (testscript stdin/stdout are pipes, no stub set) → usage
+# error pointing at the missing terminal.
+! tprompt import wispr --db-path flow.sqlite --config plain.toml -i
+stderr 'tprompt - error:'
+stderr 'needs an interactive terminal'
+! exists prompts-plain/code-review.md
+
+# Non-interactive baseline: both live snippets become prompts.
+tprompt import wispr --db-path flow.sqlite --config plain.toml
+stdout 'prompts-plain/organize-thoughts-prompt\.md'
+stdout 'prompts-plain/code-review\.md'
+
+# Interactive confirm-all (stub) imports the same fresh snippets, prints the
+# created paths to stdout, and leaves stderr clean (non-tty, no summary).
+env TPROMPT_TEST_IMPORT_RENDERER=confirm-all
+tprompt import wispr --db-path flow.sqlite --config i.toml -i
+stdout 'prompts-i/organize-thoughts-prompt\.md'
+stdout 'prompts-i/code-review\.md'
+! stderr .
+
+# The scriptable-equivalence invariant: confirm-all writes byte-for-byte what the
+# non-interactive run wrote.
+cmp prompts-plain/organize-thoughts-prompt.md prompts-i/organize-thoughts-prompt.md
+cmp prompts-plain/code-review.md prompts-i/code-review.md
+
+# Cancel (stub) writes nothing, prints nothing, and exits 0.
+env TPROMPT_TEST_IMPORT_RENDERER=cancel
+tprompt import wispr --db-path flow.sqlite --config cancel.toml -i
+! stdout .
+! stderr .
+! exists prompts-cancel/organize-thoughts-prompt.md
+! exists prompts-cancel/code-review.md
+
+-- plain.toml --
+prompts_dir = "prompts-plain"
+-- i.toml --
+prompts_dir = "prompts-i"
+-- cancel.toml --
+prompts_dir = "prompts-cancel"

@@ -13,6 +13,7 @@ import (
 	"github.com/hsadler/tprompt/internal/config"
 	"github.com/hsadler/tprompt/internal/delivery"
 	"github.com/hsadler/tprompt/internal/handoff"
+	"github.com/hsadler/tprompt/internal/importtui"
 	"github.com/hsadler/tprompt/internal/picker"
 	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/store"
@@ -43,6 +44,7 @@ type Deps struct {
 	NewPicker         func(cfg config.Resolved) (picker.Picker, error)
 	NewTUIClient      func(cfg config.Resolved) (delivery.Client, error)
 	NewRenderer       func(cfg config.Resolved, prompts store.Store, sub submitter.Submitter) (tui.Renderer, error)
+	NewImportRenderer func() (importtui.Renderer, error)
 	NewSubmitter      func(cfg config.Resolved, prompts store.Store, client delivery.Client, target tmux.TargetContext) submitter.Submitter
 }
 
@@ -106,6 +108,29 @@ func ProductionDeps(stdout, stderr io.Writer, stdin io.Reader) Deps {
 				Input:  stdin,
 				Output: stdout,
 			}), nil
+		},
+		NewImportRenderer: func() (importtui.Renderer, error) {
+			// A test stub (TPROMPT_TEST_IMPORT_RENDERER) simulates the picker, so
+			// it does not require a real terminal — this is what lets the black-box
+			// scriptable-equivalence testscript drive `-i` over pipes. The real
+			// picker reads keys from stdin and draws to stdout, so both must be a
+			// tty; otherwise fail obviously rather than silently importing all.
+			//
+			// This hook is production-active by deliberate choice, mirroring the
+			// established TPROMPT_TEST_RENDERER seam above: testscript.Main runs the
+			// real RunCLI in-process, so an env var is the only way to inject a
+			// deterministic renderer over pipes. The variable is undocumented and
+			// test-only; a user has no reason to set it, and a typo'd value fails
+			// loudly (parseTestImportRenderer rejects unknown specs). A build-tag
+			// guard would break the required testscript and leave the board's
+			// identical hook exposed anyway, so the tradeoff is accepted here too.
+			if spec := lookupEnv("TPROMPT_TEST_IMPORT_RENDERER"); spec != "" {
+				return parseTestImportRenderer(spec)
+			}
+			if !streamIsTTY(stdin) || !streamIsTTY(stdout) {
+				return nil, &InteractiveRequiresTTYError{}
+			}
+			return importtui.NewRenderer(importtui.ProgramIO{Input: stdin, Output: stdout}), nil
 		},
 		NewSubmitter: func(cfg config.Resolved, prompts store.Store, client delivery.Client, target tmux.TargetContext) submitter.Submitter {
 			return submitter.New(prompts, client, cfg, target)
@@ -242,4 +267,41 @@ func (r staticClipboardRenderer) Run(tui.State) (tui.Result, error) {
 		return result, nil
 	}
 	return result, r.sub.Submit(result)
+}
+
+// parseTestImportRenderer decodes TPROMPT_TEST_IMPORT_RENDERER into a stub import
+// Renderer for black-box testscript coverage of the `-i` paths. Never set in
+// production. It bypasses the tty gate (see NewImportRenderer) so a scripted run
+// can exercise interactive selection over pipes.
+//
+//	confirm-all → ActionConfirm with every fresh id the picker was given
+//	cancel      → ActionCancel
+//
+// confirm-all echoes the ids from the State passed to Run — the only id source
+// guaranteed to equal the disambiguated ids the writer re-derives.
+func parseTestImportRenderer(spec string) (importtui.Renderer, error) {
+	switch spec {
+	case "confirm-all":
+		return confirmAllImportRenderer{}, nil
+	case "cancel":
+		return cancelImportRenderer{}, nil
+	default:
+		return nil, fmt.Errorf("TPROMPT_TEST_IMPORT_RENDERER: unsupported spec %q", spec)
+	}
+}
+
+type confirmAllImportRenderer struct{}
+
+func (confirmAllImportRenderer) Run(state importtui.State) (importtui.Result, error) {
+	ids := make([]string, len(state.Items))
+	for i, it := range state.Items {
+		ids[i] = it.ID
+	}
+	return importtui.Result{Action: importtui.ActionConfirm, SelectedIDs: ids}, nil
+}
+
+type cancelImportRenderer struct{}
+
+func (cancelImportRenderer) Run(importtui.State) (importtui.Result, error) {
+	return importtui.Result{Action: importtui.ActionCancel}, nil
 }

@@ -91,6 +91,17 @@ func ExitCode(err error) int {
 		return ExitGeneral
 	}
 
+	// `import wispr -i` preflight failures: a flag contradiction or a non-tty
+	// environment can't run the picker. Both are usage errors (exit 2).
+	var interactiveTTY *InteractiveRequiresTTYError
+	if errors.As(err, &interactiveTTY) {
+		return ExitUsage
+	}
+	var interactiveDryRun *InteractiveDryRunConflictError
+	if errors.As(err, &interactiveDryRun) {
+		return ExitUsage
+	}
+
 	var fileExists *PromptFileExistsError
 	if errors.As(err, &fileExists) {
 		return ExitPrompt

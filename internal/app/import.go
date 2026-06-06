@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/hsadler/tprompt/internal/importtui"
 	"github.com/hsadler/tprompt/internal/promptsource"
 	"github.com/hsadler/tprompt/internal/wispr"
 )
@@ -63,18 +64,46 @@ at a copy or a non-default install.`,
 	cmd.Flags().BoolVar(&flags.dryRun, "dry-run", false, "preview what would be imported; write nothing")
 	cmd.Flags().BoolVar(&flags.overwrite, "overwrite", false, "replace existing prompts with the same id (refresh from Wispr)")
 	cmd.Flags().StringVar(&flags.tag, "tag", defaultWisprTag, "provenance tag stamped on every imported prompt")
+	cmd.Flags().BoolVarP(&flags.interactive, "interactive", "i", false, "pick which snippets to import in an interactive list (needs a terminal)")
 	return cmd
 }
 
 type importWisprFlags struct {
-	dbPath    string
-	project   bool
-	dryRun    bool
-	overwrite bool
-	tag       string
+	dbPath      string
+	project     bool
+	dryRun      bool
+	overwrite   bool
+	tag         string
+	interactive bool
+}
+
+// InteractiveRequiresTTYError reports `import wispr -i` invoked without an
+// interactive terminal on both stdin and stdout. The picker cannot run, and the
+// locked decision is an obvious failure over a silent non-interactive fallback.
+// Surfaced as a usage error (exit 2) by app.ExitCode.
+type InteractiveRequiresTTYError struct{}
+
+func (*InteractiveRequiresTTYError) Error() string {
+	return "import wispr -i needs an interactive terminal (stdin and stdout must be a tty); re-run without -i to import non-interactively"
+}
+
+// InteractiveDryRunConflictError reports `import wispr -i --dry-run`: a picker
+// that writes nothing is a contradiction. Surfaced as a usage error (exit 2).
+type InteractiveDryRunConflictError struct{}
+
+func (*InteractiveDryRunConflictError) Error() string {
+	return "import wispr -i and --dry-run conflict: -i interactively selects what to write, --dry-run writes nothing"
 }
 
 func runImportWispr(deps Deps, flags importWisprFlags) error {
+	// Interactive preflight runs before any DB/store work so a flag contradiction
+	// or a non-tty environment fails obviously (exit 2) before side effects. A nil
+	// picker means a non-interactive run.
+	picker, err := interactivePicker(deps, flags)
+	if err != nil {
+		return err
+	}
+
 	cfg, err := deps.LoadConfig(*deps.ConfigPath)
 	if err != nil {
 		return err
@@ -97,27 +126,120 @@ func runImportWispr(deps Deps, flags importWisprFlags) error {
 	if err := validatePromptSources(collisionSources, source.Path); err != nil {
 		return err
 	}
-	// A real run ensures the destination exists, auto-creating the default global
-	// dir or the project overlay. --dry-run writes nothing, so it must not create
-	// the auto-create dir — but an explicit, non-auto-create prompts_dir that is
-	// missing is still surfaced (a real import would reject it), so the preview
-	// never claims success for a destination the import could not actually use.
-	if source.AutoCreateOnAccess {
-		if !flags.dryRun {
-			if err := ensureScaffoldDir(source.Path, true); err != nil {
-				return err
-			}
-		}
-	} else if err := ensureScaffoldDir(source.Path, false); err != nil {
+	if err := prepareImportDest(source, flags, picker != nil); err != nil {
 		return err
 	}
 
-	imported, skipped, err := importSnippets(deps, source, collisionSources, snippets, flags)
+	if picker != nil {
+		return runInteractiveImport(deps, picker, source, collisionSources, snippets, flags)
+	}
+
+	imported, skipped, err := importSnippets(deps, source, collisionSources, snippets, flags, nil)
 	if err != nil {
 		return err
 	}
 	writeImportSummary(deps, flags.dryRun, imported, skipped)
 	return nil
+}
+
+// prepareImportDest validates or creates the destination before any write. The
+// auto-create default global dir / project overlay is created only for a
+// non-interactive real run: --dry-run writes nothing, and an interactive run
+// defers creation until the user confirms (so a cancel leaves no directory —
+// runInteractiveImport handles it via ensureImportWriteDir). An explicit,
+// non-auto-create prompts_dir that is missing is surfaced eagerly in every mode,
+// so a real import never claims success — and a picker never opens — for a
+// destination it could not use.
+func prepareImportDest(source promptsource.Source, flags importWisprFlags, interactive bool) error {
+	if !source.AutoCreateOnAccess {
+		return ensureScaffoldDir(source.Path, false)
+	}
+	if flags.dryRun || interactive {
+		return nil
+	}
+	return ensureScaffoldDir(source.Path, true)
+}
+
+// interactivePicker validates the `-i` preflight and builds the picker, or
+// returns (nil, nil) for a non-interactive run. The renderer's factory carries
+// the tty gate (and the test stub bypasses it), so constructing it here rejects
+// piped `-i` before any DB/store work, regardless of import contents.
+func interactivePicker(deps Deps, flags importWisprFlags) (importtui.Renderer, error) {
+	if !flags.interactive {
+		return nil, nil
+	}
+	if flags.dryRun {
+		return nil, &InteractiveDryRunConflictError{}
+	}
+	return deps.NewImportRenderer()
+}
+
+// runInteractiveImport renders the fresh (planImportable) snippets in the picker
+// and imports exactly the confirmed ids. It builds the plan and re-runs the
+// writer over the SAME snippets slice in the same order, so the disambiguated ids
+// the picker showed are exactly the ids importSnippets re-derives (the same-slice
+// invariant — DECISIONS AUR-528 D4).
+//
+// selected starts empty (nothing chosen). With no fresh items the picker is
+// skipped entirely (no blank list) and the empty selection imports nothing. A
+// cancel returns before anything is written (exit 0, no summary).
+//
+// The auto-create destination is created only when at least one prompt will be
+// written (a non-empty confirmed selection). So every no-op interactive
+// outcome — cancel, deselect-all, or zero fresh rows — leaves no empty
+// directory behind, honoring the cancel/no-op = "writes nothing" contract.
+func runInteractiveImport(deps Deps, picker importtui.Renderer, source promptsource.Source, collisionSources []promptsource.Source, snippets []wispr.Snippet, flags importWisprFlags) error {
+	selected := map[string]bool{}
+	if items := freshItems(dryRunPlan(source, collisionSources, snippets, flags)); len(items) > 0 {
+		result, err := picker.Run(importtui.State{Items: items})
+		if err != nil {
+			return err
+		}
+		if result.Action == importtui.ActionCancel {
+			return nil
+		}
+		for _, id := range result.SelectedIDs {
+			selected[id] = true
+		}
+	}
+
+	if len(selected) > 0 {
+		// Defer auto-create past the picker AND gate it on a real write, so a
+		// no-op interactive run (deselect-all / zero fresh rows) creates nothing.
+		if err := ensureImportWriteDir(source); err != nil {
+			return err
+		}
+	}
+	imported, skipped, err := importSnippets(deps, source, collisionSources, snippets, flags, selected)
+	if err != nil {
+		return err
+	}
+	writeImportSummary(deps, flags.dryRun, imported, skipped)
+	return nil
+}
+
+// ensureImportWriteDir creates the auto-create destination just before an
+// interactive write. A non-auto-create explicit prompts_dir was already
+// validated to exist in runImportWispr, so it needs nothing here.
+func ensureImportWriteDir(source promptsource.Source) error {
+	if !source.AutoCreateOnAccess {
+		return nil
+	}
+	return ensureScaffoldDir(source.Path, true)
+}
+
+// freshItems projects the importable (creatable / refreshable-under-overwrite)
+// plan rows into picker items. Non-importable statuses (exists/crossPath/empty/
+// invalid) are not shown — PR3 selects only fresh items; conflict rows are
+// AUR-529.
+func freshItems(plan []planItem) []importtui.Item {
+	items := make([]importtui.Item, 0, len(plan))
+	for _, p := range plan {
+		if p.status == planImportable {
+			items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase})
+		}
+	}
+	return items
 }
 
 // importSnippets executes (or, under --dry-run, previews) the batch import,
@@ -133,10 +255,24 @@ func runImportWispr(deps Deps, flags importWisprFlags) error {
 // stderr (dry-run). The imported-vs-skipped branch keys off the executed outcome,
 // never the planned status — the O_EXCL create-race turns a planned create into an
 // idempotent skip at execution time.
-func importSnippets(deps Deps, source promptsource.Source, collisionSources []promptsource.Source, snippets []wispr.Snippet, flags importWisprFlags) (imported, skipped int, err error) {
+//
+// selected is the interactive selection filter. nil imports every item
+// (byte-identical to the non-interactive path). A non-nil set means interactive
+// mode: import exactly the ids the user confirmed and skip everything else. Only
+// planImportable snippets are ever shown in the picker, so non-importable
+// snippets (a cross-path duplicate, a classification error) are never in the set
+// and are skipped rather than aborting the import — the user could not see or
+// deselect them, and conflict review is AUR-529. confirm-all therefore writes the
+// same fresh-item bytes as a non-interactive run when no hidden conflicts exist;
+// where they do, interactive skips them instead of hard-erroring.
+func importSnippets(deps Deps, source promptsource.Source, collisionSources []promptsource.Source, snippets []wispr.Snippet, flags importWisprFlags, selected map[string]bool) (imported, skipped int, err error) {
 	claimed := map[string]bool{}
 	for _, snip := range snippets {
 		item := classifySnippet(source, collisionSources, snip, flags, claimed)
+		if selected != nil && !selected[item.id] {
+			skipped++
+			continue
+		}
 		outcome, writeErr := executePlanItem(item, flags)
 		if writeErr != nil {
 			return imported, skipped, writeErr
