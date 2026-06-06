@@ -7,6 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/hsadler/tprompt/internal/searchindex"
 )
 
 // footerLines is the fixed chrome subtracted from terminal height to compute
@@ -15,13 +17,32 @@ import (
 // headerLines so the viewport math stays exact if it ever wraps.
 const footerLines = 2
 
+// mode is the picker's input mode. modeList (the zero value) is the default
+// checkbox list; modeSearch captures printable runes into the query for live
+// fuzzy filtering. Two stages keep the rune-vs-action conflict clean: `a`/space
+// are select-all/toggle in modeList but query text in modeSearch (AUR-530 D9).
+type mode int
+
+const (
+	modeList mode = iota
+	modeSearch
+)
+
 // Model is the bubbletea model for the import picker: a checkbox list of fresh
 // items. selected is keyed by item id and starts fully checked (locked decision
-// D8: fresh items pre-checked). cursor/scrollOffset drive the viewport with the
-// same clamp math as the board (copied; see package doc).
+// D8: fresh items pre-checked); it is independent of mode and query, so a
+// selection survives entering, filtering in, and leaving search. cursor and
+// scrollOffset index the VISIBLE slice (visible, recomputed by refilter on every
+// query change) with the same clamp math as the board (copied; see package doc).
+// index is the shared fuzzy core over all items; query is the active filter.
 type Model struct {
-	items        []Item
-	selected     map[string]bool
+	items    []Item
+	index    *searchindex.Index[Item]
+	selected map[string]bool
+	mode     mode
+	query    string
+	visible  []Item
+
 	cursor       int
 	scrollOffset int
 	width        int
@@ -33,13 +54,54 @@ type Model struct {
 // (ConflictNone) items start selected (locked decision: fresh pre-checked);
 // exact-target conflicts start unchecked (§34 skip-by-default — check to arm an
 // overwrite) unless Armed (a CLI --overwrite refresh, pre-armed); cross-path
-// duplicates start unchecked and are never selectable.
+// duplicates start unchecked and are never selectable. It also builds the shared
+// fuzzy index over the items (matching id, title, and tags) for `/`-search.
 func NewModel(state State) Model {
 	selected := make(map[string]bool, len(state.Items))
 	for _, it := range state.Items {
 		selected[it.ID] = it.Conflict == ConflictNone || it.Armed
 	}
-	return Model{items: state.Items, selected: selected}
+	m := Model{
+		items:    state.Items,
+		index:    searchindex.New(state.Items, itemFields, itemTieKey),
+		selected: selected,
+	}
+	m.visible = m.computeVisible()
+	return m
+}
+
+// itemFields adapts an Item to the search corpus: id + title + tags (the import
+// picker has no separate description field, so Description stays empty).
+func itemFields(it Item) searchindex.Fields {
+	return searchindex.Fields{ID: it.ID, Title: it.Title, Tags: it.Tags}
+}
+
+// itemTieKey is the stable tiebreak for equal-score matches: the id is unique
+// per row (it is the write target), so it totally orders the results.
+func itemTieKey(it Item) string { return it.ID }
+
+// computeVisible returns the rows to show for the current query. An empty query
+// keeps the original snippet order (the default view is unchanged from AUR-528/
+// 529); a non-empty query returns the fuzzy-ranked subset.
+func (m Model) computeVisible() []Item {
+	if m.query == "" {
+		return m.items
+	}
+	matches := m.index.Query(m.query)
+	out := make([]Item, 0, len(matches))
+	for _, mt := range matches {
+		out = append(out, mt.Item)
+	}
+	return out
+}
+
+// refilter recomputes the visible set after a query change and resets the cursor
+// to the top (the ranked order changed, so preserving the index is meaningless).
+func (m Model) refilter() Model {
+	m.visible = m.computeVisible()
+	m.cursor = 0
+	m.scrollOffset = 0
+	return m
 }
 
 // Result returns the Result captured when the Model issued tea.Quit. The
@@ -54,7 +116,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.items), m.rowsPerFrame())
+		m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.visible), m.rowsPerFrame())
 		return m, nil
 	case tea.KeyMsg:
 		return m.updateKey(msg)
@@ -63,10 +125,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.mode == modeSearch {
+		return m.updateSearchKey(msg)
+	}
+	return m.updateListKey(msg)
+}
+
+// updateListKey handles keys in the default checkbox list: navigation, toggle,
+// select-all, confirm/cancel, and `/` to enter search.
+func (m Model) updateListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Catch Ctrl+C explicitly before bubbletea's default SIGINT path so the
 	// cancel Result is captured instead of surfacing as ErrProgramKilled.
 	switch {
-	case msg.Type == tea.KeyCtrlC, msg.Type == tea.KeyEsc:
+	case msg.Type == tea.KeyCtrlC:
+		m.result = Result{Action: ActionCancel}
+		return m, tea.Quit
+	case msg.Type == tea.KeyEsc:
+		// Esc backs out one level: clear an active committed filter first (so the
+		// full list returns), and only cancel the picker when no filter is active.
+		// This keeps Esc from silently cancelling when the user means "drop the
+		// filter", and mirrors Esc's clear-the-filter meaning inside search.
+		if m.query != "" {
+			m.query = ""
+			return m.refilter(), nil
+		}
 		m.result = Result{Action: ActionCancel}
 		return m, tea.Quit
 	case msg.Type == tea.KeyEnter:
@@ -90,30 +172,85 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.toggleCurrent(), nil
 		case 'a':
 			return m.selectAll(), nil
+		case '/':
+			m.mode = modeSearch
+			return m, nil
 		}
 	}
 	return m, nil
 }
 
-// moveCursor shifts the cursor by delta (±1) within bounds and re-clamps the
-// scroll offset so the cursor stays visible.
+// updateSearchKey handles keys while typing a filter. Every printable rune
+// (including a/j/k/space) appends to the query so any text is searchable; the
+// list actions are deliberately unreachable here (AUR-530 D9). Ctrl+C still
+// cancels (never trap the user). Enter commits the filter and returns to the
+// list with the query kept; Esc clears the query and returns to the full list —
+// it does NOT cancel the picker (only Esc in modeList cancels).
+func (m Model) updateSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyCtrlC:
+		m.result = Result{Action: ActionCancel}
+		return m, tea.Quit
+	case tea.KeyEsc:
+		m.query = ""
+		m.mode = modeList
+		return m.refilter(), nil
+	case tea.KeyEnter:
+		m.mode = modeList
+		return m, nil
+	case tea.KeyUp:
+		return m.moveCursor(-1), nil
+	case tea.KeyDown:
+		return m.moveCursor(1), nil
+	case tea.KeyBackspace:
+		return m.popQueryRune(), nil
+	case tea.KeySpace:
+		// Bubble Tea may deliver a bare space as KeySpace; append it so
+		// multi-word queries work.
+		return m.appendQuery(" "), nil
+	case tea.KeyRunes:
+		return m.appendQuery(string(msg.Runes)), nil
+	}
+	return m, nil
+}
+
+// appendQuery adds text to the query and refilters.
+func (m Model) appendQuery(s string) Model {
+	m.query += s
+	return m.refilter()
+}
+
+// popQueryRune removes the last rune from the query and refilters; a no-op on an
+// empty query.
+func (m Model) popQueryRune() Model {
+	if m.query == "" {
+		return m
+	}
+	runes := []rune(m.query)
+	m.query = string(runes[:len(runes)-1])
+	return m.refilter()
+}
+
+// moveCursor shifts the cursor by delta (±1) within the visible set's bounds and
+// re-clamps the scroll offset so the cursor stays visible.
 func (m Model) moveCursor(delta int) Model {
 	next := m.cursor + delta
-	if next < 0 || next >= len(m.items) {
+	if next < 0 || next >= len(m.visible) {
 		return m
 	}
 	m.cursor = next
-	m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.items), m.rowsPerFrame())
+	m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.visible), m.rowsPerFrame())
 	return m
 }
 
-// toggleCurrent flips the checkbox under the cursor. A cross-path duplicate is
-// non-selectable (the importer cannot create it), so toggling it is a no-op.
+// toggleCurrent flips the checkbox under the cursor (over the visible set). A
+// cross-path duplicate is non-selectable (the importer cannot create it), so
+// toggling it is a no-op.
 func (m Model) toggleCurrent() Model {
-	if m.cursor < 0 || m.cursor >= len(m.items) {
+	if m.cursor < 0 || m.cursor >= len(m.visible) {
 		return m
 	}
-	it := m.items[m.cursor]
+	it := m.visible[m.cursor]
 	if it.Conflict == ConflictCrossPath {
 		return m
 	}
@@ -121,15 +258,36 @@ func (m Model) toggleCurrent() Model {
 	return m
 }
 
-// selectAll resets the selection to NewModel's initial safe default: every fresh
-// item checked, every CLI-authorized refresh (Armed) kept armed, and every other
-// conflict at skip-by-default (ad-hoc per-row overwrite arms cleared, cross-path
-// unselected). Pressing `a` always yields the same predictable state — it never
-// leaves a surprise per-row overwrite armed, yet it preserves the overwrites the
-// CLI --overwrite flag authorized (which would otherwise be silently skipped).
+// selectAll resets the VISIBLE rows to NewModel's initial safe default: every
+// fresh item checked, every CLI-authorized refresh (Armed) kept armed, and every
+// other conflict at skip-by-default (ad-hoc per-row overwrite arms cleared,
+// cross-path unselected). Scoping the reset to the visible set means `a` "applies
+// the safe default to the rows I'm looking at" — off-filter fresh selections are
+// left untouched (so a filter→select→filter→select batch builds up a union), and
+// with no filter (visible == all) it is byte-identical to the unfiltered
+// select-all.
+//
+// The one thing `a` resets GLOBALLY, even for hidden rows, is an ad-hoc armed
+// overwrite: a checked exact-target that the CLI --overwrite flag did NOT
+// authorize. AUR-529's safety contract is that `a` never leaves a surprise
+// destructive overwrite armed; a row armed and then filtered out of view is
+// exactly such a surprise, so disarming it everywhere keeps that guarantee while
+// the visible-scoped fresh selection still respects the active filter.
+// CLI-authorized refreshes (Armed) are not surprises and survive untouched.
 func (m Model) selectAll() Model {
+	visible := make(map[string]bool, len(m.visible))
+	for _, it := range m.visible {
+		visible[it.ID] = true
+	}
 	for _, it := range m.items {
-		m.selected[it.ID] = it.Conflict == ConflictNone || it.Armed
+		switch {
+		case visible[it.ID]:
+			m.selected[it.ID] = it.Conflict == ConflictNone || it.Armed
+		case it.Conflict == ConflictExactTarget && !it.Armed:
+			// Hidden ad-hoc overwrite: disarm it so `a` cannot leave an unseen
+			// destructive write pending.
+			m.selected[it.ID] = false
+		}
 	}
 	return m
 }
@@ -229,11 +387,11 @@ func clampScrollOffset(cursor, offset, rowCount, rpf int) int {
 	return offset
 }
 
-// visibleRowRange returns [start, end) of items that fit in the viewport.
-// Pre-WindowSizeMsg (rpf == 0) or when every row fits, returns the full range.
-// (Copied from internal/tui.)
+// visibleRowRange returns [start, end) of the visible (filtered) items that fit
+// in the viewport. Pre-WindowSizeMsg (rpf == 0) or when every row fits, returns
+// the full range. (Copied from internal/tui.)
 func (m Model) visibleRowRange() (int, int) {
-	rows := len(m.items)
+	rows := len(m.visible)
 	rpf := m.rowsPerFrame()
 	if rpf <= 0 || rows <= rpf {
 		return 0, rows
@@ -255,10 +413,10 @@ func (m Model) View() string {
 	sb.WriteString(m.renderHeader())
 	sb.WriteString("\n")
 
-	idWidth := maxIDWidth(m.items)
+	idWidth := maxIDWidth(m.visible)
 	start, end := m.visibleRowRange()
 	for i := start; i < end; i++ {
-		line := renderRow(m.items[i], m.selected[m.items[i].ID], idWidth, width)
+		line := renderRow(m.visible[i], m.selected[m.visible[i].ID], idWidth, width)
 		if i == m.cursor {
 			line = selectedStyle.Render(line)
 		}
@@ -269,21 +427,46 @@ func (m Model) View() string {
 	return sb.String()
 }
 
+// renderHeader is the one title line. In modeList it reports the global
+// selection count, plus an explicit "filtered" badge when a committed filter is
+// still narrowing the list (so a list with hidden rows is never indistinguishable
+// from the full list); in modeSearch it becomes the live `/<query>` input line.
+// Both render as exactly one line (no newline, width-truncated) so rowsPerFrame's
+// chrome accounting is identical in either mode.
 func (m Model) renderHeader() string {
+	if m.mode == modeSearch {
+		return headerStyle.Render(truncateToWidth("/"+m.query, m.viewWidth()))
+	}
 	header := fmt.Sprintf("Select snippets to import (%d/%d)", len(m.selectedIDs()), len(m.items))
+	if m.query != "" {
+		header += fmt.Sprintf(" — filtered %q, %d shown", m.query, len(m.visible))
+	}
 	return headerStyle.Render(truncateToWidth(header, m.viewWidth()))
 }
 
-// footer renders two lines: a faint counter (selected / armed-overwrite / blocked)
-// and a confirm + key-hint line. Each line is plain-text-truncated to width before
-// styling (mirrors renderHeader) so the no-wrap, one-line-per-row viewport math
-// holds; the two are joined by — but do not end in — a newline.
+// footer renders two lines: a faint counter (selected / armed-overwrite /
+// blocked) and a confirm + key-hint line. The counter always reports GLOBAL
+// selection (every item, not the filtered view), so the confirm count reflects
+// the true write set regardless of an active filter. The hint line is
+// mode-specific. Each line is plain-text-truncated to width before styling
+// (mirrors renderHeader) so the no-wrap, one-line-per-row viewport math holds;
+// the two are joined by — but do not end in — a newline.
 func (m Model) footer() string {
 	w := m.viewWidth()
 	n := len(m.selectedIDs())
 	counter := fmt.Sprintf("%d selected · %d overwrite · %d blocked", n, len(m.overwriteIDs()), m.blockedCount())
-	confirm := fmt.Sprintf("write %d prompts? enter confirm · space toggle · a all · esc cancel", n)
-	return headerStyle.Render(truncateToWidth(counter, w)) + "\n" + truncateToWidth(confirm, w)
+	var hint string
+	switch {
+	case m.mode == modeSearch:
+		hint = fmt.Sprintf("%d matches · enter filter · esc clear · type to search", len(m.visible))
+	case m.query != "":
+		// A committed filter is active: surface `/` to refine it and that esc now
+		// clears the filter rather than cancelling.
+		hint = fmt.Sprintf("write %d prompts? enter confirm · space toggle · a all · / edit · esc clear filter", n)
+	default:
+		hint = fmt.Sprintf("write %d prompts? enter confirm · space toggle · a all · / search · esc cancel", n)
+	}
+	return headerStyle.Render(truncateToWidth(counter, w)) + "\n" + truncateToWidth(hint, w)
 }
 
 var (
