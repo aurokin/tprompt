@@ -142,13 +142,15 @@ func TestView_RowsNeverExceedWidth(t *testing.T) {
 		{ID: "a-short-id", Title: "short"},
 		{ID: strings.Repeat("very-long-snippet-slug-", 5), Title: "a long title that also overflows"},
 	}}
-	m := NewModel(state)
-	const width = 30
-	m = send(m, tea.WindowSizeMsg{Width: width, Height: 10})
-
-	for _, line := range strings.Split(m.View(), "\n") {
-		if w := lipgloss.Width(line); w > width {
-			t.Errorf("rendered line width %d exceeds terminal width %d: %q", w, width, line)
+	// Include a pathologically narrow width (< the 7-cell fixed chrome) so the
+	// no-wrap invariant is pinned even where the checkbox + gaps don't fit.
+	for _, width := range []int{4, 30} {
+		m := NewModel(state)
+		m = send(m, tea.WindowSizeMsg{Width: width, Height: 10})
+		for _, line := range strings.Split(m.View(), "\n") {
+			if w := lipgloss.Width(line); w > width {
+				t.Errorf("at width %d: rendered line width %d exceeds it: %q", width, w, line)
+			}
 		}
 	}
 }

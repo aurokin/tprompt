@@ -265,7 +265,10 @@ func renderRow(item Item, checked bool, idWidth, width int) string {
 	}
 	id := padRight(truncateToWidth(item.ID, idWidth), idWidth)
 	title := truncateToWidth(item.Title, titleCol)
-	return fmt.Sprintf("%s  %s  %s", box, id, title)
+	// Cap the composed line too: the fixed checkbox + column gaps are 7 cells, so
+	// a terminal narrower than that would otherwise wrap the row and desync the
+	// one-line-per-row viewport math. Truncating keeps the invariant at any width.
+	return truncateToWidth(fmt.Sprintf("%s  %s  %s", box, id, title), width)
 }
 
 func maxIDWidth(items []Item) int {
