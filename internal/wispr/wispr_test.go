@@ -70,6 +70,51 @@ func TestToPrompt_FrontmatterAndBodyRoundTrip(t *testing.T) {
 	}
 }
 
+func TestToPrompt_EmitsFullScaffoldFieldSet(t *testing.T) {
+	// Imported prompts carry the same frontmatter field set `tprompt new`
+	// scaffolds (AUR-526): the description/key/mode/enter stubs are added so an
+	// imported prompt is as editable as a scaffolded one. The stubs are bare keys
+	// (no value): bare matches the scaffold and, for `enter:`, is the only form
+	// that round-trips into promptmeta.Meta's *bool without a parse error.
+	s := Snippet{
+		ID:          "11111111-2222-3333-4444-555555555555",
+		Phrase:      "organize thoughts prompt",
+		Replacement: "Help me organize my thoughts.",
+	}
+	_, md, ok := s.ToPrompt("wispr")
+	if !ok {
+		t.Fatal("ToPrompt ok = false, want true")
+	}
+
+	for _, stub := range []string{"\ndescription:\n", "\nkey:\n", "\nmode:\n", "\nenter:\n"} {
+		if !strings.Contains(string(md), stub) {
+			t.Errorf("frontmatter missing bare stub %q:\n%s", stub, md)
+		}
+	}
+
+	// The stubbed file must load cleanly with the new fields treated as unset
+	// (DECISIONS §9), not as a parse error or an empty-but-present value.
+	parsed, err := promptmeta.Parse(md)
+	if err != nil {
+		t.Fatalf("promptmeta.Parse: %v", err)
+	}
+	if parsed.Meta.Description != "" {
+		t.Errorf("Description = %q, want empty (unset)", parsed.Meta.Description)
+	}
+	if parsed.Meta.Key != nil || parsed.Meta.KeyDeclared {
+		t.Errorf("Key = %v (declared=%v), want nil/undeclared (auto-assign)", parsed.Meta.Key, parsed.Meta.KeyDeclared)
+	}
+	if parsed.Meta.Mode != "" {
+		t.Errorf("Mode = %q, want empty (unset)", parsed.Meta.Mode)
+	}
+	if parsed.Meta.Enter != nil {
+		t.Errorf("Enter = %v, want nil (unset)", parsed.Meta.Enter)
+	}
+	if parsed.Body != s.Replacement {
+		t.Errorf("Body = %q, want %q (unchanged by the added stubs)", parsed.Body, s.Replacement)
+	}
+}
+
 func TestToPrompt_BodyEqualsReplacementByteForByte(t *testing.T) {
 	// Pin the promptmeta trim interaction for whitespace-bearing replacements:
 	// the single trailing newline ToPrompt appends is exactly what Parse strips.

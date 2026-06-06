@@ -242,8 +242,12 @@ snippet becomes a prompt in the primary global prompts directory:
 - `replacement` → the markdown body
 - `tags: [wispr]` provenance tag (a starred snippet also gets `starred`)
 
-Frontmatter is YAML-marshaled (not string-templated), so a phrase containing `:`
-or quotes cannot corrupt the written file.
+Imported prompts carry the **same frontmatter fields `tprompt new` scaffolds**
+(`title`, `description`, `tags`, `key`, `mode`, `enter`): `title`/`tags` are
+filled in from the snippet and the rest are left as empty stubs, so an imported
+prompt is as ready to edit (add a keybind, set the delivery mode) as a scaffolded
+one. The snippet-controlled fields are YAML-marshaled (not string-templated), so
+a phrase containing `:` or quotes cannot corrupt the written file.
 
 Import is **idempotent**: a snippet whose id already exists as a prompt is
 **skipped** by default, so re-running never creates duplicates (use `--overwrite`
