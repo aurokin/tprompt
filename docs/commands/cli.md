@@ -271,6 +271,15 @@ Flags:
   (replaces the body and frontmatter of a prompt whose id already exists).
 - `--tag <tag>` — provenance tag stamped on every imported prompt (default
   `wispr`). A starred snippet still also gets `starred`.
+- `-i`, `--interactive` — open a checkbox picker to choose which snippets to
+  import. Only importable (fresh, or refreshable under `--overwrite`) snippets are
+  listed; all rows start checked. Keys: `↑`/`↓` (or `j`/`k`) move, `Space`
+  toggles, `a` checks all, `Enter` imports the checked rows, `Esc`/`Ctrl+C`
+  cancels. Confirming imports exactly the checked rows and is otherwise identical
+  to a non-interactive run; **cancelling writes nothing and exits 0**. Snippets
+  that aren't importable (e.g. a same-id duplicate elsewhere) aren't shown and are
+  skipped rather than aborting the run. `-i` needs an interactive terminal and
+  cannot combine with `--dry-run` (both are usage errors — see below).
 
 When two snippets' phrases normalize to the same id, the first keeps the bare
 slug and each later one gets a short `-<uuid-prefix>` suffix, so no snippet is
@@ -281,11 +290,13 @@ title.
 Exit codes: a `--db-path` (or default) that does not exist, or an OS with no
 default location and no `--db-path`, is a **usage error** (exit 2). A database
 that exists but cannot be read (locked, or macOS Full Disk Access denied) is a
-**general error** (exit 1).
+**general error** (exit 1). `-i` without an interactive terminal (e.g. piped
+stdin/stdout), and `-i --dry-run`, are both **usage errors** (exit 2): the picker
+fails obviously rather than silently falling back to a non-interactive import.
 
 ## Cancel semantics
 
-When the user cancels an interactive flow (TUI `Esc`, `pick` external cancel), the command exits with **status 0**. Cancellation is a valid outcome, not an error. Scripts should not treat it as a failure.
+When the user cancels an interactive flow (TUI `Esc`, `pick` external cancel, `import wispr -i` `Esc`), the command exits with **status 0**. Cancellation is a valid outcome, not an error. Scripts should not treat it as a failure.
 
 ## Exit code guidance
 
