@@ -167,8 +167,10 @@ func prepareImportDest(source promptsource.Source, flags importWisprFlags, inter
 		// Missing path → fine; created lazily on the first write. An existing path
 		// is validated via the create helper, which is a no-op for a real directory
 		// and surfaces a non-directory as PromptsDirCreateError — without creating
-		// anything new, since the path already exists.
-		if _, err := os.Stat(source.Path); errors.Is(err, fs.ErrNotExist) {
+		// anything new, since the path already exists. Lstat (not Stat) so a broken
+		// symlink, which Stat reports as ErrNotExist, is still caught here: the
+		// dir-entry exists and cannot be used, so MkdirAll surfaces it eagerly.
+		if _, err := os.Lstat(source.Path); errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
 		return ensureScaffoldDir(source.Path, true)
@@ -268,24 +270,22 @@ func freshItems(plan []planItem) []importtui.Item {
 //
 // selected is the interactive selection filter. nil imports every item
 // (byte-identical to the non-interactive path). A non-nil set means interactive
-// mode: import exactly the ids the user confirmed and skip everything else. Only
-// planImportable snippets are ever shown in the picker, so a non-importable
-// snippet the user could not see or deselect — a §4 cross-path duplicate, an
-// already-existing target, an empty/invalid id — is skipped rather than aborting
-// the import (conflict review is AUR-529). The one exception is planClassifyError:
-// that is a genuine IO failure (a collision scan or path resolution that errored),
-// not a policy classification, so it still surfaces in interactive mode exactly as
-// it does non-interactively — never silently swallowed into a successful exit.
-// confirm-all therefore writes the same fresh-item bytes as a non-interactive run
-// when no hidden conflicts exist; where they do, interactive skips them instead of
-// hard-erroring.
+// mode: re-classify each snippet and let only two kinds reach executePlanItem — a
+// still-importable row the user confirmed (→ written) and a genuine classify
+// error (→ surfaced). Everything else is skipped: a deselected row, or one that
+// re-classified to a §4 cross-path duplicate / already-exists / empty / invalid
+// while the picker was open. So a confirmed import never becomes a §4 hard error
+// the user could not act on (conflict review is AUR-529), and the behavior is the
+// same whether a conflict was pre-existing or appeared concurrently. confirm-all
+// therefore writes the same fresh-item bytes as a non-interactive run when no
+// conflicts exist; where they do, interactive skips them instead of hard-erroring.
 func importSnippets(deps Deps, source promptsource.Source, collisionSources []promptsource.Source, snippets []wispr.Snippet, flags importWisprFlags, selected map[string]bool) (imported, skipped int, err error) {
 	claimed := map[string]bool{}
 	interactive := selected != nil
 	destReady := false
 	for _, snip := range snippets {
 		item := classifySnippet(source, collisionSources, snip, flags, claimed)
-		if interactive && !selected[item.id] && item.status != planClassifyError {
+		if interactive && !interactiveReachesExecute(item, selected) {
 			skipped++
 			continue
 		}
@@ -308,6 +308,19 @@ func importSnippets(deps Deps, source promptsource.Source, collisionSources []pr
 		skipped += ds
 	}
 	return imported, skipped, nil
+}
+
+// interactiveReachesExecute reports whether a re-classified item should reach
+// executePlanItem in interactive mode. Only two do: a still-importable row the
+// user confirmed (→ written), and a genuine classify error (→ surfaced/aborted).
+// Everything else is skipped, so a row that re-classified to a conflict / exists
+// / empty / invalid while the picker was open never aborts the run and the user
+// only ever writes what they saw and confirmed.
+func interactiveReachesExecute(item planItem, selected map[string]bool) bool {
+	if item.status == planClassifyError {
+		return true
+	}
+	return item.status == planImportable && selected[item.id]
 }
 
 // reportOutcome emits the per-snippet line for one executed outcome and returns

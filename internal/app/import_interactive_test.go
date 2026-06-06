@@ -349,6 +349,69 @@ func TestImportWispr_Interactive_ClassifyErrorStillSurfaces(t *testing.T) {
 	}
 }
 
+// TestImportWispr_Interactive_SelectedRowRacedToConflictSkips pins that a row
+// the user kept checked but which becomes a cross-path conflict while the picker
+// is open is skipped (not aborted) at write time — the same as a pre-existing
+// hidden conflict. The conflict is created from inside the picker's decide hook,
+// after the plan was shown but before the writer re-classifies.
+func TestImportWispr_Interactive_SelectedRowRacedToConflictSkips(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "agents")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec := &recordingImportRenderer{decide: func(items []importtui.Item) importtui.Result {
+		// Race: another prompt with the `code-review` id appears at a second path
+		// after the picker showed code-review as importable.
+		if err := os.WriteFile(filepath.Join(sub, "code-review.md"), []byte("---\ntitle: x\n---\n\nb\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return confirmAll(items)
+	}}
+	deps := withImportRenderer(importCmdDeps(t, dir, &fakeWisprReader{snippets: liveSnippets()}), rec)
+
+	_, _, err := executeRootWith(t, deps, "import", "wispr", "--db-path", "x", "-i")
+	if err != nil {
+		t.Fatalf("a raced cross-path conflict aborted the run instead of skipping: %v", err)
+	}
+	// The non-conflicting selection still imported; the raced row was skipped.
+	if !pathExists(filepath.Join(dir, "organize-thoughts-prompt.md")) {
+		t.Error("the non-conflicting confirmed row was not imported")
+	}
+	if pathExists(filepath.Join(dir, "code-review.md")) {
+		t.Error("the raced cross-path row was written at the top-level target")
+	}
+}
+
+// TestImportWispr_Interactive_BrokenSymlinkDestFailsBeforePicker pins that a
+// destination occupied by a broken symlink (which os.Stat reports as
+// ErrNotExist) is still caught by the eager preflight, not deferred — the picker
+// never opens for it.
+func TestImportWispr_Interactive_BrokenSymlinkDestFailsBeforePicker(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	if err := os.Symlink(filepath.Join(root, "nonexistent-target"), filepath.Join(root, "tprompt")); err != nil {
+		t.Fatal(err)
+	}
+	globalPrompts := filepath.Join(t.TempDir(), "global")
+	if err := os.Mkdir(globalPrompts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rec := &recordingImportRenderer{decide: confirmAll}
+	deps := withImportRenderer(importCmdDeps(t, globalPrompts, &fakeWisprReader{snippets: liveSnippets()}), rec)
+
+	_, _, err := executeRootWith(t, deps, "import", "wispr", "--db-path", "x", "--project", "-i")
+	if err == nil {
+		t.Fatal("expected an error for a broken-symlink destination")
+	}
+	if rec.gotItems != nil {
+		t.Error("picker opened for an unusable broken-symlink destination")
+	}
+}
+
 // TestImportWispr_Interactive_NonDirDestinationFailsBeforePicker pins that an
 // auto-create destination occupied by a regular file is surfaced eagerly (before
 // the picker opens), not deferred to confirm — so a cancel can't hide an
