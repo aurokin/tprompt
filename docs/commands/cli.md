@@ -230,6 +230,19 @@ Flags:
 Takes no positional arguments. See `examples/tmux-bindings.md` for the same bindings
 documented for reference.
 
+### `tprompt import`
+
+A source-dispatch parent: `tprompt import <source>` runs a specific importer
+(currently only `wispr`). On its own, `tprompt import` prints help — **except**
+inside tmux with an interactive-capable terminal (stdin **and** stdout are ttys),
+where bare `tprompt import` is rewritten to `tprompt import wispr -i` (the default
+source's interactive picker) before cobra parses flags. This mirrors the bare
+`tprompt` → `tprompt tui` default (top of this doc). Only a *truly bare* import is
+rewritten: naming a source (`import wispr`), passing a source flag (`import
+--dry-run`), or a stray argument all run as typed, and a redirected stdout
+(`tprompt import >out.txt`) falls back to help rather than failing the picker's
+tty preflight.
+
 ### `tprompt import wispr`
 
 Imports your local [Wispr Flow](https://wisprflow.ai) snippets as markdown

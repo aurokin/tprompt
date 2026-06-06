@@ -401,12 +401,33 @@ files. The contract is locked:
   under `--overwrite`). It never deletes prompts, never mutates Wispr, and does
   not establish any ongoing sync — the result is standalone prompt files. This is
   unrelated to the "no in-tool snippet/composition" non-goal.
-- **Command shape.** `tprompt import` is a source-dispatch parent (bare form
-  prints help); `tprompt import wispr` carries `--db-path`, `--project`,
-  `--dry-run`, `--overwrite`, `--tag`. Created paths print to stdout (one per
-  line, scriptable); the human summary is tty-gated to stderr. The DB location is
-  the conventional OS path (macOS/Windows have defaults); an OS with no default
-  requires `--db-path`.
+- **Command shape.** `tprompt import` is a source-dispatch parent; `tprompt
+  import wispr` carries `--db-path`, `--project`, `--dry-run`, `--overwrite`,
+  `--tag`. Created paths print to stdout (one per line, scriptable); the human
+  summary is tty-gated to stderr. The DB location is the conventional OS path
+  (macOS/Windows have defaults); an OS with no default requires `--db-path`.
+- **Source seam.** Sources implement a small `ImportSource` interface (`Name` +
+  `NewCommand`) and self-register in a package-level registry; the first entry is
+  the bare-import dispatch default (`wispr`). The ingest engine is generic over an
+  `ImportRecord` interface (`ToPrompt`/`Tags`/`Title`/`Disambiguator`), so the
+  classification, deterministic disambiguation, and picker labelling name no
+  source-specific type. `wispr` is the sole built-in implementer today; the seam
+  exists so a second source is **additive** — register an entry and supply records;
+  the engine and dispatch are unchanged. (Adopted in AUR-531 with the dispatch
+  below, ahead of a second source, by explicit decision.)
+- **Bare-import dispatch (the §30 analog).** Outside tmux, without a tty, or when
+  the invocation's streams cannot host the picker, bare `tprompt import` prints
+  help (the source-dispatch parent's default). Inside tmux with an
+  interactive-capable tty (stdin **and** stdout), bare `tprompt import` rewrites
+  to `import <default-source> -i` so the picker opens — mirroring §30's bare
+  `tprompt` → `tui`. The rewrite is a pure arg transform at the top of `RunCLI`
+  before cobra parses flags, and fires **only** for a truly bare import: a named
+  source (`import wispr`), a source flag (`import --dry-run`), or a stray
+  positional (`import bogus`) all pass through untouched, while root persistent
+  flags (`--config x`) are allowed in any position. The stream check mirrors the
+  picker's own preflight (both injected streams must be ttys), so a redirected
+  stdout (`tprompt import >out.txt`) falls back to help rather than failing the
+  `-i` tty preflight.
 - **Error taxonomy → exit codes.** A missing DB path, or no default location and
   no `--db-path`, is a **usage error** (exit 2), mirroring a missing prompts
   directory. A DB that exists but cannot be opened/read (locked, or macOS Full
