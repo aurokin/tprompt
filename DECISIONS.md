@@ -326,9 +326,16 @@ files. The contract is locked:
 - **Mapping.** Per snippet: `phrase` → `title:` (verbatim) **and** the slug used
   for the filename id; `replacement` → the markdown body (byte-for-byte through
   the §9 trim contract); a starred snippet appends a `starred` tag. Every prompt
-  carries a provenance tag (`wispr` by default, `--tag` overrides). Frontmatter is
-  YAML-marshaled, never string-templated, so a `:`/quote in a phrase cannot
-  corrupt the file.
+  carries a provenance tag (`wispr` by default, `--tag` overrides). Imported
+  prompts carry the **full `tprompt new` frontmatter field set** (`title,
+  description, tags, key, mode, enter`, in scaffold order) so an imported prompt
+  is as editable as a scaffolded one; only `title`/`tags` are populated and the
+  rest are empty stubs. The snippet-controlled fields (`title`/`tags`) are
+  YAML-marshaled — never string-templated — so a `:`/quote in a phrase cannot
+  corrupt the file; the empty fields are emitted as bare keys (matching the
+  scaffold, and avoiding an `enter: ""` that would not parse back into
+  promptmeta's `*bool` enter field). The `new`↔import field set is held in
+  lockstep by a parity test (`internal/app`), not a shared abstraction.
 - **Id minting is generation-time and deterministic.** The id is `slugify(phrase)`.
   A phrase that slugifies to empty falls back to `wispr-<first-8 of the snippet
   uuid>`. When two snippets in one run mint the same id, the first keeps the bare

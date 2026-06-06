@@ -43,6 +43,10 @@ tracker; planned work lives in Linear.
   Wispr's local `flow.sqlite` **read-only** and never writes to it.
 - It reads **only snippets** (Wispr `Dictionary` rows that are snippets and not
   deleted); it never reads dictation History.
+- Imported prompts carry the same frontmatter fields that `tprompt new`
+  scaffolds (`title`, `description`, `tags`, `key`, `mode`, `enter`): `title` and
+  `tags` come from the snippet and the rest are empty stubs, so an imported prompt
+  is as ready to edit (add a keybind, set the delivery mode) as a scaffolded one.
 - Import is idempotent and **skip-by-default**: a snippet whose id already
   exists as a prompt is skipped, so re-runs never create duplicates. `--overwrite`
   refreshes existing prompts from Wispr; `--dry-run` previews without writing;

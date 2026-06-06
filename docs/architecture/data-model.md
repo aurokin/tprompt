@@ -49,7 +49,10 @@ Mapping is deterministic and one-way: the slug is the prompt id (with a
 `wispr-<uuid>` fallback for unsluggable phrases and a uuid suffix for intra-batch
 collisions), the phrase is always preserved verbatim as the title, and the
 provenance tag (`wispr` by default) plus an optional `starred` tag are written to
-frontmatter. See `DECISIONS.md` §34.
+frontmatter. Imported prompts carry the full `tprompt new` frontmatter field set
+(`title, description, tags, key, mode, enter`); only `title`/`tags` are populated
+and the rest are empty stubs, so an imported prompt is as editable as a
+scaffolded one. See `DECISIONS.md` §34.
 
 ## Source scope and shadow markers
 

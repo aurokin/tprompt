@@ -28,13 +28,44 @@ type Reader interface {
 	Snippets() ([]Snippet, error)
 }
 
-// frontmatter is the YAML-marshaled prompt header. Marshaling (not string
-// templating) is required because a phrase may contain ':' or quotes that would
-// corrupt a hand-built file. Tags use flow style so the provenance tag renders
-// as the compact `tags: [wispr]`.
-type frontmatter struct {
-	Title string   `yaml:"title"`
-	Tags  []string `yaml:"tags,flow"`
+// buildFrontmatter renders the prompt header in the same field order and shape
+// that `tprompt new` scaffolds (title, description, tags, key, mode, enter), so
+// an imported prompt is as immediately editable as a scaffolded one (AUR-526).
+// Only title and tags are populated; description/key/mode/enter are empty stubs
+// the author fills in later.
+//
+// title and tags are the only snippet-controlled fields — a phrase may contain
+// ':' or quotes, and a --tag value is arbitrary — so they are YAML-marshaled to
+// stay well-formed (tags in flow style so the provenance tag renders as the
+// compact `tags: [wispr]`). The empty stubs are written as bare keys with no
+// value, which both matches new's scaffold byte-for-byte and is load-bearing:
+// marshaling them as empty strings would emit `enter: ""`, which then fails to
+// unmarshal back into promptmeta.Meta's *bool Enter field and would make every
+// imported prompt unloadable. A bare `enter:` decodes as null → nil, the
+// intended "unset". The new↔import field-set parity is guarded by a test in
+// internal/app.
+func buildFrontmatter(phrase string, tags []string) ([]byte, error) {
+	titleFM, err := yaml.Marshal(struct {
+		Title string `yaml:"title"`
+	}{Title: phrase})
+	if err != nil {
+		return nil, err
+	}
+	tagsFM, err := yaml.Marshal(struct {
+		Tags []string `yaml:"tags,flow"`
+	}{Tags: tags})
+	if err != nil {
+		return nil, err
+	}
+
+	var b strings.Builder
+	b.Write(titleFM) // title: <phrase>\n
+	b.WriteString("description:\n")
+	b.Write(tagsFM) // tags: [wispr]\n
+	b.WriteString("key:\n")
+	b.WriteString("mode:\n")
+	b.WriteString("enter:\n")
+	return []byte(b.String()), nil
 }
 
 // ToPrompt maps a snippet to a prompt id (filename stem) and the markdown file
@@ -58,9 +89,9 @@ func (s Snippet) ToPrompt(tag string) (id string, markdown []byte, ok bool) {
 	if s.Starred {
 		tags = append(tags, "starred")
 	}
-	fm, err := yaml.Marshal(frontmatter{Title: s.Phrase, Tags: tags})
+	fm, err := buildFrontmatter(s.Phrase, tags)
 	if err != nil {
-		// frontmatter is a fixed struct of strings; Marshal cannot fail in
+		// title/tags are the only marshaled fields and Marshal cannot fail in
 		// practice. Treat the impossible failure as unimportable rather than panic.
 		return "", nil, false
 	}
