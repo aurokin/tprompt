@@ -41,6 +41,11 @@ tracker; planned work lives in Linear.
 
 - `tprompt import wispr` imports local Wispr Flow snippets as prompts. It opens
   Wispr's local `flow.sqlite` **read-only** and never writes to it.
+- `tprompt import` on its own prints help, **except** inside tmux with an
+  interactive terminal (stdin and stdout are ttys), where bare `tprompt import`
+  opens the default source's interactive picker (`import wispr -i`) — the same
+  convenience as bare `tprompt` opening the TUI. Naming a source, passing a source
+  flag, or redirecting output runs as typed (or falls back to help) instead.
 - It reads **only snippets** (Wispr `Dictionary` rows that are snippets and not
   deleted); it never reads dictation History.
 - Imported prompts carry the same frontmatter fields that `tprompt new`

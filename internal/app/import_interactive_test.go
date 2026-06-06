@@ -659,7 +659,7 @@ func TestClassifySnippet_ArmedExactTargetBecomesImportable(t *testing.T) {
 	source := promptsource.Source{Path: dir, Scope: promptsource.ScopeGlobal}
 	sources := []promptsource.Source{source}
 	snip := wispr.Snippet{ID: "uuid-2", Phrase: "code review", Replacement: "Review this code."}
-	flags := importWisprFlags{tag: defaultWisprTag}
+	flags := importFlags{tag: defaultWisprTag}
 
 	unarmed := classifySnippet(source, sources, snip, flags, map[string]bool{}, nil)
 	if unarmed.status != planExists {

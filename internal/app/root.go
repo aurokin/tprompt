@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -97,7 +98,9 @@ func RunCLI(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	cmd := NewRootCmd(deps)
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	cmd.SetArgs(dispatchArgs(cmd, args, deps.Env, stdinIsTTY))
+	cmd.SetArgs(dispatchArgs(cmd, args, deps.Env, stdinIsTTY,
+		func() bool { return streamIsTTY(stdin) && streamIsTTY(stdout) },
+		defaultImportSourceName()))
 
 	executedCmd, err := cmd.ExecuteC()
 	if err != nil {
@@ -122,32 +125,140 @@ func RunCLI(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	return ExitOK
 }
 
-// dispatchArgs implements the DECISIONS.md §30 default-subcommand rule: when
-// stdin is a tty and $TMUX is set and the user has not named a subcommand, the
-// invocation is rewritten to run `tui`. This happens before cobra parses flags
-// so `tui`'s required --target-pane validation fires normally.
-func dispatchArgs(root *cobra.Command, args []string, env func(string) string, stdinTTY func() bool) []string {
+// dispatchArgs implements the DECISIONS.md §30 default-subcommand rule and its
+// §34 import analog: when stdin is a tty and $TMUX is set and the user has not
+// named a subcommand, the invocation is rewritten so the default interactive
+// flow runs. Bare `tprompt` → `tui`; bare `tprompt import` (the import parent,
+// no source) → `import <importDefault> -i`. This happens before cobra parses
+// flags so `tui`'s required --target-pane validation (and `-i`'s tty preflight)
+// fire normally. importDefault is the default import source name (empty disables
+// the import rewrite); it and the tty predicates are passed in rather than read
+// from globals so this stays a pure function, matching the §30 shape.
+//
+// interactiveTTY gates the import rewrite only and mirrors the picker's own
+// preflight (NewImportRenderer requires streamIsTTY on both the injected stdin
+// AND stdout): it reports whether the interactive import can actually run for
+// this invocation's streams. Forcing `-i` when it cannot — stdout redirected
+// (`tprompt import >out.txt` in tmux), or an embedded caller injecting a non-tty
+// stdin while the process stdin is a terminal — would turn §34's documented "bare
+// form prints help" into an InteractiveRequiresTTYError. The §30 `tui` path takes
+// no equivalent check: it has no such preflight and is a locked decision, keying
+// off the process-global stdinTTY before command streams are threaded.
+func dispatchArgs(root *cobra.Command, args []string, env func(string) string, stdinTTY, interactiveTTY func() bool, importDefault string) []string {
 	if env("TMUX") == "" || !stdinTTY() {
 		return args
 	}
-	// Preserve root help/version output for those explicit flags. Matching on
-	// the literal string "help" is unsafe — it can appear as a flag value such
-	// as `--config help` — so rely on Find for the help-subcommand case. The
-	// version flags must short-circuit too: otherwise a bare `tprompt
-	// --version` inside tmux+tty would be rewritten to `tui --version`, which
-	// `tui` rejects as an unknown flag. `-v` is the shorthand cobra binds for
-	// --version (InitDefaultVersionFlag, since -v is otherwise free at root —
-	// verified by version_flag.txtar). We match the canonical bare forms only,
-	// mirroring the --help/-h handling above; degenerate spellings such as
-	// `--version=true` are intentionally not special-cased.
-	for _, a := range args {
-		if a == "--help" || a == "-h" || a == "--version" || a == "-v" {
-			return args
-		}
-	}
-	matched, _, err := root.Find(args)
-	if err != nil || matched != root {
+	matched, remaining, err := root.Find(args)
+	if err != nil {
 		return args
 	}
-	return append([]string{"tui"}, args...)
+	if matched == root {
+		// Bare root → `tui`, except when the user asked for root help/version:
+		// prepending `tui` would route `--help` to tui's help (wrong output) and
+		// `--version` to tui (which rejects it as an unknown flag). `-v` is the
+		// shorthand cobra binds for --version (InitDefaultVersionFlag, since -v is
+		// otherwise free at root — verified by version_flag.txtar). We match the
+		// canonical bare spellings only; degenerate forms such as `--version=true`,
+		// or a `--config -h` whose `-h` is merely the config value, are
+		// intentionally not distinguished. This guard is scoped to the root path:
+		// the import rewrite below needs no equivalent because bareImportArgs reads
+		// `-h`/`-v` correctly as a root flag's value, not a help request.
+		for _, a := range args {
+			if a == "--help" || a == "-h" || a == "--version" || a == "-v" {
+				return args
+			}
+		}
+		return append([]string{"tui"}, args...)
+	}
+	// Bare `tprompt import` (the import parent matched, with nothing of the user's
+	// own passed to it) → the default source's interactive picker. `remaining` is
+	// what cobra's Find left after locating the import command; bareImportArgs
+	// accepts it only when it holds nothing but root persistent flags. So
+	// `--config x import` and `import --config x` both rewrite (flag position is
+	// irrelevant), while `import --dry-run` (foreign flag), `import bogus`, and
+	// `import import` (positionals) all leave a disqualifying token and pass
+	// through unrewritten — crucially, rewriting `--dry-run` would inject `-i` and
+	// trip the interactive/dry-run conflict. An explicit `tprompt import wispr`
+	// matches the wispr command (matched.Name() != the parent), so it is never
+	// rewritten; outside tmux/tty the early return above leaves bare `import` to
+	// print help. The interactiveTTY guard keeps a bare `import` whose streams
+	// cannot host the picker on §34's help path instead of forcing `-i` into a
+	// non-tty renderer.
+	if importDefault != "" && interactiveTTY() && matched.Name() == "import" && matched.Parent() == root && bareImportArgs(root, remaining) {
+		return appendImportSource(args, importDefault)
+	}
+	return args
+}
+
+// bareImportArgs reports whether `remaining` — the tokens cobra's Find left after
+// locating the import parent — carries nothing of the user's own beyond root
+// persistent flags (e.g. `--config` and its value). Those invocations dispatch
+// to the default source's interactive picker regardless of where the root flag
+// sits relative to `import`. A positional (a source name or stray arg) or a flag
+// that is not a root persistent flag (e.g. the source-level `--dry-run`)
+// disqualifies, leaving the invocation for cobra to route or reject. It mirrors
+// pflag's own splitting (long `--name[=value]`, shorthand `-x[=value]`, and a
+// value-taking flag consuming the next token) without parsing into — and thus
+// mutating — the live command's bound flag variables.
+func bareImportArgs(root *cobra.Command, remaining []string) bool {
+	for i := 0; i < len(remaining); i++ {
+		consumesValue, ok := rootFlagToken(root, remaining[i])
+		if !ok {
+			return false
+		}
+		if consumesValue {
+			// A value-taking flag claims the next token. If none follows, the
+			// invocation is malformed (`import --config` with no value); leave it
+			// unrewritten so cobra reports the missing-value error rather than
+			// binding the appended source token as the flag's value.
+			if i+1 >= len(remaining) {
+				return false
+			}
+			i++
+		}
+	}
+	return true
+}
+
+// rootFlagToken classifies a single leftover-arg token. ok is false when the
+// token is a positional or names a flag that is not a root persistent flag —
+// either disqualifies "bare import". When ok, consumesValue reports whether the
+// flag takes its value from the following token (`--name value` / `-x value`, as
+// opposed to the self-contained `--name=value` or a value-optional flag).
+func rootFlagToken(root *cobra.Command, tok string) (consumesValue, ok bool) {
+	pf := root.PersistentFlags()
+	switch {
+	case strings.HasPrefix(tok, "--"):
+		name, _, hasEq := strings.Cut(tok[2:], "=")
+		f := pf.Lookup(name)
+		if f == nil {
+			return false, false
+		}
+		return f.NoOptDefVal == "" && !hasEq, true
+	case strings.HasPrefix(tok, "-") && len(tok) > 1:
+		name, _, hasEq := strings.Cut(tok[1:], "=")
+		if name == "" {
+			return false, false
+		}
+		f := pf.ShorthandLookup(name[:1])
+		if f == nil {
+			return false, false
+		}
+		return f.NoOptDefVal == "" && !hasEq, true
+	default:
+		return false, false // positional (source name, stray arg, or "-")
+	}
+}
+
+// appendImportSource rewrites a bare-`import` invocation to `… import <source>
+// -i` by appending the source token and `-i`. The caller guarantees (via
+// bareImportArgs) that the user passed nothing of their own to import, so
+// appending the source as the final command token is correct even when a root
+// flag value happens to be the literal "import" (e.g. `--config import import` →
+// `--config import import wispr -i`, which cobra re-parses correctly). A fresh
+// slice is returned so the caller's args array is never aliased.
+func appendImportSource(args []string, source string) []string {
+	out := make([]string, 0, len(args)+2)
+	out = append(out, args...)
+	return append(out, source, "-i")
 }
