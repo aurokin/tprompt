@@ -12,6 +12,7 @@ import (
 	"github.com/hsadler/tprompt/internal/sanitize"
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/submitter"
+	"github.com/hsadler/tprompt/internal/wispr"
 )
 
 func TestExitCodeNilIsZero(t *testing.T) {
@@ -78,6 +79,23 @@ func TestExitCodeProjectRootNotFound(t *testing.T) {
 	err := &promptsource.ProjectRootNotFoundError{CWD: "/tmp/no-git"}
 	if got := ExitCode(err); got != ExitUsage {
 		t.Fatalf("ExitCode(ProjectRootNotFoundError) = %d, want %d", got, ExitUsage)
+	}
+}
+
+func TestExitCodeWisprDBErrors(t *testing.T) {
+	usage := []error{
+		&wispr.DBNotFoundError{Path: "/no/flow.sqlite"},
+		&wispr.DBPathRequiredError{OS: "linux"},
+	}
+	for _, err := range usage {
+		if got := ExitCode(err); got != ExitUsage {
+			t.Errorf("ExitCode(%T) = %d, want %d", err, got, ExitUsage)
+		}
+	}
+	// A DB that exists but cannot be read (locked / FDA-denied) is general (1).
+	openErr := &wispr.DBOpenError{Path: "/x/flow.sqlite", Err: errors.New("database is locked")}
+	if got := ExitCode(openErr); got != ExitGeneral {
+		t.Errorf("ExitCode(DBOpenError) = %d, want %d", got, ExitGeneral)
 	}
 }
 

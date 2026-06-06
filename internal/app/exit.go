@@ -13,6 +13,7 @@ import (
 	"github.com/hsadler/tprompt/internal/store"
 	"github.com/hsadler/tprompt/internal/submitter"
 	"github.com/hsadler/tprompt/internal/tmux"
+	"github.com/hsadler/tprompt/internal/wispr"
 )
 
 // Exit codes documented in docs/commands/cli.md.
@@ -72,6 +73,22 @@ func ExitCode(err error) int {
 	var projectRootNotFound *promptsource.ProjectRootNotFoundError
 	if errors.As(err, &projectRootNotFound) {
 		return ExitUsage
+	}
+
+	// Wispr import DB errors. Missing DB / no default location are usage errors
+	// (exit 2), mirroring a missing prompts directory; a DB that exists but cannot
+	// be read (locked, permission-denied) is a general error (exit 1).
+	var wisprNotFound *wispr.DBNotFoundError
+	if errors.As(err, &wisprNotFound) {
+		return ExitUsage
+	}
+	var wisprPathRequired *wispr.DBPathRequiredError
+	if errors.As(err, &wisprPathRequired) {
+		return ExitUsage
+	}
+	var wisprOpen *wispr.DBOpenError
+	if errors.As(err, &wisprOpen) {
+		return ExitGeneral
 	}
 
 	var fileExists *PromptFileExistsError
