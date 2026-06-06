@@ -204,8 +204,9 @@ preservation guard for the extraction.
 
 ### Search Index (shared fuzzy core)
 
-Proof surface: pure unit tests (`internal/searchindex`), generic over a sample
-record so the tests exercise the seam (`Fields` + `tieKey`) the real callers use.
+Proof surface: pure unit tests (`internal/searchindex/searchindex_test.go`),
+generic over a sample record so the tests exercise the seam (`Fields` + `tieKey`)
+the real callers use.
 This is the dependency-free core both `internal/tui` and `internal/importtui` adapt
 to; keeping its scoring pinned here means a ranking regression is caught in the core,
 not only positionally in a caller.

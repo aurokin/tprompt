@@ -40,6 +40,12 @@ External-picker wrapper used only by `tprompt pick` (honors `picker_command` con
 ### `internal/keybind`
 Keybind resolver: combines frontmatter-declared keys with auto-assignment from the pool, surfaces collisions. Exposed to `internal/tui` and to `doctor`.
 
+### `internal/searchindex`
+Dependency-free generic fuzzy-ranking core (only `sahilm/fuzzy` + stdlib). Generic over the caller's row via a `Fields` + `tieKey` adapter; both `internal/tui` (the board) and `internal/importtui` (the import picker) adapt to it, so their `/`-search ranking stays synchronized without sharing dependencies. See `docs/implementation/interfaces.md`.
+
+### `internal/importtui`
+Bubble Tea seam for `import wispr -i`: a checkbox picker that surfaces import conflicts and per-item overwrite. A deliberate sibling of `internal/tui` (neither imports the other) with no store/clipboard/submitter dependencies — it renders only the conflict-classified items the `import` command hands it. See `docs/implementation/interfaces.md` and `DECISIONS.md` §34.
+
 ### `internal/wispr`
 Wispr Flow snippet reader and snippet→prompt mapping for `tprompt import wispr`. Owns the read-only `flow.sqlite` access, the `modernc.org/sqlite` driver import (kept here so the rest of the binary stays CGO-free), slug/id minting, and the typed DB-error taxonomy (`DB{NotFound,PathRequired,Open}Error`). The import command itself lives in `internal/app` and reuses the prompt writer from `new.go`. See `docs/commands/cli.md` and `DECISIONS.md` §34.
 

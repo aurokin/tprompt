@@ -60,6 +60,19 @@ were absent:
 
 This rule is a strict relaxation: nothing previously valid becomes invalid.
 
+### Imported prompt frontmatter parity
+
+`tprompt import wispr` writes the **same** frontmatter field set that `tprompt
+new` scaffolds (`title`, `description`, `tags`, `key`, `mode`, `enter`, in that
+order): only `title`/`tags` are populated from the snippet and the rest are
+emitted as empty stubs, so an imported prompt is as editable as a scaffolded one.
+The snippet-controlled fields are YAML-marshaled (never string-templated), and the
+body passes the same [Body trimming](#body-trimming) contract — imported bodies
+are byte-for-byte *through* that trim, not raw verbatim bytes. The `new`↔import
+field set is held in lockstep by a parity test (not a shared abstraction); see
+[DECISIONS.md §34](../../DECISIONS.md#34-wispr-flow-snippet-import) for the locked
+decision and its rationale.
+
 ## `key:` validation
 
 `key` accepts **a single printable character**. The following are hard errors at load time:
