@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hsadler/tprompt/internal/promptsource"
@@ -95,5 +96,34 @@ func TestDryRunPlan_ClaimOrdering(t *testing.T) {
 	}
 	if plan[2].status != planImportable || plan[2].id != "code-review-cccccc" {
 		t.Errorf("item 2 status=%d id=%q, want planImportable code-review-cccccc (importable claimed, so this is suffixed)", plan[2].status, plan[2].id)
+	}
+}
+
+// TestPickerItems_PopulatesTags pins that each picker row carries the snippet's
+// provenance tags — the active --tag, plus "starred" for a starred snippet — so
+// the import TUI's `/`-search can match on them. The tags are sourced from
+// wispr.Snippet.Tags, the same path the writer uses for frontmatter, so a search
+// hit reflects exactly what gets written.
+func TestPickerItems_PopulatesTags(t *testing.T) {
+	dir := t.TempDir()
+	snips := []wispr.Snippet{
+		{ID: "u1", Phrase: "code review", Replacement: "body"},
+		{ID: "u2", Phrase: "deploy steps", Replacement: "body", Starred: true},
+	}
+	plan := planFor(t, dir, snips, importWisprFlags{tag: "imported"})
+	items := pickerItems(plan, "imported")
+	if len(items) != 2 {
+		t.Fatalf("items = %d, want 2", len(items))
+	}
+
+	byID := map[string][]string{}
+	for _, it := range items {
+		byID[it.ID] = it.Tags
+	}
+	if got := byID["code-review"]; strings.Join(got, ",") != "imported" {
+		t.Errorf("code-review tags = %v, want [imported]", got)
+	}
+	if got := byID["deploy-steps"]; strings.Join(got, ",") != "imported,starred" {
+		t.Errorf("deploy-steps tags = %v, want [imported starred]", got)
 	}
 }

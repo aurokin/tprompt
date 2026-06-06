@@ -3,11 +3,13 @@
 // before the writer runs. It is a deliberate sibling to internal/tui — neither
 // imports the other — because the import picker selects ids to write, a
 // different contract from the board's Submitter/clipboard/handoff domain
-// (DECISIONS AUR-528 D1). The small pure viewport helpers (clampScrollOffset,
-// rowsPerFrame, headerLines, visibleRowRange) are COPIED from internal/tui
-// rather than shared: they are <60 LoC with no flow coupling, and exporting
-// them now would couple two renderers that are still diverging. A later slice
-// (AUR-530) may promote a shared core.
+// (DECISIONS AUR-528 D1). The fuzzy search core IS shared: both this picker and
+// the board adapt their row to internal/searchindex (AUR-530), a dependency-free
+// package that keeps importtui free of store/clipboard/config. The small pure
+// viewport helpers (clampScrollOffset, rowsPerFrame, headerLines,
+// visibleRowRange) remain COPIED from internal/tui rather than shared: they are
+// <60 LoC with no flow coupling, and exporting them now would couple two
+// renderers that are still diverging.
 //
 // Unlike tui.NewRenderer, this renderer runs with tea.WithAltScreen
 // (DECISIONS AUR-528 D9): the board renders inside an ephemeral tmux popup, but
@@ -44,12 +46,17 @@ const (
 // refresh the caller has already authorized (the CLI --overwrite flag), so the row
 // starts armed and the glyph/counter report the overwrite truthfully instead of
 // presenting it as a fresh create.
+//
+// Tags is the row's provenance tags (e.g. the wispr source tag plus "starred"),
+// added to the fuzzy search corpus alongside ID and Title so `/`-search can match
+// on them. It is never rendered.
 type Item struct {
 	ID       string
 	Title    string
 	Conflict ConflictKind
 	Blocker  string
 	Armed    bool
+	Tags     []string
 }
 
 // Action is the user's picker outcome.

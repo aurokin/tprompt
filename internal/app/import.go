@@ -209,7 +209,7 @@ func interactivePicker(deps Deps, flags importWisprFlags) (importtui.Renderer, e
 // behind, honoring the cancel/no-op = "writes nothing" contract even under a race.
 func runInteractiveImport(deps Deps, picker importtui.Renderer, source promptsource.Source, collisionSources []promptsource.Source, snippets []wispr.Snippet, flags importWisprFlags) error {
 	sel := &importSelection{write: map[string]bool{}, overwrite: map[string]bool{}}
-	if items := pickerItems(dryRunPlan(source, collisionSources, snippets, flags)); len(items) > 0 {
+	if items := pickerItems(dryRunPlan(source, collisionSources, snippets, flags), flags.tag); len(items) > 0 {
 		result, err := picker.Run(importtui.State{Items: items})
 		if err != nil {
 			return err
@@ -256,20 +256,26 @@ func ensureImportWriteDir(source promptsource.Source) error {
 // planEmptyBody / planInvalidID / planClassifyError are NOT shown: they are
 // degenerate or internal skips outside the conflict-review vocabulary (a classify
 // error still aborts the run via the writer path, not the picker).
-func pickerItems(plan []planItem) []importtui.Item {
+//
+// tag is the active provenance tag (flags.tag); each item carries the snippet's
+// tags (the tag plus "starred" when starred) so the picker's `/`-search can match
+// on them. These are the SAME tags the writer stamps into frontmatter (both go
+// through wispr.Snippet.Tags), so a search hit reflects what gets written.
+func pickerItems(plan []planItem, tag string) []importtui.Item {
 	items := make([]importtui.Item, 0, len(plan))
 	for _, p := range plan {
+		tags := p.snippet.Tags(tag)
 		switch p.status {
 		case planImportable:
 			if p.targetExisted {
-				items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase, Conflict: importtui.ConflictExactTarget, Armed: true})
+				items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase, Conflict: importtui.ConflictExactTarget, Armed: true, Tags: tags})
 			} else {
-				items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase, Conflict: importtui.ConflictNone})
+				items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase, Conflict: importtui.ConflictNone, Tags: tags})
 			}
 		case planExists:
-			items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase, Conflict: importtui.ConflictExactTarget})
+			items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase, Conflict: importtui.ConflictExactTarget, Tags: tags})
 		case planCrossPath:
-			items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase, Conflict: importtui.ConflictCrossPath, Blocker: p.blocker})
+			items = append(items, importtui.Item{ID: p.id, Title: p.snippet.Phrase, Conflict: importtui.ConflictCrossPath, Blocker: p.blocker, Tags: tags})
 		}
 	}
 	return items

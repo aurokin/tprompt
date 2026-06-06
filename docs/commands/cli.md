@@ -282,10 +282,17 @@ Flags:
 
   Keys: `↑`/`↓` (or `j`/`k`) move, `Space` toggles/arms the current row, `a`
   resets to the safe default (all fresh checked, ad-hoc overwrites cleared,
-  CLI-authorized refreshes kept), `Enter` writes, `Esc`/`Ctrl+C` cancels. The
-  footer counts `N selected · M overwrite · K blocked` and confirms `write N
-  prompts?`. Confirming creates the checked fresh rows and overwrites the armed
-  rows; **cancelling writes nothing and exits 0**. Per-item overwrite is
+  CLI-authorized refreshes kept), `Enter` writes, `Ctrl+C` cancels. `/` opens
+  **fuzzy search** over each snippet's id, title, and tags (so `starred` finds
+  starred snippets) — type to filter live, `Enter` applies the filter and returns
+  to the list (the header then shows `filtered "<query>"`), `Esc` clears it. Once
+  a filter is applied, `Space`/`a` act on the **visible** rows only (so select-all
+  respects the filter), while the footer counts and `write N prompts?` always
+  reflect the **global** selection across all snippets. `Esc` backs out one level:
+  it clears an active filter first, and cancels the picker only when no filter is
+  active. The footer counts `N selected · M overwrite · K blocked` and confirms
+  `write N prompts?`. Confirming creates the checked fresh rows and overwrites the
+  armed rows; **cancelling writes nothing and exits 0**. Per-item overwrite is
   **exact-target-only**: it routes through the same writer as `--overwrite`, which
   still refuses a cross-path duplicate as a **prompt-store error (exit 3)** — the
   picker surfaces the §34 policy, it cannot weaken it. `-i` needs an interactive

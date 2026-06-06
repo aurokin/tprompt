@@ -146,6 +146,19 @@ func TestToPrompt_BodyEqualsReplacementByteForByte(t *testing.T) {
 	}
 }
 
+func TestTags_ProvenanceAndStarred(t *testing.T) {
+	// Snippet.Tags is the single source of truth ToPrompt and the import picker
+	// both consume: the provenance tag always, plus "starred" only when starred.
+	plain := Snippet{ID: "id", Phrase: "p", Replacement: "body"}
+	if got := plain.Tags("imported"); len(got) != 1 || got[0] != "imported" {
+		t.Errorf("plain tags = %v, want [imported]", got)
+	}
+	starred := Snippet{ID: "id", Phrase: "p", Replacement: "body", Starred: true}
+	if got := starred.Tags("wispr"); len(got) != 2 || got[0] != "wispr" || got[1] != "starred" {
+		t.Errorf("starred tags = %v, want [wispr starred]", got)
+	}
+}
+
 func TestToPrompt_StarredAppendsTag(t *testing.T) {
 	s := Snippet{ID: "id", Phrase: "fav", Replacement: "body", Starred: true}
 	_, md, ok := s.ToPrompt("wispr")

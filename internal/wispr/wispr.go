@@ -68,6 +68,18 @@ func buildFrontmatter(phrase string, tags []string) ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
+// Tags is the provenance tag set stamped on the imported prompt: the supplied
+// tag (default "wispr"), plus "starred" when the snippet is starred. It is the
+// single source of truth for a snippet's tags so the frontmatter writer
+// (ToPrompt) and the import picker's search corpus cannot drift.
+func (s Snippet) Tags(tag string) []string {
+	tags := []string{tag}
+	if s.Starred {
+		tags = append(tags, "starred")
+	}
+	return tags
+}
+
 // ToPrompt maps a snippet to a prompt id (filename stem) and the markdown file
 // content. tag is the provenance tag stamped on every imported prompt (default
 // "wispr"); a starred snippet also gets a "starred" tag.
@@ -85,11 +97,7 @@ func (s Snippet) ToPrompt(tag string) (id string, markdown []byte, ok bool) {
 	if strings.TrimSpace(s.Replacement) == "" {
 		return id, nil, false
 	}
-	tags := []string{tag}
-	if s.Starred {
-		tags = append(tags, "starred")
-	}
-	fm, err := buildFrontmatter(s.Phrase, tags)
+	fm, err := buildFrontmatter(s.Phrase, s.Tags(tag))
 	if err != nil {
 		// title/tags are the only marshaled fields and Marshal cannot fail in
 		// practice. Treat the impossible failure as unimportable rather than panic.
