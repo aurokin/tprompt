@@ -256,8 +256,9 @@ Assert:
   still aborts on a cross-path duplicate, and partial progress is flushed before an abort
 - interactive `-i`: confirm-all is byte-for-byte equal to a non-interactive import (pinned
   by testscript + app test); the picker shows only importable rows; deselecting honors the
-  disambiguated id (shown id == written id); a hidden non-importable snippet is skipped, not
-  aborted; cancel / deselect-all / zero-fresh write nothing and create no directory; `-i`
+  disambiguated id (shown id == written id); a hidden policy conflict (cross-path duplicate) is
+  skipped, not aborted, but a genuine classify error (unreadable collision-scan subtree) still
+  surfaces; cancel / deselect-all / zero-fresh write nothing and create no directory; `-i`
   without a tty and `-i --dry-run` map to usage errors (exit 2)
 - DB error taxonomy maps to exit codes: missing DB / no default location →
   usage (2); unreadable/garbage/locked DB → general (1)

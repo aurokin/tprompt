@@ -285,6 +285,38 @@ func TestImportWispr_Interactive_DeselectAllLeavesNoAutoCreatedDir(t *testing.T)
 	}
 }
 
+// TestImportWispr_Interactive_ClassifyErrorStillSurfaces pins that a genuine IO
+// failure during classification (an unreadable subtree under the prompts dir
+// breaks the collision scan) is NOT swallowed by the interactive selection
+// filter: it surfaces as an error and a non-zero exit, exactly as a
+// non-interactive run would, rather than silently exiting 0 having imported
+// nothing.
+func TestImportWispr_Interactive_ClassifyErrorStillSurfaces(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions, so the unreadable subtree would not error")
+	}
+	dir := t.TempDir()
+	locked := filepath.Join(dir, "locked")
+	if err := os.Mkdir(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) }) // let TempDir cleanup remove it
+	// Confirm the chmod actually denies traversal; some filesystems ignore it.
+	if _, err := os.ReadDir(locked); err == nil {
+		t.Skip("filesystem does not enforce the unreadable subtree; cannot provoke a walk error")
+	}
+
+	rec := &recordingImportRenderer{decide: confirmAll}
+	deps := withImportRenderer(importCmdDeps(t, dir, &fakeWisprReader{snippets: liveSnippets()}), rec)
+
+	if _, _, err := executeRootWith(t, deps, "import", "wispr", "--db-path", "x", "-i"); err == nil {
+		t.Fatal("interactive import swallowed a collision-scan failure and exited 0")
+	}
+}
+
 func TestImportWispr_Interactive_DryRunConflictIsUsageError(t *testing.T) {
 	dir := t.TempDir()
 	deps := importCmdDeps(t, dir, &fakeWisprReader{snippets: liveSnippets()})

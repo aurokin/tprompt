@@ -259,17 +259,21 @@ func freshItems(plan []planItem) []importtui.Item {
 // selected is the interactive selection filter. nil imports every item
 // (byte-identical to the non-interactive path). A non-nil set means interactive
 // mode: import exactly the ids the user confirmed and skip everything else. Only
-// planImportable snippets are ever shown in the picker, so non-importable
-// snippets (a cross-path duplicate, a classification error) are never in the set
-// and are skipped rather than aborting the import — the user could not see or
-// deselect them, and conflict review is AUR-529. confirm-all therefore writes the
-// same fresh-item bytes as a non-interactive run when no hidden conflicts exist;
-// where they do, interactive skips them instead of hard-erroring.
+// planImportable snippets are ever shown in the picker, so a non-importable
+// snippet the user could not see or deselect — a §4 cross-path duplicate, an
+// already-existing target, an empty/invalid id — is skipped rather than aborting
+// the import (conflict review is AUR-529). The one exception is planClassifyError:
+// that is a genuine IO failure (a collision scan or path resolution that errored),
+// not a policy classification, so it still surfaces in interactive mode exactly as
+// it does non-interactively — never silently swallowed into a successful exit.
+// confirm-all therefore writes the same fresh-item bytes as a non-interactive run
+// when no hidden conflicts exist; where they do, interactive skips them instead of
+// hard-erroring.
 func importSnippets(deps Deps, source promptsource.Source, collisionSources []promptsource.Source, snippets []wispr.Snippet, flags importWisprFlags, selected map[string]bool) (imported, skipped int, err error) {
 	claimed := map[string]bool{}
 	for _, snip := range snippets {
 		item := classifySnippet(source, collisionSources, snip, flags, claimed)
-		if selected != nil && !selected[item.id] {
+		if selected != nil && !selected[item.id] && item.status != planClassifyError {
 			skipped++
 			continue
 		}
