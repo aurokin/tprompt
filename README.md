@@ -112,6 +112,7 @@ direct paste and send bindings.
 ```bash
 tprompt new code-review              # scaffold a global prompt
 tprompt new project-only --project   # scaffold a per-repo overlay prompt
+tprompt import wispr                  # import Wispr Flow snippets as prompts
 tprompt list                         # list prompts and their board keys
 tprompt show code-review             # print a resolved prompt + metadata
 tprompt send code-review             # deliver a prompt to a tmux pane

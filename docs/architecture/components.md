@@ -40,8 +40,11 @@ External-picker wrapper used only by `tprompt pick` (honors `picker_command` con
 ### `internal/keybind`
 Keybind resolver: combines frontmatter-declared keys with auto-assignment from the pool, surfaces collisions. Exposed to `internal/tui` and to `doctor`.
 
+### `internal/wispr`
+Wispr Flow snippet reader and snippet→prompt mapping for `tprompt import wispr`. Owns the read-only `flow.sqlite` access, the `modernc.org/sqlite` driver import (kept here so the rest of the binary stays CGO-free), slug/id minting, and the typed DB-error taxonomy (`DB{NotFound,PathRequired,Open}Error`). The import command itself lives in `internal/app` and reuses the prompt writer from `new.go`. See `docs/commands/cli.md` and `DECISIONS.md` §34.
+
 ### `internal/app`
-Command orchestration if a shared application service layer is helpful.
+Command orchestration if a shared application service layer is helpful. Owns the `import` command (`import.go`) and the shared collision-checked prompt writer (`new.go`) used by both `new` and `import`.
 
 ## Suggested core services
 

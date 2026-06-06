@@ -30,6 +30,27 @@ Prompt {
 - collision with a reserved key → hard error
 - malformed (multi-char, empty, non-printable) → hard error
 
+## Wispr snippet (import input)
+
+The input model for `tprompt import wispr` — one live row read from a Wispr Flow
+`flow.sqlite`. It is mapped to a `Prompt` file by `Snippet.ToPrompt(tag)`; it is not
+persisted or carried on any wire.
+
+```text
+Snippet {
+  id: string            // Wispr UUID; used only to disambiguate id collisions
+  phrase: string        // -> title (verbatim) and the slug source for the filename id
+  replacement: string   // -> markdown body; empty/NULL means not importable (skipped)
+  starred: bool         // isStarred -> appends the "starred" tag
+}
+```
+
+Mapping is deterministic and one-way: the slug is the prompt id (with a
+`wispr-<uuid>` fallback for unsluggable phrases and a uuid suffix for intra-batch
+collisions), the phrase is always preserved verbatim as the title, and the
+provenance tag (`wispr` by default) plus an optional `starred` tag are written to
+frontmatter. See `DECISIONS.md` §34.
+
 ## Source scope and shadow markers
 
 Prompts are discovered through an ordered list of sources (see
