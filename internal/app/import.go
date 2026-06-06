@@ -184,10 +184,11 @@ func interactivePicker(deps Deps, flags importWisprFlags) (importtui.Renderer, e
 // skipped entirely (no blank list) and the empty selection imports nothing. A
 // cancel returns before anything is written (exit 0, no summary).
 //
-// The auto-create destination is created only when at least one prompt will be
-// written (a non-empty confirmed selection). So every no-op interactive
-// outcome — cancel, deselect-all, or zero fresh rows — leaves no empty
-// directory behind, honoring the cancel/no-op = "writes nothing" contract.
+// The auto-create destination is created lazily by importSnippets, right before
+// the first actual write (see ensureImportWriteDir). So every no-op interactive
+// outcome — cancel, deselect-all, zero fresh rows, or a selection that all
+// re-classifies to a skip while the picker was open — leaves no empty directory
+// behind, honoring the cancel/no-op = "writes nothing" contract even under a race.
 func runInteractiveImport(deps Deps, picker importtui.Renderer, source promptsource.Source, collisionSources []promptsource.Source, snippets []wispr.Snippet, flags importWisprFlags) error {
 	selected := map[string]bool{}
 	if items := freshItems(dryRunPlan(source, collisionSources, snippets, flags)); len(items) > 0 {
@@ -203,13 +204,6 @@ func runInteractiveImport(deps Deps, picker importtui.Renderer, source promptsou
 		}
 	}
 
-	if len(selected) > 0 {
-		// Defer auto-create past the picker AND gate it on a real write, so a
-		// no-op interactive run (deselect-all / zero fresh rows) creates nothing.
-		if err := ensureImportWriteDir(source); err != nil {
-			return err
-		}
-	}
 	imported, skipped, err := importSnippets(deps, source, collisionSources, snippets, flags, selected)
 	if err != nil {
 		return err
@@ -218,9 +212,9 @@ func runInteractiveImport(deps Deps, picker importtui.Renderer, source promptsou
 	return nil
 }
 
-// ensureImportWriteDir creates the auto-create destination just before an
-// interactive write. A non-auto-create explicit prompts_dir was already
-// validated to exist in runImportWispr, so it needs nothing here.
+// ensureImportWriteDir creates the auto-create destination just before the first
+// interactive write. A non-auto-create explicit prompts_dir was already validated
+// to exist in runImportWispr, so it needs nothing here.
 func ensureImportWriteDir(source promptsource.Source) error {
 	if !source.AutoCreateOnAccess {
 		return nil
@@ -271,31 +265,52 @@ func freshItems(plan []planItem) []importtui.Item {
 // hard-erroring.
 func importSnippets(deps Deps, source promptsource.Source, collisionSources []promptsource.Source, snippets []wispr.Snippet, flags importWisprFlags, selected map[string]bool) (imported, skipped int, err error) {
 	claimed := map[string]bool{}
+	interactive := selected != nil
+	destReady := false
 	for _, snip := range snippets {
 		item := classifySnippet(source, collisionSources, snip, flags, claimed)
-		if selected != nil && !selected[item.id] && item.status != planClassifyError {
+		if interactive && !selected[item.id] && item.status != planClassifyError {
 			skipped++
 			continue
+		}
+		// Interactive runs defer creating the auto-create destination to here, the
+		// first real write, so a no-op selection (everything deselected, or a row
+		// that re-classified to a skip while the picker was open) leaves no empty
+		// directory. Non-interactive runs created it eagerly in runImportWispr.
+		if interactive && !destReady && item.status == planImportable && !flags.dryRun {
+			if dirErr := ensureImportWriteDir(source); dirErr != nil {
+				return imported, skipped, dirErr
+			}
+			destReady = true
 		}
 		outcome, writeErr := executePlanItem(item, flags)
 		if writeErr != nil {
 			return imported, skipped, writeErr
 		}
-		if outcome.imported {
-			imported++
-			if flags.dryRun {
-				_, _ = fmt.Fprintf(deps.Stderr, "would create: %s\n", outcome.path)
-			} else {
-				_, _ = fmt.Fprintln(deps.Stdout, outcome.path)
-			}
-			continue
-		}
-		skipped++
-		if flags.dryRun {
-			_, _ = fmt.Fprintf(deps.Stderr, "would skip: %s\n", outcome.skipNote)
-		}
+		di, ds := reportOutcome(deps, outcome, flags.dryRun)
+		imported += di
+		skipped += ds
 	}
 	return imported, skipped, nil
+}
+
+// reportOutcome emits the per-snippet line for one executed outcome and returns
+// its (imported, skipped) tally contribution. A real run prints created paths to
+// stdout (for scripting); a dry-run previews `would create:` / `would skip:` to
+// stderr.
+func reportOutcome(deps Deps, outcome snippetOutcome, dryRun bool) (imported, skipped int) {
+	if outcome.imported {
+		if dryRun {
+			_, _ = fmt.Fprintf(deps.Stderr, "would create: %s\n", outcome.path)
+		} else {
+			_, _ = fmt.Fprintln(deps.Stdout, outcome.path)
+		}
+		return 1, 0
+	}
+	if dryRun {
+		_, _ = fmt.Fprintf(deps.Stderr, "would skip: %s\n", outcome.skipNote)
+	}
+	return 0, 1
 }
 
 // snippetOutcome reports what happened (or, in dry-run, would happen) to one

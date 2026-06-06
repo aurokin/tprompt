@@ -257,6 +257,38 @@ func TestImportWispr_Interactive_CancelLeavesNoAutoCreatedDir(t *testing.T) {
 // confirming an empty selection (the user unchecked every row) writes nothing
 // and creates no auto-create destination — a no-op import has no filesystem
 // side effects.
+// TestImportWispr_Interactive_FirstRunAutoCreateShowsAndImports pins that a
+// first interactive import into a not-yet-created auto-create destination
+// (--project overlay missing) still classifies fresh snippets as importable —
+// the missing destination is handled gracefully by the collision scan — so the
+// picker shows them and confirming creates the overlay and writes the prompts.
+// (Deferring directory creation past selection does not blank the picker.)
+func TestImportWispr_Interactive_FirstRunAutoCreateShowsAndImports(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	globalPrompts := filepath.Join(t.TempDir(), "global")
+	if err := os.Mkdir(globalPrompts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rec := &recordingImportRenderer{decide: confirmAll}
+	deps := withImportRenderer(importCmdDeps(t, globalPrompts, &fakeWisprReader{snippets: liveSnippets()}), rec)
+
+	if _, _, err := executeRootWith(t, deps, "import", "wispr", "--db-path", "x", "--project", "-i"); err != nil {
+		t.Fatalf("first-run --project interactive import: %v", err)
+	}
+	// The picker was offered the fresh snippets even though the overlay did not exist.
+	if len(rec.gotItems) != 2 {
+		t.Fatalf("picker items = %+v, want both fresh snippets on a first run", rec.gotItems)
+	}
+	// Confirming created the overlay and wrote the prompts into it.
+	if !pathExists(filepath.Join(root, "tprompt", "code-review.md")) {
+		t.Error("first-run interactive import did not write into the created project overlay")
+	}
+}
+
 func TestImportWispr_Interactive_DeselectAllLeavesNoAutoCreatedDir(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
