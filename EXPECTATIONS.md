@@ -51,6 +51,14 @@ tracker; planned work lives in Linear.
   exists as a prompt is skipped, so re-runs never create duplicates. `--overwrite`
   refreshes existing prompts from Wispr; `--dry-run` previews without writing;
   `--project` writes to the project overlay; `--tag` overrides the provenance tag.
+- `-i`/`--interactive` opens a checkbox picker (all rows pre-checked) listing only
+  importable snippets; confirming imports exactly the checked rows and is otherwise
+  identical to a non-interactive run, while cancelling writes nothing and exits 0.
+  A no-op interactive outcome (cancel, deselect-all, nothing importable) creates no
+  files and no directories. `-i` requires an interactive terminal and rejects
+  `--dry-run`; both unmet preconditions are usage errors (exit 2), never a silent
+  fallback. Non-importable snippets (e.g. a same-id duplicate elsewhere) are not
+  shown and are skipped rather than aborting the run.
 - Importing never drops a snippet: two phrases that normalize to the same id are
   disambiguated with a short uuid suffix, and a phrase with no slug-able
   characters falls back to a `wispr-<uuid>` id (its phrase is still its title).

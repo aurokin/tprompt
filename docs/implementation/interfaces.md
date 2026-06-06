@@ -119,6 +119,40 @@ Submitter
 - Submit(result TUIResult) -> error
 ```
 
+## Import TUI
+
+`internal/importtui` is a separate Bubble Tea seam for `import wispr -i` — a
+checkbox picker over importable snippets. It is a deliberate sibling of
+`internal/tui` (neither imports the other): the board selects a prompt to submit;
+the import picker selects ids to write. It depends on no store, clipboard, or
+submitter — only the items the command layer hands it.
+
+```text
+ImportRenderer
+- Run(state ImportState) -> ImportResult | error
+
+ImportState {
+  items: []ImportItem              // one fresh (importable) snippet per row
+}
+
+ImportItem {
+  id: string                       // disambiguated prompt id (the id the writer uses)
+  title: string                    // snippet phrase, shown as the row label
+}
+
+ImportResult {
+  action: "confirm" | "cancel"
+  selected_ids: []string           // when action == "confirm"; in item order
+}
+```
+
+The command layer builds the write-free plan (`dryRunPlan`), passes the
+importable rows to `Run`, and on confirm re-runs the writer over the same
+snippets slice, importing exactly `selected_ids`. The small pure scroll/viewport
+helpers are copied from `internal/tui` (noted in the package doc), and the
+renderer runs with alt-screen so the picker is torn down before the command
+prints created-path lines to stdout.
+
 ## Keybind resolver
 
 ```text
