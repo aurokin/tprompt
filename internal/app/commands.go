@@ -35,6 +35,12 @@ func newListCmd(deps Deps) *cobra.Command {
 			for _, summary := range summaries {
 				_, _ = fmt.Fprintf(deps.Stdout, "%s  %s  %s\n", summary.ID, promptScope(summary), keybindSummary(summary))
 			}
+			// First-run nudge for an empty store. tty-gated to stderr so stdout
+			// stays the machine-readable list (empty here) and piped/non-tty runs —
+			// including the golden testscripts asserting empty stderr — emit nothing.
+			if len(summaries) == 0 && streamIsTTY(deps.Stderr) {
+				_, _ = fmt.Fprintln(deps.Stderr, "No prompts yet — create one with: tprompt new <id>")
+			}
 			return nil
 		},
 	}

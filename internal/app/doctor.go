@@ -158,6 +158,13 @@ func checkDiscovery(w io.Writer, deps Deps, cfg config.Resolved) error {
 		printFail(w, err.Error())
 		return err
 	}
+	if len(summaries) == 0 {
+		// An empty store is not an error, but doctor is where a stuck first-run
+		// user looks, so flag it as a warn pointing at `tprompt new`. Warn does
+		// not change the exit code (runDoctor returns only the first FAIL).
+		printWarn(w, "0 prompts discovered (run 'tprompt new <id>' to create one)")
+		return nil
+	}
 	printOK(w, fmt.Sprintf("%d prompts discovered", len(summaries)))
 	return nil
 }
