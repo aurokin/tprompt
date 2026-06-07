@@ -8,11 +8,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/hsadler/tprompt/internal/clipboard"
-	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/handoff"
-	"github.com/hsadler/tprompt/internal/promptsource"
-	"github.com/hsadler/tprompt/internal/store"
+	"github.com/aurokin/tprompt/internal/clipboard"
+	"github.com/aurokin/tprompt/internal/config"
+	"github.com/aurokin/tprompt/internal/handoff"
+	"github.com/aurokin/tprompt/internal/promptsource"
+	"github.com/aurokin/tprompt/internal/store"
 )
 
 func runDoctor(deps Deps) error {

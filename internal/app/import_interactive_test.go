@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hsadler/tprompt/internal/importtui"
-	"github.com/hsadler/tprompt/internal/promptsource"
-	"github.com/hsadler/tprompt/internal/wispr"
+	"github.com/aurokin/tprompt/internal/importtui"
+	"github.com/aurokin/tprompt/internal/promptsource"
+	"github.com/aurokin/tprompt/internal/wispr"
 )
 
 // recordingImportRenderer captures the State the picker was shown and returns a

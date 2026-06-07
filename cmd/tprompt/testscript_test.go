@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hsadler/tprompt/internal/app"
+	"github.com/aurokin/tprompt/internal/app"
 	"github.com/rogpeppe/go-internal/testscript"
 )
 

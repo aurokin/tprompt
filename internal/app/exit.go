@@ -4,16 +4,16 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/hsadler/tprompt/internal/clipboard"
-	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/delivery"
-	"github.com/hsadler/tprompt/internal/keybind"
-	"github.com/hsadler/tprompt/internal/promptsource"
-	"github.com/hsadler/tprompt/internal/sanitize"
-	"github.com/hsadler/tprompt/internal/store"
-	"github.com/hsadler/tprompt/internal/submitter"
-	"github.com/hsadler/tprompt/internal/tmux"
-	"github.com/hsadler/tprompt/internal/wispr"
+	"github.com/aurokin/tprompt/internal/clipboard"
+	"github.com/aurokin/tprompt/internal/config"
+	"github.com/aurokin/tprompt/internal/delivery"
+	"github.com/aurokin/tprompt/internal/keybind"
+	"github.com/aurokin/tprompt/internal/promptsource"
+	"github.com/aurokin/tprompt/internal/sanitize"
+	"github.com/aurokin/tprompt/internal/store"
+	"github.com/aurokin/tprompt/internal/submitter"
+	"github.com/aurokin/tprompt/internal/tmux"
+	"github.com/aurokin/tprompt/internal/wispr"
 )
 
 // Exit codes documented in docs/commands/cli.md.

@@ -1,6 +1,6 @@
 package tui
 
-import "github.com/hsadler/tprompt/internal/searchindex"
+import "github.com/aurokin/tprompt/internal/searchindex"
 
 // MatchedRow is one entry in a search result: a Row plus its weighted score.
 // Empty-query catalog entries carry Score = 0 — the Score field is only

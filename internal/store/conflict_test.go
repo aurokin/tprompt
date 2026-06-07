@@ -5,8 +5,8 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/aurokin/tprompt/internal/promptsource"
 	"github.com/google/go-cmp/cmp"
-	"github.com/hsadler/tprompt/internal/promptsource"
 )
 
 func TestResolveConflictsGlobalOnly(t *testing.T) {

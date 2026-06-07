@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/hsadler/tprompt/internal/app"
+	"github.com/aurokin/tprompt/internal/app"
 )
 
 func main() {

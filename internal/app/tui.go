@@ -8,11 +8,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/delivery"
-	"github.com/hsadler/tprompt/internal/store"
-	"github.com/hsadler/tprompt/internal/tmux"
-	"github.com/hsadler/tprompt/internal/tui"
+	"github.com/aurokin/tprompt/internal/config"
+	"github.com/aurokin/tprompt/internal/delivery"
+	"github.com/aurokin/tprompt/internal/store"
+	"github.com/aurokin/tprompt/internal/tmux"
+	"github.com/aurokin/tprompt/internal/tui"
 )
 
 // Flag names for the tui command. Shared as constants so `tprompt init` can

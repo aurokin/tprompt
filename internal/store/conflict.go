@@ -3,7 +3,7 @@ package store
 import (
 	"sort"
 
-	"github.com/hsadler/tprompt/internal/promptsource"
+	"github.com/aurokin/tprompt/internal/promptsource"
 )
 
 type ConflictPolicy string

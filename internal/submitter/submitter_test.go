@@ -5,12 +5,12 @@ import (
 	"os"
 	"testing"
 
-	"github.com/hsadler/tprompt/internal/clipboard"
-	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/delivery"
-	"github.com/hsadler/tprompt/internal/store"
-	"github.com/hsadler/tprompt/internal/tmux"
-	"github.com/hsadler/tprompt/internal/tui"
+	"github.com/aurokin/tprompt/internal/clipboard"
+	"github.com/aurokin/tprompt/internal/config"
+	"github.com/aurokin/tprompt/internal/delivery"
+	"github.com/aurokin/tprompt/internal/store"
+	"github.com/aurokin/tprompt/internal/tmux"
+	"github.com/aurokin/tprompt/internal/tui"
 )
 
 type fakeStore struct {

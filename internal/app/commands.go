@@ -7,11 +7,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/hsadler/tprompt/internal/clipboard"
-	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/sanitize"
-	"github.com/hsadler/tprompt/internal/store"
-	"github.com/hsadler/tprompt/internal/tmux"
+	"github.com/aurokin/tprompt/internal/clipboard"
+	"github.com/aurokin/tprompt/internal/config"
+	"github.com/aurokin/tprompt/internal/sanitize"
+	"github.com/aurokin/tprompt/internal/store"
+	"github.com/aurokin/tprompt/internal/tmux"
 )
 
 func newListCmd(deps Deps) *cobra.Command {

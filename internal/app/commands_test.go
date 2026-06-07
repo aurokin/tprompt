@@ -6,14 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hsadler/tprompt/internal/clipboard"
-	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/delivery"
-	"github.com/hsadler/tprompt/internal/picker"
-	"github.com/hsadler/tprompt/internal/store"
-	"github.com/hsadler/tprompt/internal/submitter"
-	"github.com/hsadler/tprompt/internal/tmux"
-	"github.com/hsadler/tprompt/internal/tui"
+	"github.com/aurokin/tprompt/internal/clipboard"
+	"github.com/aurokin/tprompt/internal/config"
+	"github.com/aurokin/tprompt/internal/delivery"
+	"github.com/aurokin/tprompt/internal/picker"
+	"github.com/aurokin/tprompt/internal/store"
+	"github.com/aurokin/tprompt/internal/submitter"
+	"github.com/aurokin/tprompt/internal/tmux"
+	"github.com/aurokin/tprompt/internal/tui"
 )
 
 func TestZeroArgCommandsRejectExtraOperands(t *testing.T) {

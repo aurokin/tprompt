@@ -8,7 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/hsadler/tprompt/internal/searchindex"
+	"github.com/aurokin/tprompt/internal/searchindex"
 )
 
 // footerLines is the fixed chrome subtracted from terminal height to compute

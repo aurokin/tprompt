@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/aurokin/tprompt/internal/config"
 	"github.com/google/go-cmp/cmp"
-	"github.com/hsadler/tprompt/internal/config"
 )
 
 func TestResolveTable(t *testing.T) {

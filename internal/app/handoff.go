@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/hsadler/tprompt/internal/handoff"
+	"github.com/aurokin/tprompt/internal/handoff"
 )
 
 func newHandoffCmd(deps Deps) *cobra.Command {

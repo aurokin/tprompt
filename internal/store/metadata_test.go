@@ -3,8 +3,8 @@ package store
 import (
 	"testing"
 
+	"github.com/aurokin/tprompt/internal/promptmeta"
 	"github.com/google/go-cmp/cmp"
-	"github.com/hsadler/tprompt/internal/promptmeta"
 )
 
 func TestSanitizeMetaStripsDangerousEscapes(t *testing.T) {

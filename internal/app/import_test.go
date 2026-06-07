@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hsadler/tprompt/internal/store"
-	"github.com/hsadler/tprompt/internal/wispr"
+	"github.com/aurokin/tprompt/internal/store"
+	"github.com/aurokin/tprompt/internal/wispr"
 )
 
 type fakeWisprReader struct {

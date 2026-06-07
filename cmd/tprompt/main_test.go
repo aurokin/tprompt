@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hsadler/tprompt/internal/app"
+	"github.com/aurokin/tprompt/internal/app"
 )
 
 func TestRunCLIConfigErrorFormat(t *testing.T) {

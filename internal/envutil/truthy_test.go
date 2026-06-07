@@ -3,7 +3,7 @@ package envutil_test
 import (
 	"testing"
 
-	"github.com/hsadler/tprompt/internal/envutil"
+	"github.com/aurokin/tprompt/internal/envutil"
 )
 
 func TestTruthy(t *testing.T) {
