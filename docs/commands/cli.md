@@ -270,10 +270,13 @@ to stderr when stderr is a terminal (piped runs emit nothing on stderr).
 
 Flags:
 
-- `--db-path <path>` — path to Wispr's `flow.sqlite`. Defaults to the OS
-  location (macOS `~/Library/Application Support/Wispr Flow/flow.sqlite`, Windows
-  `%APPDATA%\Wispr Flow\flow.sqlite`); required where there is no default
-  (e.g. Linux).
+- `--db-path <path>` — path to Wispr's `flow.sqlite`. **macOS** is the only
+  zero-config platform: it defaults to `~/Library/Application Support/Wispr
+  Flow/flow.sqlite`. Everywhere else — **Linux**, and **Windows via WSL2** (there
+  is no native Windows build, so tprompt runs as the Linux binary there) — there is
+  no default, so pass `--db-path` explicitly or you get a usage error (exit 2).
+  From WSL2, Wispr Flow's Windows database is reachable at
+  `/mnt/c/Users/<you>/AppData/Roaming/Wispr Flow/flow.sqlite`.
 - `--project` — write to the project overlay (`<gitroot>/tprompt`) instead of the
   primary global prompts directory. Must be run inside a git tree.
 - `--dry-run` — preview without writing. `would create:` / `would skip:` lines go

@@ -127,6 +127,26 @@ Bare `tprompt` dispatches to `tprompt tui` when stdin is a tty and `$TMUX` is se
 outside tmux it prints help. Full behavior and exit codes:
 [docs/commands/cli.md](docs/commands/cli.md).
 
+## Import from Wispr Flow
+
+Already keep a snippet library in [Wispr Flow](https://wisprflow.ai)? Bring it
+along. `tprompt import wispr` reads Wispr's local `flow.sqlite` **read-only** and
+writes each snippet out as an ordinary markdown prompt — one-way, no sync, your
+prompts stay plain files you own.
+
+```bash
+tprompt import wispr --dry-run   # preview what would be imported
+tprompt import wispr             # import (existing ids are skipped)
+tprompt import wispr -i          # pick interactively, conflicts surfaced for review
+```
+
+On **macOS** the database is found automatically (you may need to grant your
+terminal **Full Disk Access** the first time). On **Linux**, and on **Windows via
+WSL2** (there is no native Windows build), point `--db-path` at your `flow.sqlite`
+— from WSL2 it lives at `/mnt/c/Users/<you>/AppData/Roaming/Wispr Flow/flow.sqlite`.
+Full flags and behavior:
+[docs/commands/cli.md](docs/commands/cli.md#tprompt-import-wispr).
+
 ## How delivery works
 
 When you pick a row in the TUI, it writes your selection to a private handoff job,
