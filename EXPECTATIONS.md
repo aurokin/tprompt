@@ -41,6 +41,13 @@ tracker; planned work lives in Linear.
 
 - `tprompt import wispr` imports local Wispr Flow snippets as prompts. It opens
   Wispr's local `flow.sqlite` **read-only** and never writes to it.
+- It is not macOS-only, but **macOS is the only zero-config platform**: the DB
+  path is resolved automatically there. On Linux, and on Windows via WSL2 (there
+  is no native Windows build), pass `--db-path` (from WSL2:
+  `/mnt/c/Users/<you>/AppData/Roaming/Wispr Flow/flow.sqlite`); omitting it where
+  there is no default is a usage error (exit 2) that names the fix. On macOS,
+  reading the database may require granting your terminal **Full Disk Access** — a
+  DB that exists but cannot be read is a general error (exit 1) that names the fix.
 - `tprompt import` on its own prints help, **except** inside tmux with an
   interactive terminal (stdin and stdout are ttys), where bare `tprompt import`
   opens the default source's interactive picker (`import wispr -i`) — the same
