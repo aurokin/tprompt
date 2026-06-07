@@ -325,7 +325,8 @@ files. The contract is locked:
   never reads dictation history. The open must not leave a `-wal`/`-shm` sidecar.
 - **Mapping.** Per snippet: `phrase` → `title:` (verbatim) **and** the slug used
   for the filename id; `replacement` → the markdown body (byte-for-byte through
-  the §9 trim contract); a starred snippet appends a `starred` tag. Every prompt
+  the [§9 trim contract](#9-prompt-body-is-what-gets-injected), so a second source
+  must not assume verbatim bytes); a starred snippet appends a `starred` tag. Every prompt
   carries a provenance tag (`wispr` by default, `--tag` overrides). Imported
   prompts carry the **full `tprompt new` frontmatter field set** (`title,
   description, tags, key, mode, enter`, in scaffold order) so an imported prompt

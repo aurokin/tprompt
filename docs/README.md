@@ -41,6 +41,7 @@ belong in Linear milestones, not in the repo.
 - [TUI flow](commands/tui-flow.md) - short-lived handoff worker behavior.
 - [Architecture overview](architecture/overview.md) - where the TUI sits in the system.
 - [Interfaces](implementation/interfaces.md) - renderer, state, and submitter seams.
+- [Search index (shared fuzzy core)](implementation/interfaces.md#search-index-shared-fuzzy-core) - the dependency-free ranking core the board and the import picker both adapt to.
 - [Testing harness](testing/harness.md) - proof surfaces for model/view behavior.
 
 ## I Want To Change Tmux Delivery
@@ -53,10 +54,13 @@ belong in Linear milestones, not in the repo.
 
 ## I Want To Change Import (External Ingest)
 
-- [CLI commands](commands/cli.md#tprompt-import-wispr) - `import wispr` behavior, flags, and exit codes.
-- [Locked decisions §34](../DECISIONS.md#34-wispr-flow-snippet-import) - the import contract (read-only driver, id minting, skip-existing, error taxonomy).
+- [CLI commands](commands/cli.md#tprompt-import-wispr) - `import wispr` behavior, flags, and exit codes (and the bare-`import` dispatch).
+- [Locked decisions §34](../DECISIONS.md#34-wispr-flow-snippet-import) - the import contract (read-only driver, id minting, skip-existing, error taxonomy, source seam, bare-import dispatch).
 - [Behavior contract](../EXPECTATIONS.md#import) - user-visible import guarantees.
-- [Interfaces](implementation/interfaces.md#wispr-import-reader) - the `wispr.Reader` seam and `Deps.NewWisprReader` injection.
+- [Import source seam](implementation/interfaces.md#import-source-seam) - the `ImportSource`/`ImportRecord` interfaces to add a new source (the engine is generic).
+- [Interactive picker](implementation/interfaces.md#import-tui) - the `importtui` conflict-review picker for `import wispr -i`.
+- [Search index (shared fuzzy core)](implementation/interfaces.md#search-index-shared-fuzzy-core) - the picker's `/`-search ranking, shared with the board.
+- [Wispr import reader](implementation/interfaces.md#wispr-import-reader) - the `wispr.Reader` seam and `Deps.NewWisprReader` injection.
 - [Prompt store](storage/prompt-store.md) - the filename-stem IDs and frontmatter the importer writes into.
 - [Testing harness](testing/harness.md#import-wispr) - import proof surfaces (unit, app, testscript, fixture DB).
 
