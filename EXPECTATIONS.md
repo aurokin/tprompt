@@ -64,28 +64,25 @@ tracker; planned work lives in Linear.
   refreshes existing prompts from Wispr; `--dry-run` previews without writing;
   `--project` writes to the project overlay; `--tag` overrides the provenance tag.
 - `-i`/`--interactive` opens a checkbox picker that surfaces conflicts so you can
-  review them before writing. Each row carries a status glyph: fresh snippets show
-  `[ ]`/`[x]` (pre-checked, toggle to import); a snippet whose id already exists at
-  the exact target shows `[=]` (**skip-by-default** — check it to **arm a per-item
-  overwrite** that refreshes just that prompt); a same-id duplicate at another path
-  shows `[!]` (**non-selectable**, with the conflicting path). The footer counts
-  `N selected · M overwrite · K blocked` and asks `write N prompts?`. Confirming
-  imports the checked creates and overwrites exactly the armed rows; cancelling
-  writes nothing and exits 0; a no-op outcome (cancel, deselect-all, nothing
-  selected) creates no files and no directories. Per-item overwrite is
+  review them before writing; the glyphs, keys, footer, and search behavior are
+  specified in
+  [docs/commands/cli.md](docs/commands/cli.md#tprompt-import-wispr). Confirming
+  creates the checked fresh rows and overwrites exactly the armed conflicts;
+  cancelling writes nothing and exits 0; any no-op outcome (cancel, deselect-all,
+  nothing selected) creates no files and no directories. Per-item overwrite is
   **exact-target-only** and routes through the same writer, which still refuses a
   cross-path duplicate as a hard error (exit 3) — the picker surfaces policy, it
   cannot weaken it. `-i` requires an interactive terminal and rejects `--dry-run`
-  (both usage errors, exit 2). `-i --overwrite` is allowed: the global flag is the
-  all-or-nothing opt-in and pre-arms every refresh, while per-item arming is the
-  finer choice when no flag is passed.
-- The interactive picker has a `/` **fuzzy search** that filters the snippet list
-  by id, title, and tags (e.g. `starred`) so it scales to large libraries. A
-  filter narrows which rows you toggle and which `a` (select-all) acts on, but the
-  selection itself and the `write N prompts?` count stay global, so confirming
-  imports your true selection across all snippets — not just the filtered view.
-  An applied filter is always shown in the header, and pressing `Esc` clears the
-  filter before it cancels the picker.
+  (both usage errors, exit 2); `-i --overwrite` is allowed and pre-arms every
+  refresh (the all-or-nothing opt-in), while per-item arming is the finer choice
+  when no flag is passed.
+- The picker's `/` **fuzzy search** (over id, title, and tags such as `starred`)
+  is a view filter: your checked fresh snippets stay selected across the whole
+  library, so confirming imports your true selection — not just the filtered view,
+  and the `write N prompts?` count reflects that global selection. The one
+  visibility-scoped exception is a safety measure: an armed per-item overwrite is
+  disarmed if a filter hides its row, so a filter can never leave a hidden
+  destructive overwrite pending (its overwrite count drops accordingly).
 - Importing never drops a snippet: two phrases that normalize to the same id are
   disambiguated with a short uuid suffix, and a phrase with no slug-able
   characters falls back to a `wispr-<uuid>` id (its phrase is still its title).

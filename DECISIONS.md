@@ -362,15 +362,17 @@ files. The contract is locked:
   the explicit opt-in to refresh an existing prompt from Wispr; `--dry-run` previews
   without writing.
 - **Interactive conflict review & per-item overwrite (`-i`).** The `-i` picker
-  surfaces the §34 collision tuple per row: a fresh snippet (`[ ]`/`[x]`, toggle to
-  import), an **exact-target** conflict (`[=]`, **skip-by-default** — check to arm a
-  **per-item overwrite**), and a **cross-path** duplicate (`[!]`, **non-selectable**,
-  shown with the conflicting path). Per-item overwrite **widens the contract surface
-  but not the policy**: it is finer than the all-or-nothing `--overwrite` flag, yet it
-  is **exact-target-only** and routes through the *same* `writePromptContent` overwrite
-  path. The writer stays authoritative — arming an id whose write would create a
-  cross-path duplicate is still refused as the §4/§18 hard error (exit 3); the TUI can
-  surface the tuple but can neither invent nor weaken policy. Skip-by-default holds in
+  surfaces the §34 collision tuple per row — fresh, **exact-target**, and
+  **cross-path** — so a conflict is reviewed before any write (the per-row glyphs,
+  keys, and footer live in
+  [docs/commands/cli.md](docs/commands/cli.md#tprompt-import-wispr); the guarantees
+  in [EXPECTATIONS.md](EXPECTATIONS.md#import)). Per-item overwrite **widens the
+  contract surface but not the policy**: it is finer than the all-or-nothing
+  `--overwrite` flag, yet it is **exact-target-only** and routes through the *same*
+  `writePromptContent` overwrite path. The writer stays authoritative — arming an
+  id whose write would create a cross-path duplicate is still refused as the §4/§18
+  hard error (exit 3); the TUI can surface the tuple but can neither invent nor
+  weaken policy. Skip-by-default holds in
   the picker: an unarmed exact-target is skipped, so an idempotent re-run defaults to
   all-skip. `-i --overwrite` stays allowed (the flag is the all-or-nothing opt-in and
   pre-arms every refresh, shown checked); `-i --dry-run` and a non-tty `-i` are usage
@@ -396,8 +398,7 @@ files. The contract is locked:
   while its row is **visible** — filtering an armed exact-target out of view
   disarms it, so a filter can never strand a surprise destructive overwrite (the
   global overwrite count truthfully drops to 0). A CLI `--overwrite` refresh is an
-  authorized bulk opt-in and survives while hidden. An applied filter is shown in
-  the header, and `Esc` clears it before it cancels the picker.
+  authorized bulk opt-in and survives while hidden.
 - **Additive and one-way.** Import only creates prompt files (or refreshes them
   under `--overwrite`). It never deletes prompts, never mutates Wispr, and does
   not establish any ongoing sync — the result is standalone prompt files. This is
