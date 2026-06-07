@@ -248,12 +248,35 @@ func TestListMarksShadowedPrompts(t *testing.T) {
 
 func TestListEmptyStore(t *testing.T) {
 	fs := &fakeStore{summaries: []store.Summary{}}
-	stdout, _, err := executeRootWith(t, workingDeps(t, fs), "list")
+	stdout, stderr, err := executeRootWith(t, workingDeps(t, fs), "list")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if stdout != "" {
 		t.Fatalf("want empty stdout, got %q", stdout)
+	}
+	// Non-tty (bytes.Buffer streams): the first-run hint stays gated, so a
+	// piped/redirected list emits nothing on either stream.
+	if stderr != "" {
+		t.Fatalf("want empty stderr on non-tty, got %q", stderr)
+	}
+}
+
+func TestListEmptyStorePrintsHintWhenStderrIsTTY(t *testing.T) {
+	fs := &fakeStore{summaries: []store.Summary{}}
+
+	forceStreamsTTY(t)
+
+	stdout, stderr, err := executeRootWith(t, workingDeps(t, fs), "list")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// stdout stays empty: the hint must never pollute the machine-readable list.
+	if stdout != "" {
+		t.Fatalf("want empty stdout, got %q (hint must not land on stdout)", stdout)
+	}
+	if !strings.Contains(stderr, "No prompts yet") || !strings.Contains(stderr, "tprompt new <id>") {
+		t.Fatalf("stderr = %q, want first-run hint naming `tprompt new <id>`", stderr)
 	}
 }
 

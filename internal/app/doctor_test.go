@@ -521,7 +521,7 @@ func TestDoctorMissingAdditionalPromptsDirIsWarning(t *testing.T) {
 	}
 	assertContains(t, stdout, "ok   prompts directory exists (scope global, "+primary+") [explicit]")
 	assertContains(t, stdout, "warn prompts directory missing (scope global, "+missing+") [additional]")
-	assertContains(t, stdout, "ok   0 prompts discovered")
+	assertContains(t, stdout, "warn 0 prompts discovered (run 'tprompt new <id>' to create one)")
 }
 
 func TestDoctorAdditionalPromptsDirThatIsFileIsFailure(t *testing.T) {

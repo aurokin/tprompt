@@ -32,6 +32,11 @@ tracker; planned work lives in Linear.
 - `tprompt tui` launches the built-in TUI and submits delivery through a short-lived handoff worker.
 - Bare `tprompt` dispatches to `tprompt tui` when stdin is a tty and `$TMUX` is set.
 - Bare `tprompt` outside tmux or without a tty prints help.
+- First-run guidance for an empty prompt store: `tprompt list` keeps stdout empty
+  (the machine-readable contract) and, only when stderr is a terminal, writes a
+  one-line hint pointing at `tprompt new <id>`; `tprompt doctor` reports the empty
+  store as a non-fatal `warn` naming the same next step. Neither changes the exit
+  code (success stays 0).
 - With no `--target-pane`, the TUI enters direct mode and delivers to the current pane (showing a banner that nudges popup setup) — but only when the origin pane is confirmed real (`$TMUX_PANE` is present in `tmux list-panes -a`). Inside a popup, or on any ambiguity, it exits 2 with a usage error pointing at `tprompt init`.
 - Operational failures return non-zero exit codes.
 - User cancellation in `pick` or the TUI exits with status 0.
