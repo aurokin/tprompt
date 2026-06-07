@@ -651,7 +651,7 @@ func resolveWisprDBPath(deps Deps, override string) (string, error) {
 		return override, nil
 	}
 	home, _ := os.UserHomeDir()
-	path, ok := wispr.DefaultDBPath(runtime.GOOS, deps.Env, home)
+	path, ok := wispr.DefaultDBPath(runtime.GOOS, home)
 	if !ok {
 		return "", &wispr.DBPathRequiredError{OS: runtime.GOOS}
 	}

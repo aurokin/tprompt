@@ -405,16 +405,14 @@ files. The contract is locked:
 - **Command shape.** `tprompt import` is a source-dispatch parent; `tprompt
   import wispr` carries `--db-path`, `--project`, `--dry-run`, `--overwrite`,
   `--tag`. Created paths print to stdout (one per line, scriptable); the human
-  summary is tty-gated to stderr. The DB location resolves to the conventional OS
-  path; in practice **macOS is the only zero-config platform**
-  (`~/Library/Application Support/Wispr Flow/flow.sqlite`). The resolver also
-  contains a native-Windows branch (`%APPDATA%\Wispr Flow\flow.sqlite`), but
+  summary is tty-gated to stderr. **macOS is the only zero-config platform**
+  (`~/Library/Application Support/Wispr Flow/flow.sqlite`); `DefaultDBPath` returns
+  no default for every other platform — including Linux and Windows-via-WSL2, since
   tprompt ships **no native Windows binary** (Windows is WSL2 = the Linux build —
-  see EXPECTATIONS "Platform And Packaging"), so that branch is unreachable by any
-  shipped binary. Linux and Windows-via-WSL2 therefore have no default and require
-  `--db-path` (from WSL2 the Windows DB is at
+  see EXPECTATIONS "Platform And Packaging"). Those platforms require `--db-path`
+  (from WSL2 the Windows DB is at
   `/mnt/c/Users/<you>/AppData/Roaming/Wispr Flow/flow.sqlite`); `--db-path` is
-  checked before the OS switch, so it is a universal escape hatch on every platform.
+  checked before the OS lookup, so it is a universal escape hatch on every platform.
 - **Source seam.** Sources implement a small `ImportSource` interface (`Name` +
   `NewCommand`) and self-register in a package-level registry; the first entry is
   the bare-import dispatch default (`wispr`). The ingest engine is generic over an
