@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hsadler/tprompt/internal/promptmeta"
+	"github.com/aurokin/tprompt/internal/promptmeta"
 )
 
 func TestSlugify(t *testing.T) {

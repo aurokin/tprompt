@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/delivery"
-	"github.com/hsadler/tprompt/internal/tmux"
+	"github.com/aurokin/tprompt/internal/config"
+	"github.com/aurokin/tprompt/internal/delivery"
+	"github.com/aurokin/tprompt/internal/tmux"
 )
 
 // RunJob loads a handoff job file, runs the existing deferred-delivery

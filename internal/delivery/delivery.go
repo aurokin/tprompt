@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hsadler/tprompt/internal/tmux"
+	"github.com/aurokin/tprompt/internal/tmux"
 )
 
 // Source values for Job.Source.

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hsadler/tprompt/internal/promptsource"
-	"github.com/hsadler/tprompt/internal/wispr"
+	"github.com/aurokin/tprompt/internal/promptsource"
+	"github.com/aurokin/tprompt/internal/wispr"
 )
 
 func planFor(t *testing.T, dir string, snippets []wispr.Snippet, flags importFlags) []planItem {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hsadler/tprompt/internal/tui"
+	"github.com/aurokin/tprompt/internal/tui"
 )
 
 // stubRendererSubmitter captures Submit calls for parseTestRenderer tests.

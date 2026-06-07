@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hsadler/tprompt/internal/config"
+	"github.com/aurokin/tprompt/internal/config"
 )
 
 // UnresolvedDefaultDirError reports that prompts_dir was unset and no default

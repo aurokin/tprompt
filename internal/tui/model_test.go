@@ -10,8 +10,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/hsadler/tprompt/internal/clipboard"
-	"github.com/hsadler/tprompt/internal/store"
+	"github.com/aurokin/tprompt/internal/clipboard"
+	"github.com/aurokin/tprompt/internal/store"
 )
 
 func sampleState() State {

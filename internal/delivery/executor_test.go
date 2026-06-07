@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/hsadler/tprompt/internal/sanitize"
-	"github.com/hsadler/tprompt/internal/tmux"
+	"github.com/aurokin/tprompt/internal/sanitize"
+	"github.com/aurokin/tprompt/internal/tmux"
 )
 
 // executorAdapter records adapter calls and returns scripted outcomes for

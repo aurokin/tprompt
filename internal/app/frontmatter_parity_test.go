@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hsadler/tprompt/internal/wispr"
+	"github.com/aurokin/tprompt/internal/wispr"
 )
 
 // frontmatterKeys returns the ordered top-level keys of a prompt file's YAML

@@ -12,9 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/promptsource"
-	"github.com/hsadler/tprompt/internal/store"
+	"github.com/aurokin/tprompt/internal/config"
+	"github.com/aurokin/tprompt/internal/promptsource"
+	"github.com/aurokin/tprompt/internal/store"
 )
 
 // scaffoldTemplate is the literal body written by `tprompt new`. Every

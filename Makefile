@@ -10,7 +10,7 @@ PKG_LIST := ./...
 all: check test-scripts build
 
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
-LDFLAGS := -X github.com/hsadler/tprompt/internal/app.appVersion=$(VERSION)
+LDFLAGS := -X github.com/aurokin/tprompt/internal/app.appVersion=$(VERSION)
 
 .PHONY: build
 build:

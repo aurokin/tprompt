@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hsadler/tprompt/internal/tmux"
+	"github.com/aurokin/tprompt/internal/tmux"
 )
 
 // scriptedAdapter returns adapter results from queues so tests can sequence

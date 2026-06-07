@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/hsadler/tprompt/internal/sanitize"
-	"github.com/hsadler/tprompt/internal/tmux"
+	"github.com/aurokin/tprompt/internal/sanitize"
+	"github.com/aurokin/tprompt/internal/tmux"
 )
 
 // BannerPrefix is prepended to every error surfaced via tmux display-message

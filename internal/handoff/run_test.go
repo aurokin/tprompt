@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/delivery"
-	"github.com/hsadler/tprompt/internal/tmux"
+	"github.com/aurokin/tprompt/internal/config"
+	"github.com/aurokin/tprompt/internal/delivery"
+	"github.com/aurokin/tprompt/internal/tmux"
 )
 
 type fakeAdapter struct {

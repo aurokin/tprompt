@@ -1,4 +1,4 @@
-module github.com/hsadler/tprompt
+module github.com/aurokin/tprompt
 
 go 1.26.3
 

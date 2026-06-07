@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/hsadler/tprompt/internal/clipboard"
+	"github.com/aurokin/tprompt/internal/clipboard"
 )
 
 // searchStateWithRows returns a State shaped like the production buildTUIState

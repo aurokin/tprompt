@@ -1,8 +1,8 @@
 package store
 
 import (
-	"github.com/hsadler/tprompt/internal/promptmeta"
-	"github.com/hsadler/tprompt/internal/sanitize"
+	"github.com/aurokin/tprompt/internal/promptmeta"
+	"github.com/aurokin/tprompt/internal/sanitize"
 )
 
 // sanitizeMeta cleans metadata fields only. Body sanitization is deferred to

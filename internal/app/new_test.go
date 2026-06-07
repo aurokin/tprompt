@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hsadler/tprompt/internal/config"
-	"github.com/hsadler/tprompt/internal/promptsource"
-	"github.com/hsadler/tprompt/internal/store"
+	"github.com/aurokin/tprompt/internal/config"
+	"github.com/aurokin/tprompt/internal/promptsource"
+	"github.com/aurokin/tprompt/internal/store"
 )
 
 func TestValidateNewID(t *testing.T) {

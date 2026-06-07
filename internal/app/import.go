@@ -10,9 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/hsadler/tprompt/internal/importtui"
-	"github.com/hsadler/tprompt/internal/promptsource"
-	"github.com/hsadler/tprompt/internal/wispr"
+	"github.com/aurokin/tprompt/internal/importtui"
+	"github.com/aurokin/tprompt/internal/promptsource"
+	"github.com/aurokin/tprompt/internal/wispr"
 )
 
 // defaultWisprTag is the default provenance tag stamped on every imported

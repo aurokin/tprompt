@@ -14,9 +14,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hsadler/tprompt/internal/keybind"
-	"github.com/hsadler/tprompt/internal/promptmeta"
-	"github.com/hsadler/tprompt/internal/promptsource"
+	"github.com/aurokin/tprompt/internal/keybind"
+	"github.com/aurokin/tprompt/internal/promptmeta"
+	"github.com/aurokin/tprompt/internal/promptsource"
 )
 
 // Summary is the light-weight view of a prompt used for listings.

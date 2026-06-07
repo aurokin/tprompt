@@ -3,7 +3,7 @@ package app
 import "testing"
 
 // The release pipeline injects the version via
-// -ldflags "-X github.com/hsadler/tprompt/internal/app.appVersion=<v>"; that
+// -ldflags "-X github.com/aurokin/tprompt/internal/app.appVersion=<v>"; that
 // only takes effect if the variable exists and the root command surfaces it.
 // Guard both so a future refactor can't silently re-break the dead-ldflag bug.
 func TestRootCmdExposesVersion(t *testing.T) {

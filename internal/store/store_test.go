@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/aurokin/tprompt/internal/keybind"
+	"github.com/aurokin/tprompt/internal/promptsource"
 	"github.com/google/go-cmp/cmp"
-	"github.com/hsadler/tprompt/internal/keybind"
-	"github.com/hsadler/tprompt/internal/promptsource"
 )
 
 func TestStoreInterfaceShape(t *testing.T) {

@@ -118,7 +118,7 @@ jobs:
             version="$(cat VERSION)"
           fi
           go build -trimpath \
-            -ldflags "-s -w -X github.com/hsadler/tprompt/internal/app.appVersion=$version" \
+            -ldflags "-s -w -X github.com/aurokin/tprompt/internal/app.appVersion=$version" \
             -o "dist/tprompt-${{ matrix.os }}-${{ matrix.arch }}/tprompt" \
             ./cmd/tprompt
 

@@ -7,7 +7,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/hsadler/tprompt/internal/tmux"
+	"github.com/aurokin/tprompt/internal/tmux"
 )
 
 // Verify polls the tmux adapter until the target pane exists and is again the
