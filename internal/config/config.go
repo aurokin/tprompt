@@ -32,6 +32,7 @@ type Config struct {
 	ClipboardReadCommand       string            `toml:"clipboard_read_command"`
 	MaxPasteBytes              int64             `toml:"max_paste_bytes"`
 	Sanitize                   string            `toml:"sanitize"`
+	EditOnNew                  bool              `toml:"edit_on_new"`
 	KeybindPool                string            `toml:"keybind_pool"`
 	ReservedKeys               map[string]string `toml:"reserved_keys"`
 }
@@ -50,6 +51,7 @@ func Default() Config {
 		ClipboardReadCommand:       "",
 		MaxPasteBytes:              1 << 21,
 		Sanitize:                   "safe",
+		EditOnNew:                  true,
 		KeybindPool:                "12345qerfgtzxc",
 		ReservedKeys: map[string]string{
 			"clipboard": "P",
@@ -86,6 +88,7 @@ type Resolved struct {
 	PickerArgv                 []string
 	MaxPasteBytes              int64
 	Sanitize                   string
+	EditOnNew                  bool
 	KeybindPool                []rune
 	ReservedPrintable          map[rune]string
 	ReservedSymbolic           map[string]string
@@ -187,6 +190,7 @@ func Normalize(cfg Config, configPath string) (Resolved, error) {
 		ClipboardReadCommand:       cfg.ClipboardReadCommand,
 		MaxPasteBytes:              cfg.MaxPasteBytes,
 		Sanitize:                   cfg.Sanitize,
+		EditOnNew:                  cfg.EditOnNew,
 		ConfigPath:                 configPath,
 	}
 

@@ -83,9 +83,9 @@ func TestNew_HappyPathWritesScaffoldTemplate(t *testing.T) {
 	}
 }
 
-func TestNew_PrintsAddBodyHintWhenStderrIsTTY(t *testing.T) {
+func TestNew_InteractiveStdoutPrintsCreatedLine(t *testing.T) {
 	dir := t.TempDir()
-	deps := newCmdDeps(t, dir)
+	deps := newCmdDeps(t, dir) // Env returns "" for VISUAL/EDITOR, so no editor opens.
 
 	forceStreamsTTY(t)
 
@@ -94,18 +94,17 @@ func TestNew_PrintsAddBodyHintWhenStderrIsTTY(t *testing.T) {
 		t.Fatalf("executeRootWith: %v", err)
 	}
 
-	// stdout stays exactly the created path (scripting contract).
 	abs, err := filepath.Abs(filepath.Join(dir, "code-review.md"))
 	if err != nil {
 		t.Fatalf("abs: %v", err)
 	}
-	if got := strings.TrimRight(stdout, "\n"); got != abs {
-		t.Errorf("stdout = %q, want %q (hint must not pollute stdout)", got, abs)
+	// Interactive stdout is the single concise `Created <path>` line (not the
+	// bare path), and there is no separate stderr nudge.
+	if got := strings.TrimRight(stdout, "\n"); got != "Created "+abs {
+		t.Errorf("stdout = %q, want %q", got, "Created "+abs)
 	}
-	// The hint is emitted on stderr and points at the created file's path
-	// (self-contained, so it survives stdout redirection).
-	if !strings.Contains(stderr, "add your prompt body") || !strings.Contains(stderr, abs) {
-		t.Errorf("stderr = %q, want add-a-body hint naming the created path %q", stderr, abs)
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty", stderr)
 	}
 }
 
@@ -701,7 +700,7 @@ func TestNew_ForceRefusesCollisionInAdditionalSource(t *testing.T) {
 	}
 }
 
-func TestNew_EditLaunchesEditorAndSuppressesHint(t *testing.T) {
+func TestNew_EditLaunchesEditor(t *testing.T) {
 	dir := t.TempDir()
 	editor := writeFakeEditor(t)
 
@@ -717,12 +716,10 @@ func TestNew_EditLaunchesEditorAndSuppressesHint(t *testing.T) {
 		return ""
 	}
 
-	// Editor launch is gated on the command's stdin AND stdout being ttys; force
-	// all streams on (the blanket gate would also fire the add-a-body hint, so a
-	// suppressed hint proves the editor branch took over).
+	// Editor launch is gated on the command's stdin AND stdout being ttys.
 	forceStreamsTTY(t)
 
-	_, stderr, err := executeRootWith(t, deps, "new", "code-review", "--edit")
+	stdout, _, err := executeRootWith(t, deps, "new", "code-review", "--edit")
 	if err != nil {
 		t.Fatalf("executeRootWith: %v", err)
 	}
@@ -734,8 +731,9 @@ func TestNew_EditLaunchesEditorAndSuppressesHint(t *testing.T) {
 	if !strings.Contains(string(body), "EDITED-BY-FAKE-EDITOR") {
 		t.Errorf("editor did not run on the scaffold path: body = %q", body)
 	}
-	if strings.Contains(stderr, "add your prompt body") {
-		t.Errorf("hint must be suppressed once the editor launches, stderr = %q", stderr)
+	abs, _ := filepath.Abs(filepath.Join(dir, "code-review.md"))
+	if got := strings.TrimRight(stdout, "\n"); got != "Created "+abs {
+		t.Errorf("stdout = %q, want %q", got, "Created "+abs)
 	}
 }
 
@@ -795,8 +793,8 @@ func TestNew_EditEditorFailureIsNonFatal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("abs: %v", err)
 	}
-	if got := strings.TrimRight(stdout, "\n"); got != abs {
-		t.Errorf("stdout = %q, want %q", got, abs)
+	if got := strings.TrimRight(stdout, "\n"); got != "Created "+abs {
+		t.Errorf("stdout = %q, want %q", got, "Created "+abs)
 	}
 	if !strings.Contains(stderr, "editor exited with error") {
 		t.Errorf("stderr = %q, want editor-failure note", stderr)
@@ -806,9 +804,9 @@ func TestNew_EditEditorFailureIsNonFatal(t *testing.T) {
 	}
 }
 
-func TestNew_EditNoopWhenEditorUnsetStillPrintsHint(t *testing.T) {
+func TestNew_EditNoopWhenNoEditorResolves(t *testing.T) {
 	dir := t.TempDir()
-	deps := newCmdDeps(t, dir) // Env returns "" for EDITOR.
+	deps := newCmdDeps(t, dir) // Env returns "" for VISUAL/EDITOR.
 
 	forceStreamsTTY(t)
 
@@ -820,13 +818,13 @@ func TestNew_EditNoopWhenEditorUnsetStillPrintsHint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("abs: %v", err)
 	}
-	if got := strings.TrimRight(stdout, "\n"); got != abs {
-		t.Errorf("stdout = %q, want %q", got, abs)
+	// --edit with no editor configured is a clean no-op: the Created line still
+	// prints, stderr stays empty, and the scaffold is left at the template.
+	if got := strings.TrimRight(stdout, "\n"); got != "Created "+abs {
+		t.Errorf("stdout = %q, want %q", got, "Created "+abs)
 	}
-	// With no $EDITOR the launch is a clean no-op, so the add-a-body hint still
-	// fires (and the scaffold is left at the template).
-	if !strings.Contains(stderr, "add your prompt body") || !strings.Contains(stderr, abs) {
-		t.Errorf("stderr = %q, want add-a-body hint naming %q", stderr, abs)
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty", stderr)
 	}
 	body, err := os.ReadFile(filepath.Join(dir, "code-review.md"))
 	if err != nil {
@@ -834,6 +832,142 @@ func TestNew_EditNoopWhenEditorUnsetStillPrintsHint(t *testing.T) {
 	}
 	if string(body) != scaffoldTemplate {
 		t.Errorf("scaffold should be untouched when no editor runs")
+	}
+}
+
+func TestNew_AutoOpensEditorWhenInteractive(t *testing.T) {
+	dir := t.TempDir()
+	editor := writeFakeEditor(t)
+	deps := newCmdDeps(t, dir) // helper sets EditOnNew: true
+	deps.Env = func(k string) string {
+		if k == "EDITOR" {
+			return editor
+		}
+		return ""
+	}
+
+	forceStreamsTTY(t)
+
+	// No --edit: auto-open is the interactive default (edit_on_new=true).
+	if _, _, err := executeRootWith(t, deps, "new", "code-review"); err != nil {
+		t.Fatalf("executeRootWith: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "code-review.md"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(body), "EDITED-BY-FAKE-EDITOR") {
+		t.Errorf("auto-open should launch the editor when interactive; body = %q", body)
+	}
+}
+
+func TestNew_NoEditSuppressesAutoOpen(t *testing.T) {
+	dir := t.TempDir()
+	editor := writeFakeEditor(t)
+	deps := newCmdDeps(t, dir)
+	deps.Env = func(k string) string {
+		if k == "EDITOR" {
+			return editor
+		}
+		return ""
+	}
+
+	forceStreamsTTY(t)
+
+	if _, _, err := executeRootWith(t, deps, "new", "code-review", "--no-edit"); err != nil {
+		t.Fatalf("executeRootWith: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "code-review.md"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(body) != scaffoldTemplate {
+		t.Errorf("--no-edit must suppress the editor; body = %q", body)
+	}
+}
+
+func TestNew_EditorFlagImpliesEdit(t *testing.T) {
+	dir := t.TempDir()
+	editor := writeFakeEditor(t)
+	deps := newCmdDeps(t, dir)
+	deps.Env = func(string) string { return "" } // no $VISUAL / $EDITOR
+
+	forceStreamsTTY(t)
+
+	// --editor both selects the editor and implies editing, with no env editor set.
+	if _, _, err := executeRootWith(t, deps, "new", "code-review", "--editor", editor); err != nil {
+		t.Fatalf("executeRootWith: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "code-review.md"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(body), "EDITED-BY-FAKE-EDITOR") {
+		t.Errorf("--editor should imply edit and run the given editor; body = %q", body)
+	}
+}
+
+func TestNew_EditOnNewFalseDisablesAutoOpen(t *testing.T) {
+	dir := t.TempDir()
+	editor := writeFakeEditor(t)
+	deps := newCmdDeps(t, dir)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{PromptsDir: dir, EditOnNew: false}, nil
+	}
+	deps.Env = func(k string) string {
+		if k == "EDITOR" {
+			return editor
+		}
+		return ""
+	}
+
+	forceStreamsTTY(t)
+
+	// edit_on_new=false: a bare `new` does not auto-open even with $EDITOR set.
+	if _, _, err := executeRootWith(t, deps, "new", "code-review"); err != nil {
+		t.Fatalf("executeRootWith: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "code-review.md"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(body) != scaffoldTemplate {
+		t.Errorf("edit_on_new=false must disable auto-open; body = %q", body)
+	}
+}
+
+func TestNew_EditorAndNoEditAreMutuallyExclusive(t *testing.T) {
+	dir := t.TempDir()
+	deps := newCmdDeps(t, dir)
+	// --editor implies edit; pairing with --no-edit is contradictory and must be
+	// rejected rather than silently turning --editor into a no-op.
+	if _, _, err := executeRootWith(t, deps, "new", "code-review", "--editor", "vim", "--no-edit"); err == nil {
+		t.Fatal("want usage error for --editor with --no-edit, got nil")
+	}
+}
+
+func TestResolveEditor(t *testing.T) {
+	env := func(m map[string]string) func(string) string {
+		return func(k string) string { return m[k] }
+	}
+	tests := []struct {
+		name    string
+		flag    string
+		envVars map[string]string
+		want    string
+	}{
+		{"flag wins", "code --wait", map[string]string{"VISUAL": "vim", "EDITOR": "nano"}, "code --wait"},
+		{"visual beats editor", "", map[string]string{"VISUAL": "vim", "EDITOR": "nano"}, "vim"},
+		{"editor when no visual", "", map[string]string{"EDITOR": "nano"}, "nano"},
+		{"none set", "", map[string]string{}, ""},
+		{"whitespace ignored", "   ", map[string]string{"EDITOR": " nano "}, "nano"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveEditor(tt.flag, env(tt.envVars)); got != tt.want {
+				t.Errorf("resolveEditor(%q, env) = %q, want %q", tt.flag, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -982,6 +1116,7 @@ func newCmdDepsWithAdditional(t *testing.T, promptsDir string, additional []stri
 		return config.Resolved{
 			PromptsDir:            promptsDir,
 			AdditionalPromptsDirs: additional,
+			EditOnNew:             true, // mirror config.Default()
 		}, nil
 	}
 	return deps

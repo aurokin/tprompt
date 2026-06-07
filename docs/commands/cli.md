@@ -20,10 +20,12 @@ frontmatter values are tolerated at load time (see
 `docs/storage/prompt-store.md`), so a freshly scaffolded file loads cleanly
 without further edits.
 
-stdout is exactly the created path (for scripting). When stderr is a
-terminal, an additional hint is printed to stderr pointing at the new file so
-the author remembers to add a body to the otherwise-empty scaffold; piped or
-non-tty runs emit nothing on stderr.
+Output is tty-aware. When stdout is a terminal, `new` prints a single
+`Created <path>` line. When stdout is piped or redirected (e.g.
+`p=$(tprompt new foo)`), it prints exactly the bare created path and nothing
+else — the scripting contract. In an interactive terminal `new` also opens the
+created file in your editor (see `--editor`/`--edit` below); piped, redirected,
+and CI runs never launch an editor.
 
 Flags:
 
@@ -37,12 +39,20 @@ Flags:
   same-id prompt in a subdirectory or another source is a duplicate `--force`
   cannot resolve in place, so the command still refuses those. A `--force`
   create of a not-yet-existing id behaves like a normal create.
-- `--edit` — open the created file in `$EDITOR` after scaffolding. `$EDITOR` is
-  run as a shell command (a path containing spaces must be quoted, as with
-  git). A clean no-op when `$EDITOR` is unset or stdin/stdout is not a tty, so
-  piped and scripted runs are unaffected. Editing is best-effort: a failing
-  editor is reported on stderr but does not fail the command, since the file
-  was already created.
+- `--editor <cmd>` — editor command to open the new file with for this run.
+  Implies editing and overrides `$VISUAL`/`$EDITOR`. Run as a shell command (a
+  path containing spaces must be quoted, as with git), so `code --wait` works.
+- `--edit` — force-open the created file in your editor after scaffolding.
+- `--no-edit` — never open an editor, even in an interactive terminal. Mutually
+  exclusive with `--edit` and `--editor` (pairing them is a usage error).
+
+  Editor behavior: by default, an interactive `new` (stdin and stdout both ttys)
+  opens the file in the first editor that resolves from `--editor`, then
+  `$VISUAL`, then `$EDITOR`. There is no built-in `vi`/nano fallback, so nothing
+  opens when none is set. Set `edit_on_new = false` in config to disable
+  auto-open by default. Opening is a clean no-op for piped/non-tty/CI runs and is
+  best-effort: a failing editor is reported on stderr but does not fail the
+  command, since the file was already created.
 
 ID validation (rejected up front, exit 2):
 
