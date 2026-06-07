@@ -1,7 +1,6 @@
 package wispr
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -265,7 +264,6 @@ func TestDefaultDBPath(t *testing.T) {
 	tests := []struct {
 		name   string
 		goos   string
-		getenv func(string) string
 		home   string
 		want   string
 		wantOK bool
@@ -273,7 +271,6 @@ func TestDefaultDBPath(t *testing.T) {
 		{
 			name:   "darwin",
 			goos:   "darwin",
-			getenv: func(string) string { return "" },
 			home:   "/Users/me",
 			want:   "/Users/me/Library/Application Support/Wispr Flow/flow.sqlite",
 			wantOK: true,
@@ -281,42 +278,27 @@ func TestDefaultDBPath(t *testing.T) {
 		{
 			name:   "darwin-no-home",
 			goos:   "darwin",
-			getenv: func(string) string { return "" },
 			home:   "",
 			wantOK: false,
 		},
 		{
-			name: "windows",
-			goos: "windows",
-			getenv: func(k string) string {
-				if k == "APPDATA" {
-					return `C:\Users\me\AppData\Roaming`
-				}
-				return ""
-			},
-			home: "",
-			// Built with filepath.Join so the expected separators match the test
-			// host (backslashes are literal in the APPDATA input on POSIX).
-			want:   filepath.Join(`C:\Users\me\AppData\Roaming`, "Wispr Flow", "flow.sqlite"),
-			wantOK: true,
-		},
-		{
-			name:   "windows-no-appdata",
+			// No native Windows binary ships (Windows is WSL2 = the linux build),
+			// so windows has no zero-config default and must use --db-path.
+			name:   "windows-no-default",
 			goos:   "windows",
-			getenv: func(string) string { return "" },
+			home:   `C:\Users\me`,
 			wantOK: false,
 		},
 		{
 			name:   "linux-no-default",
 			goos:   "linux",
-			getenv: func(string) string { return "" },
 			home:   "/home/me",
 			wantOK: false,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := DefaultDBPath(tc.goos, tc.getenv, tc.home)
+			got, ok := DefaultDBPath(tc.goos, tc.home)
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
 			}

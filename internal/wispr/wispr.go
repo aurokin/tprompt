@@ -186,23 +186,13 @@ func slugify(phrase string) string {
 }
 
 // DefaultDBPath returns the conventional flow.sqlite location for goos, or
-// ok=false when there is no known default (e.g. Linux), in which case the caller
-// must require --db-path. getenv reads environment variables (for the Windows
-// %APPDATA% lookup); home is the user's home directory (used on macOS).
-func DefaultDBPath(goos string, getenv func(string) string, home string) (string, bool) {
-	switch goos {
-	case "darwin":
-		if home == "" {
-			return "", false
-		}
+// ok=false when there is no known default, in which case the caller must require
+// --db-path. Only macOS has a zero-config default; every other platform —
+// including Linux and Windows-via-WSL2, since tprompt ships no native Windows
+// binary — returns ok=false. home is the user's home directory (used on macOS).
+func DefaultDBPath(goos, home string) (string, bool) {
+	if goos == "darwin" && home != "" {
 		return filepath.Join(home, "Library", "Application Support", "Wispr Flow", "flow.sqlite"), true
-	case "windows":
-		appData := getenv("APPDATA")
-		if appData == "" {
-			return "", false
-		}
-		return filepath.Join(appData, "Wispr Flow", "flow.sqlite"), true
-	default:
-		return "", false
 	}
+	return "", false
 }
