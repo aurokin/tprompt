@@ -35,6 +35,9 @@ max_paste_bytes = 2097152              # 2 MiB cap on paste size
 # Sanitization
 sanitize = "safe"                      # "off" | "safe" | "strict"
 
+# tprompt new
+edit_on_new = true                     # auto-open the editor after `new` (interactive only)
+
 # TUI keybinds
 keybind_pool = "12345qerfgtzxc"        # auto-assign pool order
 
@@ -65,6 +68,7 @@ select    = "Enter"
 - clipboard reader override
 - max paste bytes
 - sanitize mode
+- auto-open editor on `new` (`edit_on_new`, default `true`; interactive only)
 - reserved keys map
 - keybind pool
 
@@ -161,6 +165,16 @@ clipboard = ""     # disable clipboard keybind; still accessible via search
 ## Sanitize
 
 `sanitize` accepts `"off"`, `"safe"`, or `"strict"`. Default is `"safe"`: strips dangerous control sequences (OSC, DCS, mode toggles, bracketed-paste protocol terminators) while preserving cosmetic CSI (SGR colors, cursor movement). See `docs/implementation/sanitization.md` for the full denylist and the rationale behind the default. `"off"` is opt-in for users who legitimately need raw escape passthrough; `"strict"` rejects on any escape sequence and reports class plus byte offset. Invalid values fail config validation.
+
+## `edit_on_new`
+
+`edit_on_new` defaults to `true`. When `true`, `tprompt new` opens the created
+file in your editor in an interactive terminal (stdin and stdout both ttys).
+The editor command is resolved as `--editor` flag › `$VISUAL` › `$EDITOR`; with
+none set, nothing opens (there is no built-in `vi`/nano fallback). Piped,
+redirected, and CI runs never open an editor. Set `edit_on_new = false` to keep
+`new` scaffold-and-stop by default; you can still open per-run with `--edit` or
+`--editor <cmd>`, or force-skip with `--no-edit`.
 
 ## Legacy daemon fields
 

@@ -441,3 +441,32 @@ files. The contract is locked:
   directory. A DB that exists but cannot be opened/read (locked, or macOS Full
   Disk Access denied) is a **general error** (exit 1). Errors name the actionable
   fix (`--db-path`, quit Wispr Flow, grant Full Disk Access).
+
+### 35. `tprompt new` auto-opens the editor when interactive
+
+- **Auto-open is the default, deliberately against the create-vs-edit norm.**
+  Surveyed scaffold commands (`cargo new`, `gh issue create`, `kubectl create`,
+  `helm create`, `go mod init`) write the file and return; only *edit* commands
+  (`git commit`, `crontab -e`, `kubectl edit`) auto-open an editor. `tprompt new`
+  is a scaffold command, so the norm would be opt-in. We chose auto-open-by-default
+  anyway because tprompt is a personal authoring tool where "create then fill in"
+  is the dominant flow — but only after making it **safe by gating**, so it never
+  surprises a script or CI. `edit_on_new = true` is the default; set it `false` to
+  restore scaffold-and-stop.
+- **The gate is what makes it safe.** The editor opens only when ALL hold: stdin
+  **and** stdout are both ttys; an editor command resolves; and editing is not
+  suppressed. So `p=$(tprompt new x)` (captured stdout = non-tty), pipelines, and
+  CI never launch an editor and never leak one onto a stdout the scripting
+  contract reserves for the path. `--no-edit` force-skips; `--edit` and
+  `--editor <cmd>` force-open; `--editor` also selects the editor and implies edit.
+- **Editor resolution follows the Unix chain, no fallback.** `--editor` flag ›
+  config `editor`-less by design (we use the shell standards) › `$VISUAL` ›
+  `$EDITOR`. There is **no** hardcoded `vi`/nano fallback: a scaffold command must
+  not force-open an editor the user never configured. The resolved value is a
+  shell command line run via `sh -c "<value> \"$@\""` (so `code --wait` works);
+  do not field-split it. Editing stays best-effort — a failing editor is reported
+  but never fails the create.
+- **Output is tty-aware to de-duplicate.** stdout prints `Created <path>` when it
+  is a terminal and the **bare path** when piped/redirected. The bare-path form is
+  the unchanged scripting contract; the friendly form replaces the old
+  path-on-stdout + hint-on-stderr pair, which repeated the path in a terminal.

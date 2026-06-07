@@ -37,6 +37,14 @@ tracker; planned work lives in Linear.
   one-line hint pointing at `tprompt new <id>`; `tprompt doctor` reports the empty
   store as a non-fatal `warn` naming the same next step. Neither changes the exit
   code (success stays 0).
+- `tprompt new <id>` scaffolds a prompt file. In an interactive terminal it
+  prints `Created <path>` and opens the file in your editor; when stdout is
+  piped or redirected it prints the bare created path only (the scripting
+  contract) and never opens an editor. Auto-open is the default (`edit_on_new`),
+  gated on stdin and stdout both being ttys and an editor resolving from
+  `--editor` › `$VISUAL` › `$EDITOR` (no `vi`/nano fallback). `--no-edit` skips
+  it; `--edit`/`--editor` force it. Editing is best-effort and never fails the
+  create.
 - With no `--target-pane`, the TUI enters direct mode and delivers to the current pane (showing a banner that nudges popup setup) — but only when the origin pane is confirmed real (`$TMUX_PANE` is present in `tmux list-panes -a`). Inside a popup, or on any ambiguity, it exits 2 with a usage error pointing at `tprompt init`.
 - Operational failures return non-zero exit codes.
 - User cancellation in `pick` or the TUI exits with status 0.

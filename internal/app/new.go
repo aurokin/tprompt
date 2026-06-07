@@ -61,7 +61,8 @@ func (e *PromptFileExistsError) Error() string {
 }
 
 func newNewCmd(deps Deps) *cobra.Command {
-	var project, edit, force bool
+	var project, edit, noEdit, force bool
+	var editor string
 	cmd := &cobra.Command{
 		Use:   "new <id>",
 		Short: "Scaffold a new prompt file",
@@ -79,28 +80,39 @@ auto-created on first use when it is the default global path. With --project,
 <gitroot>/tprompt is auto-created. Explicit prompts_dir paths must already
 exist.
 
-With --edit, the new file is opened in $EDITOR after creation. This is a
-clean no-op when $EDITOR is unset or stdin/stdout is not a tty, and editing is
-best-effort: a failing editor is reported but does not fail the command, since
-the file was already created.
+When run in an interactive terminal, new opens the created file in your editor,
+resolved from --editor, then $VISUAL, then $EDITOR. This is a clean no-op when
+none is set or when stdin/stdout is not a tty, so pipelines and CI are
+unaffected. Pass --no-edit to skip it, --edit to force it, or --editor <cmd> to
+pick the editor for this run (which implies editing); set edit_on_new = false in
+config to disable auto-open by default. Editing is best-effort: a failing editor
+is reported but does not fail the command, since the file was already created.
 
 The scaffolded file stubs every supported frontmatter field with an empty
 value so authors can see the schema without consulting docs. Empty
 frontmatter values are ignored at load.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return runNew(deps, args[0], newFlags{project: project, edit: edit, force: force})
+			return runNew(deps, args[0], newFlags{project: project, edit: edit, noEdit: noEdit, editor: editor, force: force})
 		},
 	}
 	cmd.Flags().BoolVar(&project, "project", false, "write to <gitroot>/tprompt instead of the global prompts directory")
-	cmd.Flags().BoolVar(&edit, "edit", false, "open the new file in $EDITOR after creating it (no-op when $EDITOR is unset or stdin/stdout is not a tty)")
+	cmd.Flags().StringVar(&editor, "editor", "", "editor command to open the new file with (implies --edit; overrides $VISUAL/$EDITOR)")
+	cmd.Flags().BoolVar(&edit, "edit", false, "force-open the new file in your editor after creating it")
+	cmd.Flags().BoolVar(&noEdit, "no-edit", false, "do not open an editor, even in an interactive terminal")
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing prompt file instead of refusing")
+	cmd.MarkFlagsMutuallyExclusive("edit", "no-edit")
+	// --editor implies edit, so pairing it with --no-edit is contradictory;
+	// reject it rather than silently letting --no-edit cancel the explicit editor.
+	cmd.MarkFlagsMutuallyExclusive("editor", "no-edit")
 	return cmd
 }
 
 type newFlags struct {
 	project bool
 	edit    bool
+	noEdit  bool
+	editor  string
 	force   bool
 }
 
@@ -129,7 +141,8 @@ func runNew(deps Deps, id string, flags newFlags) error {
 	if err := writePromptFile(target, collisionSources, source.Scope, id, []byte(scaffoldTemplate), flags.force); err != nil {
 		return err
 	}
-	return announceNewFile(deps, target, flags.edit)
+	editorCmd, open := editorPlan(flags, cfg, deps)
+	return announceNewFile(deps, target, editorCmd, open)
 }
 
 // writePromptFile is the TOCTOU-safe collision-check + atomic write shared by
@@ -192,77 +205,89 @@ func pathExists(p string) bool {
 	return err == nil
 }
 
-// announceNewFile prints the created path on stdout (the scripting contract)
-// and then, depending on flags and terminal context, either opens the file in
-// $EDITOR or prints the add-a-body hint on stderr — never both.
-func announceNewFile(deps Deps, target string, edit bool) error {
-	_, _ = fmt.Fprintln(deps.Stdout, target)
-
-	// With --edit, open the scaffold in $EDITOR; a started editor session makes
-	// the add-a-body hint redundant. launchEditor is a clean no-op (returns
-	// false) when $EDITOR is unset or stdin/stdout is not a tty, in which case
-	// the hint below still fires. Editing is best-effort and never aborts `new`
-	// (the file is already created), so launchEditor returns no error.
-	if edit && launchEditor(deps, target) {
-		return nil
+// announceNewFile reports the created file and, when editing is enabled, opens
+// it. stdout is tty-aware: an interactive terminal gets a single `Created
+// <path>` line, while a piped/redirected stdout gets the bare path and nothing
+// else — the scripting contract, so `p=$(tprompt new foo)` still captures just
+// the path. When open is true the editor is launched after the line is printed.
+func announceNewFile(deps Deps, target, editorCmd string, open bool) error {
+	if streamIsTTY(deps.Stdout) {
+		_, _ = fmt.Fprintf(deps.Stdout, "Created %s\n", target)
+	} else {
+		_, _ = fmt.Fprintln(deps.Stdout, target)
 	}
-
-	// The scaffold body is empty, so a freshly-created prompt delivers nothing
-	// until the author fills it in. Nudge them, pointing at the absolute file
-	// path (not a reconstructed `show <id>` command, which would not preserve
-	// --config, could resolve to a shadowing prompt under --project, and would
-	// need shell-quoting for unusual ids). tty-gated to stderr: stdout stays
-	// exactly the path for scripting, and piped/non-tty runs (including the
-	// golden testscripts asserting empty stderr) emit nothing.
-	if streamIsTTY(deps.Stderr) {
-		_, _ = fmt.Fprintf(deps.Stderr, "now add your prompt body to %s\n", target)
+	if open {
+		launchEditor(deps, editorCmd, target)
 	}
 	return nil
 }
 
-// launchEditor opens target in the user's $EDITOR, reporting whether an editor
-// session was started (true) so the caller can suppress the add-a-body hint. It
-// is a clean no-op (false) when $EDITOR is unset, or when the command's stdin
-// or stdout is not a tty. The tty gate keys off the injected Deps streams (not
-// the process globals) and the editor inherits those same streams, so a caller
-// that redirects RunCLI's I/O gets a consistent no-op rather than an editor
-// leaking onto the real terminal and scribbling into a stdout the scripting
-// contract reserves for the created path.
-//
-// Editing is best-effort: a non-zero editor exit or an unstartable $EDITOR is
-// reported to stderr but never returned as an error, since `new`'s deliverable
-// (the created file) already succeeded.
-func launchEditor(deps Deps, target string) bool {
-	editor := strings.TrimSpace(deps.Env("EDITOR"))
-	if editor == "" || !streamIsTTY(deps.Stdin) || !streamIsTTY(deps.Stdout) {
-		return false
+// editorPlan resolves the editor command and decides whether to open it after
+// scaffolding. The command is resolved from --editor, then $VISUAL, then
+// $EDITOR (first non-empty). The editor opens only when a command resolves AND
+// stdin and stdout are both ttys (so redirected/piped/CI runs never launch an
+// editor and never leak it onto a stdout the scripting contract reserves for the
+// path), and:
+//   - --no-edit             -> never
+//   - --edit or --editor set -> force open
+//   - otherwise             -> the edit_on_new config default (true)
+func editorPlan(flags newFlags, cfg config.Resolved, deps Deps) (string, bool) {
+	editorCmd := resolveEditor(flags.editor, deps.Env)
+	if flags.noEdit {
+		return editorCmd, false
 	}
-	// Run through `sh -c` so $EDITOR is parsed with full shell quoting — values
-	// like `emacsclient -c -a ""` or a quoted path containing spaces work, and
-	// there is no naive strings.Fields split to mishandle them or panic on a
-	// whitespace-only value. `"$@"` passes the validated scaffold path as the
-	// sole positional argument; the editor inherits the command's stdio so it
-	// can drive the terminal.
+	if editorCmd == "" || !streamIsTTY(deps.Stdin) || !streamIsTTY(deps.Stdout) {
+		return editorCmd, false
+	}
+	if flags.edit || flags.editor != "" {
+		return editorCmd, true
+	}
+	return editorCmd, cfg.EditOnNew
+}
+
+// resolveEditor returns the editor command line to use: the --editor flag, then
+// $VISUAL, then $EDITOR — the standard Unix precedence (VISUAL, the full-screen
+// editor, wins over EDITOR). Returns "" when none is set; there is deliberately
+// no hardcoded vi/nano fallback, so `new` never force-opens an editor the user
+// did not configure. The value is a shell command line (see launchEditor).
+func resolveEditor(flagEditor string, env func(string) string) string {
+	for _, candidate := range []string{flagEditor, env("VISUAL"), env("EDITOR")} {
+		if s := strings.TrimSpace(candidate); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// launchEditor opens target with editorCmd, best-effort. The caller (editorPlan)
+// has already resolved a non-empty command and confirmed stdin/stdout are ttys.
+//
+// Editing never fails the command: a non-zero editor exit or an unstartable
+// editor is reported to stderr but not returned, since `new`'s deliverable (the
+// created file) already succeeded.
+func launchEditor(deps Deps, editorCmd, target string) {
+	// Run through `sh -c` so the command is parsed with full shell quoting —
+	// values like `code --wait`, `emacsclient -c -a ""`, or a quoted path
+	// containing spaces work, with no naive strings.Fields split to mishandle
+	// them. `"$@"` passes the validated scaffold path as the sole positional
+	// argument; the editor inherits the command's stdio so it can drive the
+	// terminal.
 	//
-	// $EDITOR is treated as a shell command line, matching the universal
+	// $EDITOR/$VISUAL are treated as shell command lines, matching the universal
 	// convention (git, less, the freedesktop spec): an executable path that
-	// contains spaces must be quoted in $EDITOR itself (e.g.
-	// EDITOR='"/Applications/Visual Studio Code.app/.../code" --wait'). This is
-	// deliberate — field-splitting the raw value instead would break editors
-	// that carry quoted arguments, which is the opposite (and more common)
-	// failure. Not a bug; do not "fix" by switching to strings.Fields.
+	// contains spaces must be quoted in the value itself. This is deliberate —
+	// field-splitting the raw value instead would break editors that carry
+	// quoted arguments. Not a bug; do not "fix" by switching to strings.Fields.
 	//
-	// G204: the command is the user's own $EDITOR and the argument is a
-	// validated path in the user's own prompt store — the user explicitly
-	// asking to open their own file in their own editor, not remote input.
-	ed := exec.Command("sh", "-c", editor+` "$@"`, "sh", target) //nolint:gosec
+	// G204: the command is the user's own editor and the argument is a validated
+	// path in the user's own prompt store — not remote input.
+	ed := exec.Command("sh", "-c", editorCmd+` "$@"`, "sh", target) //nolint:gosec
 	ed.Stdin = deps.Stdin
 	ed.Stdout = deps.Stdout
 	ed.Stderr = deps.Stderr
 	if err := ed.Run(); err != nil {
 		_, _ = fmt.Fprintf(deps.Stderr, "tprompt: editor exited with error: %v\n", err)
 	}
-	return true
 }
 
 // scaffoldTargetSources resolves the write target and the collision-scan tier
