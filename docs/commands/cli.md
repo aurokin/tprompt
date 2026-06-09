@@ -289,10 +289,11 @@ Flags:
   `/mnt/c/Users/<you>/AppData/Roaming/Wispr Flow/flow.sqlite`.
 - `--project` — write to the project overlay (`<gitroot>/tprompt`) instead of the
   primary global prompts directory. Must be run inside a git tree.
-- `--dry-run` — preview without writing. `would create:` / `would skip:` lines go
-  to stderr and nothing is created; stdout stays empty. It previews the import
-  *plan* (which ids would be created or skipped, plus any id/duplicate errors); it
-  does not verify write permissions or disk space, which the real import validates.
+- `--dry-run` — preview without writing. `would create:`, `would overwrite:`,
+  and `would skip:` lines go to stderr and nothing is created; stdout stays empty.
+  It previews the import *plan* (which ids would be created, refreshed, or skipped,
+  plus any id/duplicate errors); it does not verify write permissions or disk
+  space, which the real import validates.
 - `--overwrite` — refresh existing prompts from Wispr instead of skipping them
   (replaces the body and frontmatter of a prompt whose id already exists).
 - `--tag <tag>` — provenance tag stamped on every imported prompt (default
