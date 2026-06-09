@@ -399,6 +399,12 @@ files. The contract is locked:
   disarms it, so a filter can never strand a surprise destructive overwrite (the
   global overwrite count truthfully drops to 0). A CLI `--overwrite` refresh is an
   authorized bulk opt-in and survives while hidden.
+- **Shared layout helpers.** The board TUI and import picker share pure
+  row-window and width helpers through `internal/tuilayout`: rows-per-frame
+  arithmetic, scroll clamping, visible range selection, right-padding, and
+  rune-width truncation. Renderer-specific chrome accounting (`headerLines`,
+  banner/title rendering, footer composition) stays local, so `internal/importtui`
+  remains a sibling of `internal/tui` rather than importing it.
 - **Additive and one-way.** Import only creates prompt files (or refreshes them
   under `--overwrite`). It never deletes prompts, never mutates Wispr, and does
   not establish any ongoing sync — the result is standalone prompt files. This is

@@ -472,28 +472,6 @@ func TestDisplayKey(t *testing.T) {
 	}
 }
 
-func TestTruncateToWidth(t *testing.T) {
-	cases := []struct {
-		name  string
-		in    string
-		width int
-		want  string
-	}{
-		{"fits as-is", "abc", 10, "abc"},
-		{"zero width blank", "abc", 0, ""},
-		{"negative width blank", "abc", -1, ""},
-		{"truncates with ellipsis", "abcdefghij", 5, "abcd…"},
-		{"single ellipsis at width 1", "abcdef", 1, "…"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := truncateToWidth(tc.in, tc.width); got != tc.want {
-				t.Fatalf("truncateToWidth(%q, %d) = %q, want %q", tc.in, tc.width, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestRenderer_RunUsesInjectedInput(t *testing.T) {
 	r := NewRenderer(ModelDeps{}, ProgramIO{
 		Input:  strings.NewReader("\x1b"),
@@ -1436,35 +1414,6 @@ func TestUpdate_ScrollingPreservesInlineError(t *testing.T) {
 	}
 	if m.inlineError == "" {
 		t.Fatal("inlineError should be preserved through scroll-triggered navigation")
-	}
-}
-
-func TestClampScrollOffset(t *testing.T) {
-	cases := []struct {
-		name     string
-		cursor   int
-		offset   int
-		rowCount int
-		rpf      int
-		want     int
-	}{
-		{"pre-WindowSize rpf zero collapses", 2, 5, 10, 0, 0},
-		{"empty row set collapses", 0, 3, 0, 2, 0},
-		{"cursor inside window is noop", 2, 1, 10, 3, 1},
-		{"cursor above window pulls offset down", 5, 0, 10, 2, 4},
-		{"cursor below window pulls offset up", 0, 3, 10, 2, 0},
-		{"offset past tail clamps to len-rpf", 3, 7, 4, 2, 2},
-		{"negative offset clamped to zero", 0, -5, 4, 2, 0},
-		{"rpf exceeds row count collapses to zero", 1, 3, 4, 10, 0},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := clampScrollOffset(tc.cursor, tc.offset, tc.rowCount, tc.rpf)
-			if got != tc.want {
-				t.Fatalf("clampScrollOffset(%d, %d, %d, %d) = %d, want %d",
-					tc.cursor, tc.offset, tc.rowCount, tc.rpf, got, tc.want)
-			}
-		})
 	}
 }
 
