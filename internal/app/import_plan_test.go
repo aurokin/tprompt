@@ -99,6 +99,36 @@ func TestDryRunPlan_ClaimOrdering(t *testing.T) {
 	}
 }
 
+func TestImportSnippets_EnsureDestRunsOnceBeforeWrites(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "prompts")
+	source := promptsource.Source{Path: dir, Scope: promptsource.ScopeGlobal, AutoCreateOnAccess: true}
+	snippets := []wispr.Snippet{
+		{ID: "uuid-1", Phrase: "alpha", Replacement: "first"},
+		{ID: "uuid-2", Phrase: "beta", Replacement: "second"},
+	}
+	calls := 0
+	ensureDest := onceEnsureDest(func() error {
+		calls++
+		return os.MkdirAll(dir, 0o755)
+	})
+
+	imported, skipped, err := importSnippets(fakeDeps(t), source, []promptsource.Source{source}, wisprImportRecords(snippets), importFlags{tag: defaultWisprTag}, ensureDest, nil)
+	if err != nil {
+		t.Fatalf("importSnippets: %v", err)
+	}
+	if imported != 2 || skipped != 0 {
+		t.Fatalf("imported=%d skipped=%d, want 2/0", imported, skipped)
+	}
+	if calls != 1 {
+		t.Fatalf("ensureDest calls = %d, want 1", calls)
+	}
+	for _, name := range []string{"alpha.md", "beta.md"} {
+		if !pathExists(filepath.Join(dir, name)) {
+			t.Fatalf("expected %s to be written after ensureDest created the directory", name)
+		}
+	}
+}
+
 // TestPickerItems_PopulatesTags pins that each picker row carries the snippet's
 // provenance tags — the active --tag, plus "starred" for a starred snippet — so
 // the import TUI's `/`-search can match on them. The tags are sourced from
