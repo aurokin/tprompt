@@ -233,6 +233,20 @@ func TestToPrompt_EmptyReplacementNotImportable(t *testing.T) {
 	}
 }
 
+func TestMustYAMLMarshalPanicsOnInvariantViolation(t *testing.T) {
+	defer func() {
+		got := recover()
+		if got == nil {
+			t.Fatal("mustYAMLMarshal did not panic for an unsupported value")
+		}
+		if got != "wispr frontmatter marshal invariant violated" {
+			t.Fatalf("panic = %q, want static invariant message", got)
+		}
+	}()
+
+	_ = mustYAMLMarshal(func() {})
+}
+
 func TestToPrompt_UnsluggablePhraseFallsBackToUUID(t *testing.T) {
 	// A phrase with no sluggable characters yields a `wispr-<first8 uuid>` id,
 	// while the title still preserves the original phrase verbatim.
