@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 
 	"github.com/spf13/cobra"
 
@@ -152,15 +153,16 @@ func runImport[R ImportRecord](deps Deps, flags importFlags, produce func() ([]R
 	if err := validatePromptSources(collisionSources, source.Path); err != nil {
 		return err
 	}
-	if err := prepareImportDest(source, flags, picker != nil); err != nil {
+	ensureDest, err := prepareImportDest(source, flags, picker != nil)
+	if err != nil {
 		return err
 	}
 
 	if picker != nil {
-		return runInteractiveImport(deps, picker, source, collisionSources, records, flags)
+		return runInteractiveImport(deps, picker, source, collisionSources, records, flags, ensureDest)
 	}
 
-	imported, skipped, err := importSnippets(deps, source, collisionSources, records, flags, nil)
+	imported, skipped, err := importSnippets(deps, source, collisionSources, records, flags, ensureDest, nil)
 	if err != nil {
 		return err
 	}
@@ -168,25 +170,28 @@ func runImport[R ImportRecord](deps Deps, flags importFlags, produce func() ([]R
 	return nil
 }
 
-// prepareImportDest validates or creates the destination before any write. The
-// auto-create default global dir / project overlay is created only for a
-// non-interactive real run: --dry-run writes nothing, and an interactive run
-// defers creation until the user confirms (so a cancel leaves no directory —
-// importSnippets handles it via ensureImportWriteDir). An explicit,
-// non-auto-create prompts_dir that is missing is surfaced eagerly in every mode,
-// so a real import never claims success — and a picker never opens — for a
-// destination it could not use.
+// prepareImportDest validates the destination and returns the per-mode creation
+// hook importSnippets must call before the first real write. The auto-create
+// default global dir / project overlay is created eagerly for a non-interactive
+// real run, never for --dry-run, and lazily/once for an interactive run (so a
+// cancel or no-op selection leaves no directory). An explicit, non-auto-create
+// prompts_dir that is missing is surfaced eagerly in every mode, so a real import
+// never claims success — and a picker never opens — for a destination it could not
+// use.
 //
 // An interactive auto-create destination still validates an EXISTING path here
 // (without creating a missing one): a path occupied by a regular file can never
 // be a prompts directory, so surface that before the picker opens rather than
 // only after the user confirms (and never at all if they cancel).
-func prepareImportDest(source promptsource.Source, flags importFlags, interactive bool) error {
+func prepareImportDest(source promptsource.Source, flags importFlags, interactive bool) (func() error, error) {
 	if !source.AutoCreateOnAccess {
-		return ensureScaffoldDir(source.Path, false)
+		if err := ensureScaffoldDir(source.Path, false); err != nil {
+			return nil, err
+		}
+		return noEnsureDest, nil
 	}
 	if flags.dryRun {
-		return nil
+		return noEnsureDest, nil
 	}
 	if interactive {
 		// Missing path → fine; created lazily on the first write. An existing path
@@ -196,11 +201,23 @@ func prepareImportDest(source promptsource.Source, flags importFlags, interactiv
 		// symlink, which Stat reports as ErrNotExist, is still caught here: the
 		// dir-entry exists and cannot be used, so MkdirAll surfaces it eagerly.
 		if _, err := os.Lstat(source.Path); errors.Is(err, fs.ErrNotExist) {
-			return nil
+			return onceEnsureDest(func() error { return ensureScaffoldDir(source.Path, true) }), nil
 		}
-		return ensureScaffoldDir(source.Path, true)
+		if err := ensureScaffoldDir(source.Path, true); err != nil {
+			return nil, err
+		}
+		return onceEnsureDest(func() error { return ensureScaffoldDir(source.Path, true) }), nil
 	}
-	return ensureScaffoldDir(source.Path, true)
+	if err := ensureScaffoldDir(source.Path, true); err != nil {
+		return nil, err
+	}
+	return noEnsureDest, nil
+}
+
+func noEnsureDest() error { return nil }
+
+func onceEnsureDest(ensure func() error) func() error {
+	return sync.OnceValue(ensure)
 }
 
 // interactivePicker validates the `-i` preflight and builds the picker, or
@@ -227,12 +244,13 @@ func interactivePicker(deps Deps, flags importFlags) (importtui.Renderer, error)
 // skipped entirely (no blank list) and the empty selection imports nothing. A
 // cancel returns before anything is written (exit 0, no summary).
 //
-// The auto-create destination is created lazily by importSnippets, right before
-// the first actual write (see ensureImportWriteDir). So every no-op interactive
-// outcome — cancel, deselect-all, zero fresh rows, or a selection that all
-// re-classifies to a skip while the picker was open — leaves no empty directory
-// behind, honoring the cancel/no-op = "writes nothing" contract even under a race.
-func runInteractiveImport[R ImportRecord](deps Deps, picker importtui.Renderer, source promptsource.Source, collisionSources []promptsource.Source, records []R, flags importFlags) error {
+// The auto-create destination is created lazily by importSnippets through the
+// ensureDest hook, right before the first actual write. So every no-op
+// interactive outcome — cancel, deselect-all, zero fresh rows, or a selection
+// that all re-classifies to a skip while the picker was open — leaves no empty
+// directory behind, honoring the cancel/no-op = "writes nothing" contract even
+// under a race.
+func runInteractiveImport[R ImportRecord](deps Deps, picker importtui.Renderer, source promptsource.Source, collisionSources []promptsource.Source, records []R, flags importFlags, ensureDest func() error) error {
 	sel := &importSelection{write: map[string]bool{}, overwrite: map[string]bool{}}
 	if items := pickerItems(dryRunPlan(source, collisionSources, records, flags), flags.tag); len(items) > 0 {
 		result, err := picker.Run(importtui.State{Items: items})
@@ -250,22 +268,12 @@ func runInteractiveImport[R ImportRecord](deps Deps, picker importtui.Renderer, 
 		}
 	}
 
-	imported, skipped, err := importSnippets(deps, source, collisionSources, records, flags, sel)
+	imported, skipped, err := importSnippets(deps, source, collisionSources, records, flags, ensureDest, sel)
 	if err != nil {
 		return err
 	}
 	writeImportSummary(deps, flags.dryRun, imported, skipped)
 	return nil
-}
-
-// ensureImportWriteDir creates the auto-create destination just before the first
-// interactive write. A non-auto-create explicit prompts_dir was already validated
-// to exist in runImportWispr, so it needs nothing here.
-func ensureImportWriteDir(source promptsource.Source) error {
-	if !source.AutoCreateOnAccess {
-		return nil
-	}
-	return ensureScaffoldDir(source.Path, true)
 }
 
 // pickerItems projects the user-actionable plan rows into picker items, carrying
@@ -333,25 +341,23 @@ func pickerItems(plan []planItem, tag string) []importtui.Item {
 // a §4 hard error the user could not act on, while an explicit overwrite intent
 // keeps the writer authoritative. confirm-all therefore writes the same fresh-item
 // bytes as a non-interactive run when no conflicts exist.
-func importSnippets[R ImportRecord](deps Deps, source promptsource.Source, collisionSources []promptsource.Source, records []R, flags importFlags, sel *importSelection) (imported, skipped int, err error) {
+//
+// ensureDest owns destination readiness for the selected mode. It is called only
+// for real writes that classified planImportable; dry-runs and skipped rows never
+// invoke it.
+func importSnippets[R ImportRecord](deps Deps, source promptsource.Source, collisionSources []promptsource.Source, records []R, flags importFlags, ensureDest func() error, sel *importSelection) (imported, skipped int, err error) {
 	claimed := map[string]bool{}
 	interactive := sel != nil
-	destReady := false
 	for _, rec := range records {
 		item := classifySnippet(source, collisionSources, rec, flags, claimed, sel)
 		if interactive && !interactiveReachesExecute(item, sel) {
 			skipped++
 			continue
 		}
-		// Interactive runs defer creating the auto-create destination to here, the
-		// first real write, so a no-op selection (everything deselected, or a row
-		// that re-classified to a skip while the picker was open) leaves no empty
-		// directory. Non-interactive runs created it eagerly in runImport.
-		if interactive && !destReady && item.status == planImportable && !flags.dryRun {
-			if dirErr := ensureImportWriteDir(source); dirErr != nil {
+		if item.status == planImportable && !flags.dryRun {
+			if dirErr := ensureDest(); dirErr != nil {
 				return imported, skipped, dirErr
 			}
-			destReady = true
 		}
 		outcome, writeErr := executePlanItem(item, flags)
 		if writeErr != nil {
