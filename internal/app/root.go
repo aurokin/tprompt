@@ -131,9 +131,9 @@ func RunCLI(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 // flow runs. Bare `tprompt` → `tui`; bare `tprompt import` (the import parent,
 // no source) → `import <importDefault> -i`. This happens before cobra parses
 // flags so `tui`'s required --target-pane validation (and `-i`'s tty preflight)
-// fire normally. importDefault is the default import source name (empty disables
-// the import rewrite); it and the tty predicates are passed in rather than read
-// from globals so this stays a pure function, matching the §30 shape.
+// fire normally. importDefault is the default import source name; it and the tty
+// predicates are passed in rather than read from globals so this stays a pure
+// function, matching the §30 shape.
 //
 // interactiveTTY gates the import rewrite only and mirrors the picker's own
 // preflight (NewImportRenderer requires streamIsTTY on both the injected stdin
@@ -184,7 +184,7 @@ func dispatchArgs(root *cobra.Command, args []string, env func(string) string, s
 	// print help. The interactiveTTY guard keeps a bare `import` whose streams
 	// cannot host the picker on §34's help path instead of forcing `-i` into a
 	// non-tty renderer.
-	if importDefault != "" && interactiveTTY() && matched.Name() == "import" && matched.Parent() == root && bareImportArgs(root, remaining) {
+	if interactiveTTY() && matched.Name() == "import" && matched.Parent() == root && bareImportArgs(root, remaining) {
 		return appendImportSource(args, importDefault)
 	}
 	return args

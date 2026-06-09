@@ -282,18 +282,6 @@ func TestDispatchArgsSkipsBareImportOutsideTmux(t *testing.T) {
 	}
 }
 
-func TestDispatchArgsSkipsImportRewriteWhenNoDefaultSource(t *testing.T) {
-	// An empty registry (no default source name) disables the import rewrite.
-	root := NewRootCmd(fakeDeps(t))
-	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
-	tty := func() bool { return true }
-
-	got := dispatchArgs(root, []string{"import"}, env, tty, tty, "")
-	if !stringSliceEqual(got, []string{"import"}) {
-		t.Fatalf("no default source must leave bare import unchanged, got %v", got)
-	}
-}
-
 func TestRootBareInvocationFallsBackToHelp(t *testing.T) {
 	deps := fakeDeps(t)
 	root := NewRootCmd(deps)

@@ -121,7 +121,7 @@ The SQLite driver (`modernc.org/sqlite`, pure-Go) is **isolated to `internal/wis
 
 No tmux adapter, sanitizer, or handoff is involved — import only touches the prompt store.
 
-`import` is a source-dispatch parent: sources register through an `ImportSource` seam and the ingest engine is generic over an `ImportRecord`, so steps 4–5 name no source-specific type (wispr is the only built-in today). Bare `tprompt import` in tmux + tty opens the default source's interactive picker — the §34 analog of the bare-`tprompt` → `tui` default. See the [import source seam](../implementation/interfaces.md#import-source-seam) and `DECISIONS.md` §34.
+`import` is a source-dispatch parent: sources register through an `ImportSource` seam and feed `ImportRecord` values to the shared ingest engine, so steps 4–5 name no source-specific type (wispr is the only built-in today). Bare `tprompt import` in tmux + tty opens the default source's interactive picker — the §34 analog of the bare-`tprompt` → `tui` default. See the [import source seam](../implementation/interfaces.md#import-source-seam) and `DECISIONS.md` §34.
 
 ## Architectural priorities
 

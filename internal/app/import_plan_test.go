@@ -13,7 +13,7 @@ import (
 func planFor(t *testing.T, dir string, snippets []wispr.Snippet, flags importFlags) []planItem {
 	t.Helper()
 	src := promptsource.Source{Path: dir, Scope: promptsource.ScopeGlobal}
-	return dryRunPlan(src, []promptsource.Source{src}, snippets, flags)
+	return dryRunPlan(src, []promptsource.Source{src}, wisprImportRecords(snippets), flags)
 }
 
 // TestDryRunPlan_ClassifiesTheThreeConflictCases pins the §34 classification the
