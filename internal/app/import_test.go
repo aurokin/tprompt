@@ -247,6 +247,37 @@ func TestImportWispr_DryRunWritesNothingAndPreviews(t *testing.T) {
 	}
 }
 
+func TestImportWispr_DryRunOverwritePreviewsRefresh(t *testing.T) {
+	dir := t.TempDir()
+	stale := filepath.Join(dir, "code-review.md")
+	staleBody := []byte("STALE content\n")
+	if err := os.WriteFile(stale, staleBody, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps := importCmdDeps(t, dir, &fakeWisprReader{snippets: liveSnippets()})
+	forceStreamsTTY(t)
+
+	stdout, stderr, err := executeRootWith(t, deps, "import", "wispr", "--db-path", "x", "--dry-run", "--overwrite")
+	if err != nil {
+		t.Fatalf("dry-run overwrite: %v", err)
+	}
+	if strings.TrimSpace(stdout) != "" {
+		t.Errorf("dry-run overwrite stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "would overwrite:") || !strings.Contains(stderr, "code-review.md") {
+		t.Errorf("stderr missing would-overwrite line:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "would create: "+stale) {
+		t.Errorf("stderr mislabeled overwrite as create:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "would create:") || !strings.Contains(stderr, "organize-thoughts-prompt.md") {
+		t.Errorf("stderr missing fresh would-create line:\n%s", stderr)
+	}
+	if got, err := os.ReadFile(stale); err != nil || string(got) != string(staleBody) {
+		t.Errorf("dry-run overwrite must not refresh existing file, got %q err=%v", got, err)
+	}
+}
+
 func TestImportWispr_OverwriteRefreshesExisting(t *testing.T) {
 	dir := t.TempDir()
 	stale := filepath.Join(dir, "code-review.md")

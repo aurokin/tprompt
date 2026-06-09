@@ -407,12 +407,16 @@ func interactiveReachesExecute(item planItem, sel *importSelection) bool {
 
 // reportOutcome emits the per-snippet line for one executed outcome and returns
 // its (imported, skipped) tally contribution. A real run prints created paths to
-// stdout (for scripting); a dry-run previews `would create:` / `would skip:` to
-// stderr.
+// stdout (for scripting); a dry-run previews `would create:` / `would overwrite:`
+// / `would skip:` to stderr.
 func reportOutcome(deps Deps, outcome snippetOutcome, dryRun bool) (imported, skipped int) {
 	if outcome.imported {
 		if dryRun {
-			_, _ = fmt.Fprintf(deps.Stderr, "would create: %s\n", outcome.path)
+			label := "create"
+			if outcome.overwrite {
+				label = "overwrite"
+			}
+			_, _ = fmt.Fprintf(deps.Stderr, "would %s: %s\n", label, outcome.path)
 		} else {
 			_, _ = fmt.Fprintln(deps.Stdout, outcome.path)
 		}
@@ -427,9 +431,10 @@ func reportOutcome(deps Deps, outcome snippetOutcome, dryRun bool) (imported, sk
 // snippetOutcome reports what happened (or, in dry-run, would happen) to one
 // snippet: imported (path set) or skipped (skipNote describes why).
 type snippetOutcome struct {
-	imported bool
-	path     string
-	skipNote string
+	imported  bool
+	path      string
+	overwrite bool // dry-run preview wording for an existing target refresh
+	skipNote  string
 }
 
 // planStatus classifies what importing one snippet would do, computed write-free
@@ -599,7 +604,7 @@ func executePlanItem(item planItem, flags importFlags) (snippetOutcome, error) {
 				return snippetOutcome{}, err
 			}
 		}
-		return snippetOutcome{imported: true, path: item.target}, nil
+		return snippetOutcome{imported: true, path: item.target, overwrite: item.overwrite && item.targetExisted}, nil
 	default:
 		// Unreachable: every planStatus is handled above. A new status that reaches
 		// here is a programming error, surfaced rather than silently skipped.
