@@ -57,6 +57,12 @@ func (s fakeImportSource) NewCommand(deps Deps) *cobra.Command {
 	return cmd
 }
 
+func (s fakeImportSource) RunDefaultInteractive(deps Deps) error {
+	return runImport(deps, importFlags{tag: "fake", interactive: true}, func() ([]fakeRecord, error) {
+		return s.records, nil
+	})
+}
+
 // executeImportSource builds an `import` parent carrying just the given source's
 // subcommand (the same wiring newImportCmd does over the registry) and runs it,
 // without mutating the package registry.

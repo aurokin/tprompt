@@ -3,10 +3,12 @@ package app
 import (
 	"bytes"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/aurokin/tprompt/internal/clipboard"
 	"github.com/aurokin/tprompt/internal/config"
+	"github.com/aurokin/tprompt/internal/importtui"
 	"github.com/aurokin/tprompt/internal/picker"
 	"github.com/aurokin/tprompt/internal/store"
 	"github.com/aurokin/tprompt/internal/submitter"
@@ -39,12 +41,12 @@ func TestDispatchArgsRewritesBareInvocationInTmuxTTY(t *testing.T) {
 	}
 	tty := func() bool { return true }
 
-	got := dispatchArgs(root, nil, env, tty, tty, "wispr")
+	got := dispatchArgs(root, nil, env, tty)
 	if len(got) != 1 || got[0] != "tui" {
 		t.Fatalf("bare args should rewrite to [tui], got %v", got)
 	}
 
-	got = dispatchArgs(root, []string{"--target-pane", "%0"}, env, tty, tty, "wispr")
+	got = dispatchArgs(root, []string{"--target-pane", "%0"}, env, tty)
 	want := []string{"tui", "--target-pane", "%0"}
 	if !stringSliceEqual(got, want) {
 		t.Fatalf("flagged bare args should prepend tui, got %v want %v", got, want)
@@ -56,7 +58,7 @@ func TestDispatchArgsPreservesSubcommandInvocation(t *testing.T) {
 	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
 	tty := func() bool { return true }
 
-	got := dispatchArgs(root, []string{"list"}, env, tty, tty, "wispr")
+	got := dispatchArgs(root, []string{"list"}, env, tty)
 	if !stringSliceEqual(got, []string{"list"}) {
 		t.Fatalf("subcommand args should pass through, got %v", got)
 	}
@@ -68,7 +70,7 @@ func TestDispatchArgsPreservesExplicitHelpFlags(t *testing.T) {
 	tty := func() bool { return true }
 
 	for _, helpArg := range []string{"--help", "-h"} {
-		got := dispatchArgs(root, []string{helpArg}, env, tty, tty, "wispr")
+		got := dispatchArgs(root, []string{helpArg}, env, tty)
 		if !stringSliceEqual(got, []string{helpArg}) {
 			t.Fatalf("%q should pass through, got %v", helpArg, got)
 		}
@@ -83,7 +85,7 @@ func TestDispatchArgsRewritesWhenHelpIsFlagValue(t *testing.T) {
 	tty := func() bool { return true }
 
 	args := []string{"--config", "help", "--target-pane", "%0"}
-	got := dispatchArgs(root, args, env, tty, tty, "wispr")
+	got := dispatchArgs(root, args, env, tty)
 	want := []string{"tui", "--config", "help", "--target-pane", "%0"}
 	if !stringSliceEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
@@ -95,7 +97,7 @@ func TestDispatchArgsSkipsRewriteWithoutTmux(t *testing.T) {
 	env := func(string) string { return "" }
 	tty := func() bool { return true }
 
-	got := dispatchArgs(root, nil, env, tty, tty, "wispr")
+	got := dispatchArgs(root, nil, env, tty)
 	if len(got) != 0 {
 		t.Fatalf("bare args outside tmux should not be rewritten, got %v", got)
 	}
@@ -106,191 +108,118 @@ func TestDispatchArgsSkipsRewriteWithoutTTY(t *testing.T) {
 	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
 	tty := func() bool { return false }
 
-	got := dispatchArgs(root, nil, env, tty, tty, "wispr")
+	got := dispatchArgs(root, nil, env, tty)
 	if len(got) != 0 {
 		t.Fatalf("bare args without tty should not be rewritten, got %v", got)
 	}
 }
 
-func TestDispatchArgsRewritesBareImportToInteractiveDefaultSource(t *testing.T) {
-	root := NewRootCmd(fakeDeps(t))
-	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
-	tty := func() bool { return true }
+func TestImportBareDispatchesDefaultSourceInTmuxInteractiveTTY(t *testing.T) {
+	withStdinTTY(t, true)
+	forceStreamsTTY(t)
+	withImportSourceRegistry(t, fakeImportSource{})
+	deps, called := bareImportDeps(t)
 
-	got := dispatchArgs(root, []string{"import"}, env, tty, tty, "wispr")
-	want := []string{"import", "wispr", "-i"}
-	if !stringSliceEqual(got, want) {
-		t.Fatalf("bare import in tmux+tty should rewrite to %v, got %v", want, got)
+	_, _, err := executeRootWith(t, deps, "import")
+	if err != nil {
+		t.Fatalf("bare import dispatch: %v", err)
+	}
+	if !*called {
+		t.Fatal("bare import in tmux+interactive tty did not construct the default interactive renderer")
 	}
 }
 
-func TestDispatchArgsAppendsImportSourceWithRootFlags(t *testing.T) {
-	// A persistent root flag before a bare `import` must survive: `import` is the
-	// final command token, so the source and `-i` are appended after it.
-	root := NewRootCmd(fakeDeps(t))
-	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
-	tty := func() bool { return true }
+func TestImportBareFallsBackToHelpWhenGateFails(t *testing.T) {
+	withImportSourceRegistry(t, fakeImportSource{})
+	cases := []struct {
+		name     string
+		env      func(string) string
+		stdinTTY bool
+		streams  bool
+	}{
+		{
+			name:     "outside tmux",
+			env:      func(string) string { return "" },
+			stdinTTY: true,
+			streams:  true,
+		},
+		{
+			name:     "process stdin not tty",
+			env:      func(string) string { return "/tmp/tmux-0/default,1,0" },
+			stdinTTY: false,
+			streams:  true,
+		},
+		{
+			name:     "injected streams not tty",
+			env:      func(string) string { return "/tmp/tmux-0/default,1,0" },
+			stdinTTY: true,
+			streams:  false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withStdinTTY(t, tc.stdinTTY)
+			if tc.streams {
+				forceStreamsTTY(t)
+			}
+			deps, called := bareImportDeps(t)
+			deps.Env = tc.env
 
-	got := dispatchArgs(root, []string{"--config", "x", "import"}, env, tty, tty, "wispr")
-	want := []string{"--config", "x", "import", "wispr", "-i"}
-	if !stringSliceEqual(got, want) {
-		t.Fatalf("got %v, want %v", got, want)
+			stdout, _, err := executeRootWith(t, deps, "import")
+			if err != nil {
+				t.Fatalf("bare import help: %v", err)
+			}
+			if *called {
+				t.Fatal("default interactive renderer was constructed despite a failed gate")
+			}
+			if !strings.Contains(stdout, "fake") {
+				t.Fatalf("bare import should print source-dispatch help, got:\n%s", stdout)
+			}
+		})
 	}
 }
 
-func TestDispatchArgsRewritesBareImportWhenRootFlagValueIsImport(t *testing.T) {
-	// Regression: `--config import import` has the literal "import" as the
-	// --config value AND as the command token. Appending (rather than splicing
-	// after the first "import") keeps the real command token last, so cobra
-	// re-parses --config=import and runs `import wispr -i`.
-	root := NewRootCmd(fakeDeps(t))
-	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
-	tty := func() bool { return true }
+func TestImportBareCobraParsingBehavior(t *testing.T) {
+	withStdinTTY(t, true)
+	forceStreamsTTY(t)
+	withImportSourceRegistry(t, fakeImportSource{})
 
-	got := dispatchArgs(root, []string{"--config", "import", "import"}, env, tty, tty, "wispr")
-	want := []string{"--config", "import", "import", "wispr", "-i"}
-	if !stringSliceEqual(got, want) {
-		t.Fatalf("got %v, want %v", got, want)
+	cases := []struct {
+		name       string
+		args       []string
+		wantCalled bool
+		wantErr    string
+	}{
+		{"root flag before import", []string{"--config", "x", "import"}, true, ""},
+		{"root flag after import", []string{"import", "--config", "x"}, true, ""},
+		{"root flag value is import", []string{"--config", "import", "import"}, true, ""},
+		{"root flag value looks like shorthand", []string{"import", "--config", "-v"}, true, ""},
+		{"dangling root flag", []string{"import", "--config"}, false, "flag needs an argument"},
+		{"source flag without source", []string{"import", "--dry-run"}, false, "unknown flag"},
+		{"stray positional", []string{"import", "bogus"}, false, "unknown command"},
+		{"stray import positional", []string{"import", "import"}, false, "unknown command"},
+		{"explicit source", []string{"import", "fake"}, false, ""},
 	}
-}
 
-func TestDispatchArgsDoesNotRewriteImportWithFlags(t *testing.T) {
-	// `tprompt import --dry-run` must NOT be rewritten: injecting `-i` would make
-	// the engine see both interactive and dry-run and error. Find leaves
-	// `--dry-run` in `remaining`, a flag that is not a root persistent flag, so
-	// bareImportArgs rejects it and the rewrite is skipped.
-	root := NewRootCmd(fakeDeps(t))
-	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
-	tty := func() bool { return true }
-
-	got := dispatchArgs(root, []string{"import", "--dry-run"}, env, tty, tty, "wispr")
-	if !stringSliceEqual(got, []string{"import", "--dry-run"}) {
-		t.Fatalf("import --dry-run must pass through unchanged, got %v", got)
-	}
-}
-
-func TestDispatchArgsDoesNotRewriteImportWithStrayPositional(t *testing.T) {
-	// `tprompt import bogus` leaves "bogus" in `remaining`, so the rewrite is
-	// skipped and cobra reports the unknown source itself.
-	root := NewRootCmd(fakeDeps(t))
-	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
-	tty := func() bool { return true }
-
-	got := dispatchArgs(root, []string{"import", "bogus"}, env, tty, tty, "wispr")
-	if !stringSliceEqual(got, []string{"import", "bogus"}) {
-		t.Fatalf("import bogus must pass through unchanged, got %v", got)
-	}
-}
-
-func TestDispatchArgsDoesNotRewriteBareImportWhenNotInteractiveCapable(t *testing.T) {
-	// The picker needs both injected streams to be ttys (NewImportRenderer's
-	// preflight). When they are not — stdout redirected (`tprompt import >out.txt`
-	// in tmux) or an embedded caller injecting a non-tty stdin — forcing `-i`
-	// would turn §34's "bare form prints help" into InteractiveRequiresTTYError,
-	// so the rewrite is gated on interactiveTTY and bare `import` prints help.
-	root := NewRootCmd(fakeDeps(t))
-	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
-	stdinTTY := func() bool { return true }
-	notInteractive := func() bool { return false }
-
-	got := dispatchArgs(root, []string{"import"}, env, stdinTTY, notInteractive, "wispr")
-	if !stringSliceEqual(got, []string{"import"}) {
-		t.Fatalf("bare import without an interactive-capable tty must pass through unchanged, got %v", got)
-	}
-}
-
-func TestDispatchArgsRewritesBareImportWithRootFlagAfterImport(t *testing.T) {
-	// A root persistent flag placed AFTER `import` must still count as bare:
-	// `tprompt import --config /tmp/cfg` carries only a root flag, so it dispatches
-	// to the default source regardless of flag position relative to `import`.
-	root := NewRootCmd(fakeDeps(t))
-	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
-	tty := func() bool { return true }
-
-	got := dispatchArgs(root, []string{"import", "--config", "/tmp/cfg"}, env, tty, tty, "wispr")
-	want := []string{"import", "--config", "/tmp/cfg", "wispr", "-i"}
-	if !stringSliceEqual(got, want) {
-		t.Fatalf("import with trailing root flag should rewrite to %v, got %v", want, got)
-	}
-}
-
-func TestDispatchArgsRewritesBareImportWhenConfigValueLooksLikeHelpFlag(t *testing.T) {
-	// `tprompt import --config -v` names a config path "-v" — it is NOT a version
-	// request. bareImportArgs reads "-v" as --config's value, so the invocation is
-	// bare and dispatches to the default source (the help/version guard is scoped
-	// to the root→tui path and must not suppress this).
-	root := NewRootCmd(fakeDeps(t))
-	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
-	tty := func() bool { return true }
-
-	got := dispatchArgs(root, []string{"import", "--config", "-v"}, env, tty, tty, "wispr")
-	want := []string{"import", "--config", "-v", "wispr", "-i"}
-	if !stringSliceEqual(got, want) {
-		t.Fatalf("import --config -v should rewrite to %v, got %v", want, got)
-	}
-}
-
-func TestDispatchArgsDoesNotRewriteImportWithDanglingRootFlag(t *testing.T) {
-	// `tprompt import --config` omits --config's required value. Rewriting would
-	// append `wispr`, which cobra would bind as the missing value; instead the
-	// invocation must pass through so cobra reports the missing-value error.
-	root := NewRootCmd(fakeDeps(t))
-	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
-	tty := func() bool { return true }
-
-	got := dispatchArgs(root, []string{"import", "--config"}, env, tty, tty, "wispr")
-	if !stringSliceEqual(got, []string{"import", "--config"}) {
-		t.Fatalf("import with dangling --config must pass through unchanged, got %v", got)
-	}
-}
-
-func TestDispatchArgsDoesNotRewriteImportWithStrayImportPositional(t *testing.T) {
-	// `tprompt import import` has "import" as a stray positional (Find leaves it in
-	// `remaining` as a non-flag), so it must NOT rewrite — cobra rejects the
-	// unknown source, the same as `import bogus`.
-	root := NewRootCmd(fakeDeps(t))
-	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
-	tty := func() bool { return true }
-
-	got := dispatchArgs(root, []string{"import", "import"}, env, tty, tty, "wispr")
-	if !stringSliceEqual(got, []string{"import", "import"}) {
-		t.Fatalf("import import must pass through unchanged, got %v", got)
-	}
-}
-
-func TestDispatchArgsDoesNotRewriteExplicitImportSource(t *testing.T) {
-	// `tprompt import wispr` names a source, so Find matches the wispr command,
-	// not the import parent — it is never rewritten (no surprise -i).
-	root := NewRootCmd(fakeDeps(t))
-	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
-	tty := func() bool { return true }
-
-	got := dispatchArgs(root, []string{"import", "wispr"}, env, tty, tty, "wispr")
-	if !stringSliceEqual(got, []string{"import", "wispr"}) {
-		t.Fatalf("explicit `import wispr` must pass through unchanged, got %v", got)
-	}
-}
-
-func TestDispatchArgsSkipsBareImportOutsideTmux(t *testing.T) {
-	root := NewRootCmd(fakeDeps(t))
-	env := func(string) string { return "" }
-	tty := func() bool { return true }
-
-	got := dispatchArgs(root, []string{"import"}, env, tty, tty, "wispr")
-	if !stringSliceEqual(got, []string{"import"}) {
-		t.Fatalf("bare import outside tmux must print help (unchanged), got %v", got)
-	}
-}
-
-func TestDispatchArgsSkipsImportRewriteWhenNoDefaultSource(t *testing.T) {
-	// An empty registry (no default source name) disables the import rewrite.
-	root := NewRootCmd(fakeDeps(t))
-	env := func(string) string { return "/tmp/tmux-0/default,1,0" }
-	tty := func() bool { return true }
-
-	got := dispatchArgs(root, []string{"import"}, env, tty, tty, "")
-	if !stringSliceEqual(got, []string{"import"}) {
-		t.Fatalf("no default source must leave bare import unchanged, got %v", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, called := bareImportDeps(t)
+			_, _, err := executeRootWith(t, deps, tc.args...)
+			if tc.wantErr == "" && err != nil {
+				t.Fatalf("executeRootWith(%v): %v", tc.args, err)
+			}
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("executeRootWith(%v) err = nil, want containing %q", tc.args, tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("executeRootWith(%v) err = %q, want containing %q", tc.args, err, tc.wantErr)
+				}
+			}
+			if *called != tc.wantCalled {
+				t.Fatalf("default interactive renderer called = %v, want %v", *called, tc.wantCalled)
+			}
+		})
 	}
 }
 
@@ -329,6 +258,30 @@ func withStdinTTY(t *testing.T, isTTY bool) {
 	orig := stdinIsTTY
 	stdinIsTTY = func() bool { return isTTY }
 	t.Cleanup(func() { stdinIsTTY = orig })
+}
+
+func withImportSourceRegistry(t *testing.T, sources ...ImportSource) {
+	t.Helper()
+	orig := importSourceRegistry
+	importSourceRegistry = sources
+	t.Cleanup(func() { importSourceRegistry = orig })
+}
+
+func bareImportDeps(t *testing.T) (Deps, *bool) {
+	t.Helper()
+	called := false
+	deps := newCmdDeps(t, t.TempDir())
+	deps.Env = func(key string) string {
+		if key == "TMUX" {
+			return "/tmp/tmux-0/default,1,0"
+		}
+		return ""
+	}
+	deps.NewImportRenderer = func() (importtui.Renderer, error) {
+		called = true
+		return &recordingImportRenderer{decide: confirmAll}, nil
+	}
+	return deps, &called
 }
 
 func fakeDeps(t *testing.T) Deps {

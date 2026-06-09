@@ -32,6 +32,11 @@ type ImportSource interface {
 	Name() string
 	// NewCommand builds the cobra subcommand registered under `import`.
 	NewCommand(deps Deps) *cobra.Command
+	// RunDefaultInteractive runs this source through its default interactive
+	// import path for bare `tprompt import` dispatch. The import parent calls this
+	// after cobra has already parsed root persistent flags and accepted the parent
+	// invocation as truly bare.
+	RunDefaultInteractive(deps Deps) error
 }
 
 // importSourceRegistry is the ordered list of import origins. The first entry is
@@ -43,10 +48,18 @@ var importSourceRegistry = []ImportSource{wisprImportSource{}}
 // defaultImportSourceName is the source bare `tprompt import` dispatches to in
 // tmux+tty. Empty when the registry is empty (then dispatch does not rewrite).
 func defaultImportSourceName() string {
-	if len(importSourceRegistry) == 0 {
+	src := defaultImportSource()
+	if src == nil {
 		return ""
 	}
-	return importSourceRegistry[0].Name()
+	return src.Name()
+}
+
+func defaultImportSource() ImportSource {
+	if len(importSourceRegistry) == 0 {
+		return nil
+	}
+	return importSourceRegistry[0]
 }
 
 // wisprImportSource is the sole built-in import source today: Wispr Flow snippets.
@@ -55,3 +68,10 @@ type wisprImportSource struct{}
 func (wisprImportSource) Name() string { return "wispr" }
 
 func (wisprImportSource) NewCommand(deps Deps) *cobra.Command { return newImportWisprCmd(deps) }
+
+func (wisprImportSource) RunDefaultInteractive(deps Deps) error {
+	return runImportWispr(deps, "", importFlags{
+		tag:         defaultWisprTag,
+		interactive: true,
+	})
+}
