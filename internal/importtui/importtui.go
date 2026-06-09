@@ -6,10 +6,8 @@
 // (DECISIONS AUR-528 D1). The fuzzy search core IS shared: both this picker and
 // the board adapt their row to internal/searchindex (AUR-530), a dependency-free
 // package that keeps importtui free of store/clipboard/config. The small pure
-// viewport helpers (clampScrollOffset, rowsPerFrame, headerLines,
-// visibleRowRange) remain COPIED from internal/tui rather than shared: they are
-// <60 LoC with no flow coupling, and exporting them now would couple two
-// renderers that are still diverging.
+// viewport/width helpers live in internal/tuilayout, so shared row-window and
+// truncation invariants stay in one place without importing internal/tui.
 //
 // Unlike tui.NewRenderer, this renderer runs with tea.WithAltScreen
 // (DECISIONS AUR-528 D9): the board renders inside an ephemeral tmux popup, but

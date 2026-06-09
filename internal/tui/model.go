@@ -11,6 +11,7 @@ import (
 
 	"github.com/aurokin/tprompt/internal/clipboard"
 	"github.com/aurokin/tprompt/internal/store"
+	layout "github.com/aurokin/tprompt/internal/tuilayout"
 )
 
 // Submitter is the subset of internal/submitter.Submitter the Model depends
@@ -145,11 +146,7 @@ func (m Model) Init() tea.Cmd { return nil }
 // View treats that as "render all rows" so tests without a terminal still
 // see everything.
 func (m Model) rowsPerFrame() int {
-	rpf := m.height - m.headerLines() - footerLines
-	if rpf <= 0 {
-		return 0
-	}
-	return rpf
+	return layout.RowsPerFrame(m.height, m.headerLines(), footerLines)
 }
 
 // headerLines is the height of the rendered header chrome. It is zero in the
@@ -180,32 +177,6 @@ func (m Model) viewWidth() int {
 	return m.width
 }
 
-// clampScrollOffset returns the scrollOffset that keeps cursor visible in the
-// window [offset, offset+rpf) and prevents overscroll past the list tail.
-// rpf <= 0 (pre-WindowSizeMsg) or an empty row set collapse to offset 0.
-func clampScrollOffset(cursor, offset, rowCount, rpf int) int {
-	if rpf <= 0 || rowCount == 0 {
-		return 0
-	}
-	if cursor < offset {
-		offset = cursor
-	}
-	if cursor >= offset+rpf {
-		offset = cursor - rpf + 1
-	}
-	max := rowCount - rpf
-	if max < 0 {
-		max = 0
-	}
-	if offset > max {
-		offset = max
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	return offset
-}
-
 // Update handles inbound messages. Keypress handling forks by mode so search
 // can layer in without disturbing board handling.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -213,8 +184,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.state.Rows), m.rowsPerFrame())
-		m.searchScrollOffset = clampScrollOffset(m.searchCursor, m.searchScrollOffset, len(m.results), m.rowsPerFrame())
+		m.scrollOffset = layout.ClampScrollOffset(m.cursor, m.scrollOffset, len(m.state.Rows), m.rowsPerFrame())
+		m.searchScrollOffset = layout.ClampScrollOffset(m.searchCursor, m.searchScrollOffset, len(m.results), m.rowsPerFrame())
 		return m, nil
 	case submitResultMsg:
 		m.pendingSubmit = false
@@ -260,14 +231,14 @@ func (m Model) updateBoard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.Type == tea.KeyUp:
 		if m.cursor > 0 {
 			m.cursor--
-			m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.state.Rows), m.rowsPerFrame())
+			m.scrollOffset = layout.ClampScrollOffset(m.cursor, m.scrollOffset, len(m.state.Rows), m.rowsPerFrame())
 		}
 		// ↑/↓ preserve inlineError per §19.
 		return m, nil
 	case msg.Type == tea.KeyDown:
 		if m.cursor < len(m.state.Rows)-1 {
 			m.cursor++
-			m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.state.Rows), m.rowsPerFrame())
+			m.scrollOffset = layout.ClampScrollOffset(m.cursor, m.scrollOffset, len(m.state.Rows), m.rowsPerFrame())
 		}
 		return m, nil
 	case matchesReserved(msg, m.state.Reserved.Clipboard):
@@ -469,7 +440,7 @@ func (m Model) refilter() Model {
 	} else {
 		m.highlightedPromptID = ""
 	}
-	m.searchScrollOffset = clampScrollOffset(m.searchCursor, m.searchScrollOffset, len(m.results), m.rowsPerFrame())
+	m.searchScrollOffset = layout.ClampScrollOffset(m.searchCursor, m.searchScrollOffset, len(m.results), m.rowsPerFrame())
 	return m
 }
 
@@ -567,7 +538,7 @@ func (m Model) searchMoveCursor(delta int) Model {
 		return m
 	}
 	m.searchCursor = next
-	m.searchScrollOffset = clampScrollOffset(m.searchCursor, m.searchScrollOffset, len(m.results), m.rowsPerFrame())
+	m.searchScrollOffset = layout.ClampScrollOffset(m.searchCursor, m.searchScrollOffset, len(m.results), m.rowsPerFrame())
 	m.highlightedPromptID = m.results[m.searchCursor].Row.PromptID
 	return m
 }
@@ -670,16 +641,7 @@ func renderRowList(rows []Row, cursor, width, idWidth int) string {
 }
 
 func (m Model) visibleSearchRowRange() (int, int) {
-	rows := len(m.results)
-	rpf := m.rowsPerFrame()
-	if rpf <= 0 || rows <= rpf {
-		return 0, rows
-	}
-	end := m.searchScrollOffset + rpf
-	if end > rows {
-		end = rows
-	}
-	return m.searchScrollOffset, end
+	return layout.VisibleRange(m.searchScrollOffset, len(m.results), m.rowsPerFrame())
 }
 
 // visibleRowRange returns [start, end) of m.state.Rows that fit in the current
@@ -687,16 +649,7 @@ func (m Model) visibleSearchRowRange() (int, int) {
 // the full range so the render-all fallback satisfies pre-WindowSize tests
 // and avoids division-by-zero paths.
 func (m Model) visibleRowRange() (int, int) {
-	rows := len(m.state.Rows)
-	rpf := m.rowsPerFrame()
-	if rpf <= 0 || rows <= rpf {
-		return 0, rows
-	}
-	end := m.scrollOffset + rpf
-	if end > rows {
-		end = rows
-	}
-	return m.scrollOffset, end
+	return layout.VisibleRange(m.scrollOffset, len(m.state.Rows), m.rowsPerFrame())
 }
 
 var selectedStyle = lipgloss.NewStyle().Reverse(true)
@@ -707,8 +660,8 @@ var bannerStyle = lipgloss.NewStyle().Faint(true)
 
 func renderRow(row Row, idWidth, descWidth int) string {
 	key := "[" + displayKey(row.Key) + "]"
-	id := padRight(row.DisplayName(), idWidth)
-	desc := truncateToWidth(row.DisplayDescription(), descWidth)
+	id := layout.PadRight(row.DisplayName(), idWidth)
+	desc := layout.TruncateToWidth(row.DisplayDescription(), descWidth)
 	return fmt.Sprintf("%s  %s  %s", key, id, desc)
 }
 
@@ -720,34 +673,6 @@ func maxIDWidth(rows []Row) int {
 		}
 	}
 	return max
-}
-
-func padRight(s string, width int) string {
-	pad := width - lipgloss.Width(s)
-	if pad <= 0 {
-		return s
-	}
-	return s + strings.Repeat(" ", pad)
-}
-
-// truncateToWidth returns s trimmed so its rendered width does not exceed
-// maxWidth, appending an ellipsis when trimming occurred.
-func truncateToWidth(s string, maxWidth int) string {
-	if maxWidth <= 0 {
-		return ""
-	}
-	if lipgloss.Width(s) <= maxWidth {
-		return s
-	}
-	runes := []rune(s)
-	for len(runes) > 0 {
-		candidate := string(runes) + "…"
-		if lipgloss.Width(candidate) <= maxWidth {
-			return candidate
-		}
-		runes = runes[:len(runes)-1]
-	}
-	return "…"
 }
 
 func (m Model) footer() string {

@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/aurokin/tprompt/internal/searchindex"
+	layout "github.com/aurokin/tprompt/internal/tuilayout"
 )
 
 // footerLines is the fixed chrome subtracted from terminal height to compute
@@ -33,7 +34,7 @@ const (
 // D8: fresh items pre-checked); it is independent of mode and query, so a
 // selection survives entering, filtering in, and leaving search. cursor and
 // scrollOffset index the VISIBLE slice (visible, recomputed by refilter on every
-// query change) with the same clamp math as the board (copied; see package doc).
+// query change) with the same shared clamp math as the board.
 // index is the shared fuzzy core over all items; query is the active filter.
 type Model struct {
 	items    []Item
@@ -134,7 +135,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.visible), m.rowsPerFrame())
+		m.scrollOffset = layout.ClampScrollOffset(m.cursor, m.scrollOffset, len(m.visible), m.rowsPerFrame())
 		return m, nil
 	case tea.KeyMsg:
 		return m.updateKey(msg)
@@ -257,7 +258,7 @@ func (m Model) moveCursor(delta int) Model {
 		return m
 	}
 	m.cursor = next
-	m.scrollOffset = clampScrollOffset(m.cursor, m.scrollOffset, len(m.visible), m.rowsPerFrame())
+	m.scrollOffset = layout.ClampScrollOffset(m.cursor, m.scrollOffset, len(m.visible), m.rowsPerFrame())
 	return m
 }
 
@@ -334,28 +335,18 @@ func (m Model) blockedCount() int {
 // rowsPerFrame returns how many row lines fit in the viewport. Returns 0
 // pre-WindowSizeMsg (height == 0) or when chrome exceeds the window; View
 // treats 0 as "render all rows" so headless tests still see everything.
-// (Copied from internal/tui; see package doc.) The "chrome exceeds the window"
-// case (a 1-2 line terminal renders the whole list rather than clamping) is the
-// board's intentional, documented behavior, deliberately preserved here for
-// parity; the alt-screen picker always receives the real terminal height, so it
-// only arises in a pathological terminal.
 func (m Model) rowsPerFrame() int {
-	rpf := m.height - m.headerLines() - footerLines
-	if rpf <= 0 {
-		return 0
-	}
-	return rpf
+	return layout.RowsPerFrame(m.height, m.headerLines(), footerLines)
 }
 
 // headerLines is the rendered height of the title header, counted so
-// rowsPerFrame reserves exactly the lines View prepends. (Copied from
-// internal/tui's banner accounting; see package doc.)
+// rowsPerFrame reserves exactly the lines View prepends.
 func (m Model) headerLines() int {
 	return lipgloss.Height(m.renderHeader())
 }
 
 // viewWidth is the effective render width: the terminal width once known, or an
-// 80-column default before the first WindowSizeMsg. (Copied from internal/tui.)
+// 80-column default before the first WindowSizeMsg.
 func (m Model) viewWidth() int {
 	if m.width <= 0 {
 		return 80
@@ -363,47 +354,11 @@ func (m Model) viewWidth() int {
 	return m.width
 }
 
-// clampScrollOffset returns the scrollOffset that keeps cursor visible in the
-// window [offset, offset+rpf) and prevents overscroll past the list tail.
-// rpf <= 0 (pre-WindowSizeMsg) or an empty row set collapse to offset 0.
-// (Copied verbatim from internal/tui; see package doc.)
-func clampScrollOffset(cursor, offset, rowCount, rpf int) int {
-	if rpf <= 0 || rowCount == 0 {
-		return 0
-	}
-	if cursor < offset {
-		offset = cursor
-	}
-	if cursor >= offset+rpf {
-		offset = cursor - rpf + 1
-	}
-	max := rowCount - rpf
-	if max < 0 {
-		max = 0
-	}
-	if offset > max {
-		offset = max
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	return offset
-}
-
 // visibleRowRange returns [start, end) of the visible (filtered) items that fit
 // in the viewport. Pre-WindowSizeMsg (rpf == 0) or when every row fits, returns
-// the full range. (Copied from internal/tui.)
+// the full range.
 func (m Model) visibleRowRange() (int, int) {
-	rows := len(m.visible)
-	rpf := m.rowsPerFrame()
-	if rpf <= 0 || rows <= rpf {
-		return 0, rows
-	}
-	end := m.scrollOffset + rpf
-	if end > rows {
-		end = rows
-	}
-	return m.scrollOffset, end
+	return layout.VisibleRange(m.scrollOffset, len(m.visible), m.rowsPerFrame())
 }
 
 // View renders header + visible rows + footer. Structure mirrors the board:
@@ -438,13 +393,13 @@ func (m Model) View() string {
 // chrome accounting is identical in either mode.
 func (m Model) renderHeader() string {
 	if m.mode == modeSearch {
-		return headerStyle.Render(truncateToWidth("/"+m.query, m.viewWidth()))
+		return headerStyle.Render(layout.TruncateToWidth("/"+m.query, m.viewWidth()))
 	}
 	header := fmt.Sprintf("Select snippets to import (%d/%d)", len(m.selectedIDs()), len(m.items))
 	if m.query != "" {
 		header += fmt.Sprintf(" — filtered %q, %d shown", m.query, len(m.visible))
 	}
-	return headerStyle.Render(truncateToWidth(header, m.viewWidth()))
+	return headerStyle.Render(layout.TruncateToWidth(header, m.viewWidth()))
 }
 
 // footer renders two lines: a faint counter (selected / armed-overwrite /
@@ -469,7 +424,7 @@ func (m Model) footer() string {
 	default:
 		hint = fmt.Sprintf("write %d prompts? enter confirm · space toggle · a all · / search · esc cancel", n)
 	}
-	return headerStyle.Render(truncateToWidth(counter, w)) + "\n" + truncateToWidth(hint, w)
+	return headerStyle.Render(layout.TruncateToWidth(counter, w)) + "\n" + layout.TruncateToWidth(hint, w)
 }
 
 var (
@@ -498,16 +453,16 @@ func renderRow(item Item, checked bool, idWidth, width int) string {
 	if labelCol < 0 {
 		labelCol = 0
 	}
-	id := padRight(truncateToWidth(item.ID, idWidth), idWidth)
+	id := layout.PadRight(layout.TruncateToWidth(item.ID, idWidth), idWidth)
 	label := sanitizeLabel(item.Title)
 	if item.Conflict == ConflictCrossPath {
 		label = "also at " + sanitizeLabel(item.Blocker)
 	}
-	label = truncateToWidth(label, labelCol)
+	label = layout.TruncateToWidth(label, labelCol)
 	// Cap the composed line too: the fixed glyph + column gaps are 7 cells, so a
 	// terminal narrower than that would otherwise wrap the row and desync the
 	// one-line-per-row viewport math. Truncating keeps the invariant at any width.
-	return truncateToWidth(fmt.Sprintf("%s  %s  %s", glyphFor(item, checked), id, label), width)
+	return layout.TruncateToWidth(fmt.Sprintf("%s  %s  %s", glyphFor(item, checked), id, label), width)
 }
 
 // glyphFor returns the 3-cell status box for a row: cross-path is always [!]
@@ -552,32 +507,4 @@ func maxIDWidth(items []Item) int {
 		}
 	}
 	return max
-}
-
-// padRight / truncateToWidth are copied from internal/tui (rune-width aware via
-// lipgloss.Width so wide-rune titles align and truncate correctly).
-func padRight(s string, width int) string {
-	pad := width - lipgloss.Width(s)
-	if pad <= 0 {
-		return s
-	}
-	return s + strings.Repeat(" ", pad)
-}
-
-func truncateToWidth(s string, maxWidth int) string {
-	if maxWidth <= 0 {
-		return ""
-	}
-	if lipgloss.Width(s) <= maxWidth {
-		return s
-	}
-	runes := []rune(s)
-	for len(runes) > 0 {
-		candidate := string(runes) + "…"
-		if lipgloss.Width(candidate) <= maxWidth {
-			return candidate
-		}
-		runes = runes[:len(runes)-1]
-	}
-	return "…"
 }

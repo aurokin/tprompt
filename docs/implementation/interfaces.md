@@ -158,8 +158,8 @@ same snippets slice — importing `selected_ids` and folding `overwrite_ids` int
 per-item effective overwrite. Per-item overwrite is exact-target-only and routes
 through the single `writePromptContent` overwrite path, so the writer still refuses a
 cross-path duplicate (exit 3); the picker surfaces policy, it cannot weaken it. The
-small pure scroll/viewport helpers are copied from `internal/tui` (noted in the
-package doc), and the renderer runs with alt-screen so the picker is torn down before
+small pure scroll/viewport/width helpers live in `internal/tuilayout`, and the
+renderer runs with alt-screen so the picker is torn down before
 the command prints created-path lines to stdout. Its `/`-search delegates to the
 shared `internal/searchindex` core (below) over the row's id, title, and tags — so the
 picker gains fuzzy filtering without importing `internal/tui`, keeping its dependency
