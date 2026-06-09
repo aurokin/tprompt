@@ -455,7 +455,7 @@ func TestTUI_BareDispatchInTmuxTTYWithoutOriginPaneExitsUsage(t *testing.T) {
 	root := NewRootCmd(deps)
 	root.SetOut(deps.Stdout)
 	root.SetErr(deps.Stderr)
-	root.SetArgs(dispatchArgs(root, nil, deps.Env, stdinIsTTY, stdinIsTTY, defaultImportSourceName()))
+	root.SetArgs(dispatchArgs(root, nil, deps.Env, stdinIsTTY))
 
 	err := root.Execute()
 	if err == nil {
@@ -488,7 +488,7 @@ func TestTUI_BareDispatchWithFlagInTmuxTTYSucceeds(t *testing.T) {
 	root.SetOut(deps.Stdout)
 	root.SetErr(deps.Stderr)
 	args := []string{"--target-pane", "%0"}
-	root.SetArgs(dispatchArgs(root, args, deps.Env, stdinIsTTY, stdinIsTTY, defaultImportSourceName()))
+	root.SetArgs(dispatchArgs(root, args, deps.Env, stdinIsTTY))
 
 	if err := root.Execute(); err != nil {
 		t.Fatalf("bare --target-pane invocation should succeed via cancel stub, got %v", err)

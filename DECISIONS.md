@@ -426,13 +426,15 @@ files. The contract is locked:
 - **Bare-import dispatch (the §30 analog).** Outside tmux, without a tty, or when
   the invocation's streams cannot host the picker, bare `tprompt import` prints
   help (the source-dispatch parent's default). Inside tmux with an
-  interactive-capable tty (stdin **and** stdout), bare `tprompt import` rewrites
-  to `import <default-source> -i` so the picker opens — mirroring §30's bare
-  `tprompt` → `tui`. The rewrite is a pure arg transform at the top of `RunCLI`
-  before cobra parses flags, and fires **only** for a truly bare import: a named
-  source (`import wispr`), a source flag (`import --dry-run`), or a stray
-  positional (`import bogus`) all pass through untouched, while root persistent
-  flags (`--config x`) are allowed in any position. The stream check mirrors the
+  interactive-capable tty (stdin **and** stdout), bare `tprompt import`
+  dispatches to the default source's interactive picker (`import wispr -i` in
+  effect) — mirroring §30's bare `tprompt` → `tui`. Unlike root `tprompt` →
+  `tui`, the import dispatch runs in the `import` parent's `RunE` after cobra has
+  parsed root persistent flags and accepted the invocation as truly bare. So a
+  named source (`import wispr`), a source flag (`import --dry-run`), a stray
+  positional (`import bogus`), or a malformed root flag (`import --config`) stay
+  cobra-owned and run or fail as typed, while valid root persistent flags
+  (`--config x`) are allowed in any position. The stream check mirrors the
   picker's own preflight (both injected streams must be ttys), so a redirected
   stdout (`tprompt import >out.txt`) falls back to help rather than failing the
   `-i` tty preflight.

@@ -30,9 +30,12 @@ prompts. Pick a source subcommand:
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			// Bare `tprompt import` (no source) prints help when not dispatched.
-			// In tmux+tty, dispatchArgs rewrites it to `import <default> -i`
-			// (DECISIONS §30/§34) before cobra runs; outside tmux/tty it lands
-			// here and prints help.
+			// In tmux+tty, the parent dispatches to the default source's
+			// interactive path (DECISIONS §30/§34) after cobra parses root flags;
+			// outside tmux/tty it lands here and prints help.
+			if src := defaultImportSource(); src != nil && canRunBareInteractiveImport(deps) {
+				return src.RunDefaultInteractive(deps)
+			}
 			return c.Help()
 		},
 	}
@@ -43,6 +46,13 @@ prompts. Pick a source subcommand:
 		cmd.AddCommand(src.NewCommand(deps))
 	}
 	return cmd
+}
+
+func canRunBareInteractiveImport(deps Deps) bool {
+	return deps.Env("TMUX") != "" &&
+		stdinIsTTY() &&
+		streamIsTTY(deps.Stdin) &&
+		streamIsTTY(deps.Stdout)
 }
 
 func newImportWisprCmd(deps Deps) *cobra.Command {

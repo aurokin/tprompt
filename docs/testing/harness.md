@@ -262,8 +262,10 @@ through an `ImportSource` seam (interfaces.md). The seam is proved without the
 wispr type: a test-only `fakeRecord`/`fakeImportSource` imports through the same
 engine (`runImport`) — confirming a registry entry yields a working subcommand and
 that disambiguation uses the record's own `Disambiguator()`. The bare-import
-dispatch (`dispatchArgs`, DECISIONS §34) is a pure arg-rewrite unit-tested over its
-full branch set.
+dispatch (DECISIONS §34) is tested through the real cobra command tree: cobra owns
+root persistent flags, unknown source flags, explicit source names, stray
+positionals, and malformed flags, while the import parent dispatches only after a
+truly bare invocation reaches its `RunE`.
 
 `internal/importtui` is a sibling of `internal/tui` (neither imports the other);
 its pure model/view tests mirror the board's — toggle/select-all/confirm/cancel
@@ -328,10 +330,10 @@ Assert:
   through the shared engine, and two records minting the same id are disambiguated
   by the record's own `Disambiguator()` (collision policy names no source type);
   the registry's default source is `wispr` and wires the `import wispr` subcommand
-- bare-import dispatch (`dispatchArgs`): inside tmux + interactive tty, bare
-  `import` rewrites to `import wispr -i`, with root flags surviving in any position
+- bare-import dispatch: inside tmux + interactive tty, bare `import` dispatches to
+  the default source's interactive path, with root flags surviving in any position
   (`--config x import`, `import --config x`, even `--config import import`); it does
-  **not** rewrite a named source (`import wispr`), a source flag (`import
+  **not** dispatch a named source (`import wispr`), a source flag (`import
   --dry-run`), a stray positional (`import bogus`/`import import`), a dangling
   value-taking root flag (`import --config`), an empty default-source registry, or
   a non-interactive stream (redirected stdout / injected non-tty); outside tmux or
