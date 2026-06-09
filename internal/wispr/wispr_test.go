@@ -114,9 +114,11 @@ func TestToPrompt_EmitsFullScaffoldFieldSet(t *testing.T) {
 	}
 }
 
-func TestToPrompt_BodyEqualsReplacementByteForByte(t *testing.T) {
+func TestToPrompt_BodyMatchesReplacementThroughTrimContract(t *testing.T) {
 	// Pin the promptmeta trim interaction for whitespace-bearing replacements:
 	// the single trailing newline ToPrompt appends is exactly what Parse strips.
+	// A replacement ending in bare '\r' is tested separately because the appended
+	// '\n' forms a trailing CRLF, which promptmeta trims as one line break.
 	cases := map[string]string{
 		"plain":            "Review this code.",
 		"multiline":        "line1\nline2",
@@ -142,6 +144,21 @@ func TestToPrompt_BodyEqualsReplacementByteForByte(t *testing.T) {
 				t.Errorf("body = %q, want %q", parsed.Body, replacement)
 			}
 		})
+	}
+}
+
+func TestToPrompt_BareCRTailFollowsPromptmetaTrimContract(t *testing.T) {
+	s := Snippet{ID: "id", Phrase: "phrase", Replacement: "abc\r"}
+	_, md, ok := s.ToPrompt("wispr")
+	if !ok {
+		t.Fatal("ToPrompt ok = false, want true")
+	}
+	parsed, err := promptmeta.Parse(md)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if parsed.Body != "abc" {
+		t.Errorf("body = %q, want %q after trailing CRLF trim", parsed.Body, "abc")
 	}
 }
 

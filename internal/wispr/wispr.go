@@ -113,7 +113,9 @@ func (s Snippet) ToPrompt(tag string) (id string, markdown []byte, ok bool) {
 	// break, so this blank line (not the replacement's own first byte) absorbs the
 	// leading trim — preserving a replacement that itself starts with a newline —
 	// and the trailing newline absorbs the trailing trim. Net: the delivered body
-	// equals Replacement byte-for-byte.
+	// matches Replacement through promptmeta's one-break trim contract; the only
+	// known byte-level exception is a replacement ending in bare '\r', which joins
+	// the appended '\n' into a trailing CRLF that promptmeta trims as one break.
 	b.WriteString("\n")
 	b.WriteString(s.Replacement)
 	b.WriteString("\n")
