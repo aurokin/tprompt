@@ -144,9 +144,7 @@ func dispatchArgs(root *cobra.Command, args []string, env func(string) string, s
 		// otherwise free at root — verified by version_flag.txtar). We match the
 		// canonical bare spellings only; degenerate forms such as `--version=true`,
 		// or a `--config -h` whose `-h` is merely the config value, are
-		// intentionally not distinguished. This guard is scoped to the root path:
-		// the import rewrite below needs no equivalent because bareImportArgs reads
-		// `-h`/`-v` correctly as a root flag's value, not a help request.
+		// intentionally not distinguished.
 		for _, a := range args {
 			if a == "--help" || a == "-h" || a == "--version" || a == "-v" {
 				return args

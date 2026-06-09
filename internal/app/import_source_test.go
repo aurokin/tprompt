@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// fakeRecord is a non-wispr ImportRecord, proving the import engine is generic
-// over the record type (it never names wispr.Snippet).
+// fakeRecord is a non-wispr ImportRecord, proving the import engine is
+// source-neutral (it never names wispr.Snippet).
 type fakeRecord struct {
 	id     string
 	disamb string
@@ -46,7 +46,9 @@ func (s fakeImportSource) NewCommand(deps Deps) *cobra.Command {
 		Use:  "fake",
 		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			return runImport(deps, flags, func() ([]fakeRecord, error) { return s.records, nil })
+			return runImport(deps, flags, func() ([]ImportRecord, error) {
+				return fakeImportRecords(s.records), nil
+			})
 		},
 	}
 	cmd.Flags().BoolVar(&flags.project, "project", false, "")
@@ -58,9 +60,17 @@ func (s fakeImportSource) NewCommand(deps Deps) *cobra.Command {
 }
 
 func (s fakeImportSource) RunDefaultInteractive(deps Deps) error {
-	return runImport(deps, importFlags{tag: "fake", interactive: true}, func() ([]fakeRecord, error) {
-		return s.records, nil
+	return runImport(deps, importFlags{tag: "fake", interactive: true}, func() ([]ImportRecord, error) {
+		return fakeImportRecords(s.records), nil
 	})
+}
+
+func fakeImportRecords(records []fakeRecord) []ImportRecord {
+	out := make([]ImportRecord, 0, len(records))
+	for _, rec := range records {
+		out = append(out, rec)
+	}
+	return out
 }
 
 // executeImportSource builds an `import` parent carrying just the given source's
@@ -101,7 +111,7 @@ func TestImportSource_RegistryEntryYieldsWorkingSubcommand(t *testing.T) {
 func TestImportSource_EngineUsesRecordDisambiguator(t *testing.T) {
 	// Two fake records minting the same base id must be disambiguated with the
 	// record's OWN Disambiguator() (not anything wispr-specific): the second is
-	// suffixed with its disambiguator, proving the collision policy is generic.
+	// suffixed with its disambiguator, proving the collision policy is source-neutral.
 	dir := t.TempDir()
 	deps := newCmdDeps(t, dir)
 	src := fakeImportSource{records: []fakeRecord{

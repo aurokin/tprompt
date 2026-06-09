@@ -33,8 +33,8 @@ prompts. Pick a source subcommand:
 			// In tmux+tty, the parent dispatches to the default source's
 			// interactive path (DECISIONS §30/§34) after cobra parses root flags;
 			// outside tmux/tty it lands here and prints help.
-			if src := defaultImportSource(); src != nil && canRunBareInteractiveImport(deps) {
-				return src.RunDefaultInteractive(deps)
+			if canRunBareInteractiveImport(deps) {
+				return defaultImportSource().RunDefaultInteractive(deps)
 			}
 			return c.Help()
 		},
@@ -124,13 +124,25 @@ func (*InteractiveDryRunConflictError) Error() string {
 // The DB read is deferred into the producer so runImport's interactive preflight
 // still runs before any side effect.
 func runImportWispr(deps Deps, dbPath string, flags importFlags) error {
-	return runImport(deps, flags, func() ([]wispr.Snippet, error) {
+	return runImport(deps, flags, func() ([]ImportRecord, error) {
 		resolved, err := resolveWisprDBPath(deps, dbPath)
 		if err != nil {
 			return nil, err
 		}
-		return deps.NewWisprReader(resolved).Snippets()
+		snippets, err := deps.NewWisprReader(resolved).Snippets()
+		if err != nil {
+			return nil, err
+		}
+		return wisprImportRecords(snippets), nil
 	})
+}
+
+func wisprImportRecords(snippets []wispr.Snippet) []ImportRecord {
+	records := make([]ImportRecord, 0, len(snippets))
+	for _, snippet := range snippets {
+		records = append(records, snippet)
+	}
+	return records
 }
 
 // runImport is the source-agnostic import engine. produce yields the source's
@@ -139,7 +151,7 @@ func runImportWispr(deps Deps, dbPath string, flags importFlags) error {
 // opening a database. A nil picker means a non-interactive run. The whole pipeline
 // — config, destination prep, classification, write, summary — is identical for any
 // source; only produce() varies, which is the seam.
-func runImport[R ImportRecord](deps Deps, flags importFlags, produce func() ([]R, error)) error {
+func runImport(deps Deps, flags importFlags, produce func() ([]ImportRecord, error)) error {
 	picker, err := interactivePicker(deps, flags)
 	if err != nil {
 		return err
@@ -242,7 +254,7 @@ func interactivePicker(deps Deps, flags importFlags) (importtui.Renderer, error)
 // outcome — cancel, deselect-all, zero fresh rows, or a selection that all
 // re-classifies to a skip while the picker was open — leaves no empty directory
 // behind, honoring the cancel/no-op = "writes nothing" contract even under a race.
-func runInteractiveImport[R ImportRecord](deps Deps, picker importtui.Renderer, source promptsource.Source, collisionSources []promptsource.Source, records []R, flags importFlags) error {
+func runInteractiveImport(deps Deps, picker importtui.Renderer, source promptsource.Source, collisionSources []promptsource.Source, records []ImportRecord, flags importFlags) error {
 	sel := &importSelection{write: map[string]bool{}, overwrite: map[string]bool{}}
 	if items := pickerItems(dryRunPlan(source, collisionSources, records, flags), flags.tag); len(items) > 0 {
 		result, err := picker.Run(importtui.State{Items: items})
@@ -343,7 +355,7 @@ func pickerItems(plan []planItem, tag string) []importtui.Item {
 // a §4 hard error the user could not act on, while an explicit overwrite intent
 // keeps the writer authoritative. confirm-all therefore writes the same fresh-item
 // bytes as a non-interactive run when no conflicts exist.
-func importSnippets[R ImportRecord](deps Deps, source promptsource.Source, collisionSources []promptsource.Source, records []R, flags importFlags, sel *importSelection) (imported, skipped int, err error) {
+func importSnippets(deps Deps, source promptsource.Source, collisionSources []promptsource.Source, records []ImportRecord, flags importFlags, sel *importSelection) (imported, skipped int, err error) {
 	claimed := map[string]bool{}
 	interactive := sel != nil
 	destReady := false
@@ -478,7 +490,7 @@ type planItem struct {
 // classification error (collision walk failure, path resolution) is captured on its
 // item as planClassifyError, so a full plan always exists for the TUI to show rather
 // than aborting plan construction.
-func dryRunPlan[R ImportRecord](source promptsource.Source, collisionSources []promptsource.Source, records []R, flags importFlags) []planItem {
+func dryRunPlan(source promptsource.Source, collisionSources []promptsource.Source, records []ImportRecord, flags importFlags) []planItem {
 	claimed := map[string]bool{}
 	plan := make([]planItem, 0, len(records))
 	for _, rec := range records {
@@ -511,7 +523,7 @@ type importSelection struct {
 // same promptCollision check, so an armed id with a same-id prompt at another path
 // stays planCrossPath — arming cannot create a §4/§18 duplicate. sel == nil
 // (non-interactive) leaves the effective overwrite at flags.overwrite, byte-identical.
-func classifySnippet[R ImportRecord](source promptsource.Source, collisionSources []promptsource.Source, rec R, flags importFlags, claimed map[string]bool, sel *importSelection) planItem {
+func classifySnippet(source promptsource.Source, collisionSources []promptsource.Source, rec ImportRecord, flags importFlags, claimed map[string]bool, sel *importSelection) planItem {
 	id, content, ok := rec.ToPrompt(flags.tag)
 	if !ok {
 		// A skipped (empty-body) record is never written, so it must not claim a

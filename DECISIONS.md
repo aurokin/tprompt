@@ -421,14 +421,15 @@ files. The contract is locked:
   `/mnt/c/Users/<you>/AppData/Roaming/Wispr Flow/flow.sqlite`); `--db-path` is
   checked before the OS lookup, so it is a universal escape hatch on every platform.
 - **Source seam.** Sources implement a small `ImportSource` interface (`Name` +
-  `NewCommand`) and self-register in a package-level registry; the first entry is
-  the bare-import dispatch default (`wispr`). The ingest engine is generic over an
-  `ImportRecord` interface (`ToPrompt`/`Tags`/`Title`/`Disambiguator`), so the
-  classification, deterministic disambiguation, and picker labelling name no
-  source-specific type. `wispr` is the sole built-in implementer today; the seam
-  exists so a second source is **additive** — register an entry and supply records;
-  the engine and dispatch are unchanged. (Adopted in AUR-531 with the dispatch
-  below, ahead of a second source, by explicit decision.)
+  `NewCommand`) and self-register in a package-level, non-empty registry; the
+  first entry is the bare-import dispatch default (`wispr`). Source commands
+  produce `ImportRecord` values (`ToPrompt`/`Tags`/`Title`/`Disambiguator`) for
+  the shared ingest engine, so classification, deterministic disambiguation, and
+  picker labelling name no source-specific type. `wispr` is the sole built-in
+  implementer today; the seam exists so a second source is **additive** —
+  register an entry and supply records; the engine and dispatch are unchanged.
+  (Adopted in AUR-531 with the dispatch below, ahead of a second source, by
+  explicit decision.)
 - **Bare-import dispatch (the §30 analog).** Outside tmux, without a tty, or when
   the invocation's streams cannot host the picker, bare `tprompt import` prints
   help (the source-dispatch parent's default). Inside tmux with an

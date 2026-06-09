@@ -5,8 +5,8 @@ import "github.com/spf13/cobra"
 // ImportRecord is one prompt-shaped item an import source yields, reduced to
 // exactly what the source-agnostic import engine (classifySnippet / dryRunPlan /
 // importSnippets) needs. wispr.Snippet satisfies it structurally, and any future
-// source's record type does too — that is what lets the engine be generic over
-// the source (it never names wispr.Snippet).
+// source's record type can too — source commands box their concrete records into
+// this interface at the source boundary before handing them to the shared engine.
 type ImportRecord interface {
 	// ToPrompt maps the record to a prompt id (filename stem) and markdown file
 	// content; ok is false when the record has no usable body (skip it).
@@ -39,26 +39,20 @@ type ImportSource interface {
 	RunDefaultInteractive(deps Deps) error
 }
 
-// importSourceRegistry is the ordered list of import origins. The first entry is
-// the default for the bare-`import` dispatch (DECISIONS §30/§34). It is read-only:
-// newImportCmd ranges over it and dispatch reads its first name (via
+// importSourceRegistry is the ordered, non-empty list of import origins. The first
+// entry is the default for the bare-`import` dispatch (DECISIONS §30/§34). It is
+// read-only: newImportCmd ranges over it and dispatch reads its first name (via
 // defaultImportSourceName). A second source is added here, plus its implementer.
 var importSourceRegistry = []ImportSource{wisprImportSource{}}
 
 // defaultImportSourceName is the source bare `tprompt import` dispatches to in
-// tmux+tty. Empty when the registry is empty (then dispatch does not rewrite).
+// tmux+tty. The registry is a non-empty built-in literal, so the first entry is
+// the locked default.
 func defaultImportSourceName() string {
-	src := defaultImportSource()
-	if src == nil {
-		return ""
-	}
-	return src.Name()
+	return defaultImportSource().Name()
 }
 
 func defaultImportSource() ImportSource {
-	if len(importSourceRegistry) == 0 {
-		return nil
-	}
 	return importSourceRegistry[0]
 }
 

@@ -57,7 +57,7 @@ belong in Linear milestones, not in the repo.
 - [CLI commands](commands/cli.md#tprompt-import-wispr) - `import wispr` behavior, flags, and exit codes (and the bare-`import` dispatch).
 - [Locked decisions §34](../DECISIONS.md#34-wispr-flow-snippet-import) - the import contract (read-only driver, id minting, skip-existing, error taxonomy, source seam, bare-import dispatch).
 - [Behavior contract](../EXPECTATIONS.md#import) - user-visible import guarantees.
-- [Import source seam](implementation/interfaces.md#import-source-seam) - the `ImportSource`/`ImportRecord` interfaces to add a new source (the engine is generic).
+- [Import source seam](implementation/interfaces.md#import-source-seam) - the `ImportSource`/`ImportRecord` interfaces to add a new source.
 - [Interactive picker](implementation/interfaces.md#import-tui) - the `importtui` conflict-review picker for `import wispr -i`.
 - [Search index (shared fuzzy core)](implementation/interfaces.md#search-index-shared-fuzzy-core) - the picker's `/`-search ranking, shared with the board.
 - [Wispr import reader](implementation/interfaces.md#wispr-import-reader) - the `wispr.Reader` seam and `Deps.NewWisprReader` injection.

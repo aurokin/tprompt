@@ -228,17 +228,18 @@ ImportRecord
 
 Two interfaces keep the import subsystem source-agnostic (`internal/app`). An
 `ImportSource` is a registry entry — it names itself and builds its own cobra
-subcommand under the `import` parent; a package-level slice lists the built-ins and
-its first entry is the bare-import dispatch default (DECISIONS §34). The ingest
-engine (`runImport[R ImportRecord]`) is generic over `ImportRecord`, so
+subcommand under the `import` parent; a package-level, non-empty slice lists the
+built-ins and its first entry is the bare-import dispatch default (DECISIONS
+§34). Source commands feed `[]ImportRecord` to the ingest engine, so
 classification, deterministic disambiguation (`Disambiguator()`), and picker
 labelling (`Title()`/`Tags()`) name no concrete source type. `wispr` is the only
-built-in today: `wisprImportSource.NewCommand` wires `import wispr` and feeds
-`wispr.Snippet` (which satisfies `ImportRecord`) into the shared engine. A second
-source is additive — register an `ImportSource` and pass its records to
-`runImport`; the engine, the collision policy, and the dispatch are untouched. The
-seam is proved by a test-only `fakeRecord`/`fakeImportSource` that imports through
-the same engine without naming `wispr` (`internal/app/import_source_test.go`).
+built-in today: `wisprImportSource.NewCommand` wires `import wispr`, reads
+`wispr.Snippet` values, boxes them as `ImportRecord`, and passes them into the
+shared engine. A second source is additive — register an `ImportSource` and pass
+its records to `runImport`; the engine, the collision policy, and the dispatch are
+untouched. The seam is proved by a test-only `fakeRecord`/`fakeImportSource` that
+imports through the same engine without naming `wispr`
+(`internal/app/import_source_test.go`).
 
 ## Wispr import reader
 
