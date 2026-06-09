@@ -42,21 +42,17 @@ type Reader interface {
 // marshaling them as empty strings would emit `enter: ""`, which then fails to
 // unmarshal back into promptmeta.Meta's *bool Enter field and would make every
 // imported prompt unloadable. A bare `enter:` decodes as null → nil, the
-// intended "unset". The new↔import field-set parity is guarded by a test in
-// internal/app.
-func buildFrontmatter(phrase string, tags []string) ([]byte, error) {
-	titleFM, err := yaml.Marshal(struct {
+// intended "unset". Marshal cannot fail for these fixed string / []string
+// structs; if that invariant changes, the importer is broken rather than looking
+// at an unimportable snippet. The new↔import field-set parity is guarded by a
+// test in internal/app.
+func buildFrontmatter(phrase string, tags []string) []byte {
+	titleFM := mustYAMLMarshal(struct {
 		Title string `yaml:"title"`
 	}{Title: phrase})
-	if err != nil {
-		return nil, err
-	}
-	tagsFM, err := yaml.Marshal(struct {
+	tagsFM := mustYAMLMarshal(struct {
 		Tags []string `yaml:"tags,flow"`
 	}{Tags: tags})
-	if err != nil {
-		return nil, err
-	}
 
 	var b strings.Builder
 	b.Write(titleFM) // title: <phrase>\n
@@ -65,7 +61,20 @@ func buildFrontmatter(phrase string, tags []string) ([]byte, error) {
 	b.WriteString("key:\n")
 	b.WriteString("mode:\n")
 	b.WriteString("enter:\n")
-	return []byte(b.String()), nil
+	return []byte(b.String())
+}
+
+func mustYAMLMarshal(v any) (out []byte) {
+	defer func() {
+		if recover() != nil {
+			panic("wispr frontmatter marshal invariant violated")
+		}
+	}()
+	out, err := yaml.Marshal(v)
+	if err != nil {
+		panic("wispr frontmatter marshal invariant violated")
+	}
+	return out
 }
 
 // Tags is the provenance tag set stamped on the imported prompt: the supplied
@@ -97,12 +106,7 @@ func (s Snippet) ToPrompt(tag string) (id string, markdown []byte, ok bool) {
 	if strings.TrimSpace(s.Replacement) == "" {
 		return id, nil, false
 	}
-	fm, err := buildFrontmatter(s.Phrase, s.Tags(tag))
-	if err != nil {
-		// title/tags are the only marshaled fields and Marshal cannot fail in
-		// practice. Treat the impossible failure as unimportable rather than panic.
-		return "", nil, false
-	}
+	fm := buildFrontmatter(s.Phrase, s.Tags(tag))
 
 	var b strings.Builder
 	b.WriteString("---\n")
