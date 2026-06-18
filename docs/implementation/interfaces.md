@@ -55,6 +55,27 @@ Sanitizer
 - Process(content []byte) -> []byte, error
 ```
 
+## Prompt template renderer
+
+```text
+TemplateRenderer
+- Validate(prompt Prompt) -> error
+- Defaults(vars []TemplateVariable) -> map<string,string>
+- Render(body string, vars []TemplateVariable, values map<string,string>) -> string | error
+
+TemplateVariable {
+  name: string
+  label: string?
+  description: string?
+  default: string
+  required: bool
+}
+```
+
+The renderer is deliberately not a general template engine. It supports only
+frontmatter-declared string variables and `{{name}}` substitution, with `\{{` for
+a literal opening delimiter.
+
 ## Picker (external)
 
 ```text
@@ -101,6 +122,7 @@ ReservedBinding {
 TUIResult {
   action: "prompt" | "clipboard" | "cancel"
   prompt_id: string?               // when action == "prompt"
+  template_values: map<string,string>? // collected TUI values for templated prompts
   clipboard_body: []byte?          // when action == "clipboard"
 }
 
@@ -112,12 +134,21 @@ TUIModelDeps {
 }
 ```
 
-The production TUI model owns recoverable selection handling. It resolves prompt bodies, reads clipboard content, validates `max_paste_bytes`, and invokes the injected `Submitter` via a Bubble Tea command. `Renderer.Run` returns the final `TUIResult` plus any submit error so the command layer can apply normal exit-code mapping.
+The production TUI model owns recoverable selection handling. It resolves prompt
+bodies, collects frontmatter-declared template variables one at a time, reads
+clipboard content, validates `max_paste_bytes`, and invokes the injected
+`Submitter` via a Bubble Tea command. `Renderer.Run` returns the final
+`TUIResult` plus any submit error so the command layer can apply normal
+exit-code mapping.
 
 ```text
 Submitter
 - Submit(result TUIResult) -> error
 ```
+
+For prompt results, the submitter resolves the prompt again, renders the body
+with `template_values`, checks the rendered size, and constructs the delivery
+job. For clipboard results, it validates and forwards the captured bytes.
 
 ## Import TUI
 

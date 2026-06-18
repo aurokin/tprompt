@@ -24,7 +24,6 @@ func TestRootLongDescribesWorkflows(t *testing.T) {
 func TestRootLongAvoidsUnsupportedBehavior(t *testing.T) {
 	root := NewRootCmd(fakeDeps(t))
 	assertLongAvoids(t, "tprompt", root.Long, []string{
-		"templat",  // no prompt templating
 		"remote",   // local-only delivery
 		"modifier", // single-char keybinds only
 		"preview",  // no live clipboard preview
@@ -42,7 +41,7 @@ func TestSubcommandHelpText(t *testing.T) {
 		{
 			path:   []string{"send"},
 			want:   []string{"synchronous", "does not use handoff"},
-			banned: []string{"templat", "remote"},
+			banned: []string{"remote"},
 		},
 		{
 			path:   []string{"paste"},
@@ -61,7 +60,7 @@ func TestSubcommandHelpText(t *testing.T) {
 		{
 			path:   []string{"tui"},
 			want:   []string{"handoff", "--target-pane"},
-			banned: []string{"templat"},
+			banned: nil,
 		},
 	}
 

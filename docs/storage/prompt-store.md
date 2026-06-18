@@ -39,6 +39,7 @@ Supported keys:
 - `mode` — delivery default (`paste` | `type`)
 - `enter` — delivery default (bool)
 - `key` — single printable character for the TUI keybind board
+- `variables` — ordered list of string template inputs
 
 Unsupported keys are ignored.
 Invalid `mode` values are a hard error at load time.
@@ -55,6 +56,7 @@ were absent:
   against `{paste, type}` (anything else remains a hard error).
 - `tags:` (no value) and `tags: []` both decode to an empty list.
 - `enter:` (no value) decodes to nil — config-level default applies.
+- `variables:` (no value) and `variables: []` both decode to an empty list.
 - `title: ""` and `description: ""` are still accepted as legal display
   values; behaviour is unchanged.
 
@@ -63,9 +65,10 @@ This rule is a strict relaxation: nothing previously valid becomes invalid.
 ### Imported prompt frontmatter parity
 
 `tprompt import wispr` writes the **same** frontmatter field set that `tprompt
-new` scaffolds (`title`, `description`, `tags`, `key`, `mode`, `enter`, in that
-order): only `title`/`tags` are populated from the snippet and the rest are
-emitted as empty stubs, so an imported prompt is as editable as a scaffolded one.
+new` scaffolds (`title`, `description`, `tags`, `key`, `mode`, `enter`,
+`variables`, in that order): only `title`/`tags` are populated from the snippet
+and the rest are emitted as empty stubs, so an imported prompt is as editable as
+a scaffolded one.
 The snippet-controlled fields are YAML-marshaled (never string-templated), and the
 body passes the same [Body trimming](#body-trimming) contract — imported bodies
 are byte-for-byte *through* that trim, not raw verbatim bytes. The `new`↔import
@@ -85,6 +88,51 @@ Case sensitivity: `key: c` and `key: C` are the **same** key. The system normali
 
 Keys outside the auto-assign pool (`1 2 3 4 5 q e r f g t z x c`) are allowed in frontmatter. A user may pin `key: m` and it takes a board slot using the character `m`.
 
+## Template variables
+
+`variables` declares ordered string inputs for the prompt body. A prompt becomes
+templated only when this list is non-empty; prompts without variables may contain
+literal `{{...}}` text without special handling.
+
+Example:
+
+```yaml
+variables:
+  - name: issue-id
+    label: Issue
+    description: Linear issue identifier
+    default: AUR-123
+    required: true
+  - name: focus
+    default: correctness and tests
+```
+
+Variable fields:
+
+- `name` — required; lowercase kebab-case (`issue`, `issue-id`, `p0-context`)
+- `label` — optional TUI display label; falls back to `name`
+- `description` — optional TUI helper text
+- `default` — optional string value used when the CLI/TUI provides no override
+- `required` — optional bool; when true, the final value must not be empty or whitespace
+
+Validation rules:
+
+- Variable names must be unique within the prompt.
+- Variable names must not collide with built-in `send` or root flags:
+  `mode`, `enter`, `target-pane`, `sanitize`, `config`, `help`, `h`, or
+  `version`.
+- Placeholder syntax is `{{name}}`; spaces inside the braces are tolerated
+  (`{{ name }}`).
+- `\{{name}}` renders as the literal text `{{name}}`.
+- A placeholder in a templated prompt must name a declared variable. Unknown,
+  malformed, empty, or unclosed placeholders are prompt-store errors.
+- Every declared variable must be used by at least one unescaped placeholder in
+  the body. Unused declarations are prompt-store errors.
+
+Rendering happens before `max_paste_bytes` validation and before sanitization.
+The rendered markdown body is the content delivered by `send` or written into a
+TUI handoff job.
+
 ## Keybind assignment
 
 Two-stage process, deterministic given the same prompt set:
@@ -95,9 +143,11 @@ Two-stage process, deterministic given the same prompt set:
 
 ## Injected content
 
-Only the markdown body is injected.
+Only the rendered markdown body is injected.
 
-Frontmatter is never injected.
+Frontmatter is never injected. For non-template prompts, "rendered" means the
+trimmed body unchanged. For templated prompts, it means the body after
+frontmatter-declared variables have been substituted.
 
 ### Body trimming
 
@@ -132,9 +182,12 @@ tags: [review, code]
 key: c
 mode: paste
 enter: false
+variables:
+  - name: focus
+    default: correctness, risk, and missing tests
 ---
 
-Review this code for correctness, risk, and missing tests.
+Review this code for {{focus}}.
 ```
 
 Injected text:

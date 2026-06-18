@@ -1,6 +1,9 @@
 # Sanitization
 
-Optional content-sanitization layer that runs between source (prompt body or clipboard) and tmux adapter. Controls whether terminal escape sequences inside the payload are forwarded, stripped, or cause the delivery to be rejected.
+Optional content-sanitization layer that runs between source (rendered prompt
+body or clipboard) and tmux adapter. Controls whether terminal escape sequences
+inside the payload are forwarded, stripped, or cause the delivery to be
+rejected.
 
 ## Modes
 
@@ -16,7 +19,9 @@ Both `safe` and `strict` require fixture-backed tests (see `docs/testing/harness
 
 ## Scope
 
-The same mode applies to both `tprompt paste` and `tprompt send <id>`. There is **no** per-source override — one policy, one code path.
+The same mode applies to both `tprompt paste` and `tprompt send <id>`. For
+templated prompts, sanitization sees the rendered body. There is **no**
+per-source override — one policy, one code path.
 
 ## Sequence classes
 

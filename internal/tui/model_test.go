@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/aurokin/tprompt/internal/clipboard"
+	"github.com/aurokin/tprompt/internal/prompttmpl"
 	"github.com/aurokin/tprompt/internal/store"
 )
 
@@ -43,6 +44,8 @@ func keyMsg(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyDown}
 	case "tab":
 		return tea.KeyMsg{Type: tea.KeyTab}
+	case "shift+tab":
+		return tea.KeyMsg{Type: tea.KeyShiftTab}
 	case "enter":
 		return tea.KeyMsg{Type: tea.KeyEnter}
 	case "space":
@@ -515,8 +518,9 @@ func (f *fakeSubmitter) Submit(r Result) error {
 }
 
 type fakeStore struct {
-	bodies map[string]string
-	err    error
+	bodies  map[string]string
+	prompts map[string]store.Prompt
+	err     error
 }
 
 func (f *fakeStore) Discover() error                { return nil }
@@ -524,6 +528,13 @@ func (f *fakeStore) List() ([]store.Summary, error) { return nil, nil }
 func (f *fakeStore) Resolve(id string) (store.Prompt, error) {
 	if f.err != nil {
 		return store.Prompt{}, f.err
+	}
+	if f.prompts != nil {
+		p, ok := f.prompts[id]
+		if !ok {
+			return store.Prompt{}, &store.NotFoundError{ID: id}
+		}
+		return p, nil
 	}
 	body, ok := f.bodies[id]
 	if !ok {
@@ -610,6 +621,231 @@ func TestUpdate_BoundKeyUppercaseAlsoSubmits(t *testing.T) {
 	}
 	if len(sub.calls) != 1 || sub.calls[0].PromptID != "code-review" {
 		t.Fatalf("Submitter.Submit calls = %+v, want one call for code-review", sub.calls)
+	}
+}
+
+func TestUpdate_TemplatedPromptEntersInputMode(t *testing.T) {
+	sub := &fakeSubmitter{}
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID: "code-review",
+				Variables: []prompttmpl.Variable{{
+					Name:        "issue",
+					Label:       "Issue",
+					Description: "Linear issue id",
+					Required:    true,
+				}},
+			},
+			Body: "Review {{issue}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: sub, Store: st, MaxPasteBytes: 1 << 20})
+
+	next, cmd := m.Update(keyMsg("c"))
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("template selection must not submit immediately, got cmd %T", cmd())
+	}
+	if got.mode != modeTemplate {
+		t.Fatalf("mode = %v, want modeTemplate", got.mode)
+	}
+	if got.templatePromptID != "code-review" || got.templateInput != "" {
+		t.Fatalf("template state = id %q input %q", got.templatePromptID, got.templateInput)
+	}
+	if len(sub.calls) != 0 {
+		t.Fatalf("Submitter.Submit called %d times, want 0", len(sub.calls))
+	}
+	out := got.View()
+	if !strings.Contains(out, "code-review  [1/1]") || !strings.Contains(out, "Issue *") ||
+		!strings.Contains(out, "Linear issue id") {
+		t.Fatalf("template view missing prompt/variable context:\n%s", out)
+	}
+}
+
+func TestUpdate_TemplateRequiredValueStaysInline(t *testing.T) {
+	sub := &fakeSubmitter{}
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID:        "code-review",
+				Variables: []prompttmpl.Variable{{Name: "issue", Label: "Issue", Required: true}},
+			},
+			Body: "Review {{issue}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: sub, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(keyMsg("c"))
+	m = next.(Model)
+
+	next, cmd := m.Update(keyMsg("enter"))
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("missing required value must not submit, got cmd %T", cmd())
+	}
+	if got.mode != modeTemplate {
+		t.Fatalf("mode = %v, want modeTemplate", got.mode)
+	}
+	if !strings.Contains(got.inlineError, "Issue is required") {
+		t.Fatalf("inlineError = %q", got.inlineError)
+	}
+	if len(sub.calls) != 0 {
+		t.Fatalf("Submitter.Submit called %d times, want 0", len(sub.calls))
+	}
+}
+
+func TestUpdate_TemplateCollectsValuesAndSubmits(t *testing.T) {
+	sub := &fakeSubmitter{}
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID: "code-review",
+				Variables: []prompttmpl.Variable{
+					{Name: "issue", Required: true},
+					{Name: "focus", Default: "correctness"},
+				},
+			},
+			Body: "Review {{issue}} for {{focus}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: sub, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(keyMsg("c"))
+	m = next.(Model)
+
+	next, _ = m.Update(keyMsg("AUR-123"))
+	m = next.(Model)
+	next, cmd := m.Update(keyMsg("enter"))
+	m = next.(Model)
+	if cmd != nil {
+		t.Fatalf("first value should advance only, got cmd %T", cmd())
+	}
+	if m.templateIndex != 1 || m.templateInput != "correctness" {
+		t.Fatalf("template index/input = %d/%q, want second default", m.templateIndex, m.templateInput)
+	}
+
+	next, cmd = m.Update(keyMsg("enter"))
+	got := next.(Model)
+	if !got.pendingSubmit {
+		t.Fatal("final template value must set pendingSubmit")
+	}
+	if cmd == nil {
+		t.Fatal("final template value must submit")
+	}
+	msg := runCmd(cmd)
+	sr, ok := msg.(submitResultMsg)
+	if !ok {
+		t.Fatalf("cmd emitted %T, want submitResultMsg", msg)
+	}
+	if sr.result.PromptID != "code-review" {
+		t.Fatalf("result PromptID = %q", sr.result.PromptID)
+	}
+	if sr.result.TemplateValues["issue"] != "AUR-123" ||
+		sr.result.TemplateValues["focus"] != "correctness" {
+		t.Fatalf("TemplateValues = %#v", sr.result.TemplateValues)
+	}
+	if len(sub.calls) != 1 {
+		t.Fatalf("Submitter.Submit calls = %d, want 1", len(sub.calls))
+	}
+}
+
+func TestUpdate_TemplateShiftTabReturnsToPreviousValue(t *testing.T) {
+	sub := &fakeSubmitter{}
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID: "code-review",
+				Variables: []prompttmpl.Variable{
+					{Name: "issue", Required: true},
+					{Name: "focus", Default: "correctness"},
+				},
+			},
+			Body: "Review {{issue}} for {{focus}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: sub, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(keyMsg("c"))
+	m = next.(Model)
+	next, _ = m.Update(keyMsg("AUR-123"))
+	m = next.(Model)
+	next, _ = m.Update(keyMsg("enter"))
+	m = next.(Model)
+	next, _ = m.Update(keyMsg(" and tests"))
+	m = next.(Model)
+
+	next, cmd := m.Update(keyMsg("shift+tab"))
+	m = next.(Model)
+	if cmd != nil {
+		t.Fatalf("Shift+Tab should only move between variables, got cmd %T", cmd())
+	}
+	if m.templateIndex != 0 || m.templateInput != "AUR-123" {
+		t.Fatalf("template index/input = %d/%q, want first value", m.templateIndex, m.templateInput)
+	}
+
+	next, _ = m.Update(keyMsg("enter"))
+	m = next.(Model)
+	if m.templateIndex != 1 || m.templateInput != "correctness and tests" {
+		t.Fatalf("template index/input = %d/%q, want preserved second value", m.templateIndex, m.templateInput)
+	}
+}
+
+func TestUpdate_TemplateRenderedOversizeStaysInline(t *testing.T) {
+	sub := &fakeSubmitter{}
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID:        "code-review",
+				Variables: []prompttmpl.Variable{{Name: "issue", Required: true}},
+			},
+			Body: "{{issue}}",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: sub, Store: st, MaxPasteBytes: 3})
+	next, _ := m.Update(keyMsg("c"))
+	m = next.(Model)
+	next, _ = m.Update(keyMsg("AUR-123"))
+	m = next.(Model)
+
+	next, cmd := m.Update(keyMsg("enter"))
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("oversize rendered prompt must not submit, got cmd %T", cmd())
+	}
+	if !strings.Contains(got.inlineError, "max_paste_bytes") {
+		t.Fatalf("inlineError = %q", got.inlineError)
+	}
+	if len(sub.calls) != 0 {
+		t.Fatalf("Submitter.Submit calls = %d, want 0", len(sub.calls))
+	}
+}
+
+func TestUpdate_TemplateEscReturnsToBoard(t *testing.T) {
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID:        "code-review",
+				Variables: []prompttmpl.Variable{{Name: "issue"}},
+			},
+			Body: "{{issue}}",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: &fakeSubmitter{}, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(keyMsg("c"))
+	m = next.(Model)
+
+	next, cmd := m.Update(keyMsg("esc"))
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("Esc in template mode must not quit, got cmd %T", cmd())
+	}
+	if got.mode != modeBoard {
+		t.Fatalf("mode = %v, want modeBoard", got.mode)
+	}
+	if got.templatePromptID != "" || got.templateValues != nil {
+		t.Fatalf("template state not cleared: %+v", got)
 	}
 }
 

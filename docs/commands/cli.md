@@ -120,7 +120,7 @@ Key: c (explicit)
 Review this code for correctness, risk, and missing tests.
 ```
 
-### `tprompt send <id>`
+### `tprompt send <id> [template flags]`
 
 Resolves the prompt and sends it to a tmux pane.
 
@@ -135,11 +135,23 @@ Behavior:
 
 - if `--target-pane` is omitted, use current pane context when available
 - if not inside tmux and no target pane supplied, fail clearly
+- if the prompt declares frontmatter `variables`, pass values as
+  prompt-specific flags after `<id>`:
+
+  ```bash
+  tprompt send pr-review --issue-id AUR-123 --focus "template UX"
+  ```
+
+- required variables without a non-empty value fail before delivery with a
+  usage error (exit 2)
+- template values that must literally start with another built-in flag name
+  should use `--name=value` form, for example `--issue=--target-pane`
 - delivery settings resolve in this order:
   - CLI flags
   - prompt frontmatter defaults
   - config file
   - built-in defaults
+- template rendering happens before `max_paste_bytes` and sanitization
 - always a direct send; never writes a handoff job
 
 ### `tprompt paste`
@@ -183,8 +195,9 @@ Checks, in order:
 3. **prompt priority and project overlay** — reports `prompt_priority` and the
    project overlay path, or `no project overlay`.
 4. **prompts discovered** — `FAIL` on duplicate IDs, malformed
-   frontmatter, or duplicate/reserved/malformed `key:` values; reports the
-   discovered prompt count on success.
+   frontmatter, malformed template variables/placeholders, or
+   duplicate/reserved/malformed `key:` values; reports the discovered prompt
+   count on success.
 5. **inside tmux** — `warn` when `$TMUX` is unset.
 6. **tmux popup binding** — only when inside tmux: parses `tmux list-keys` and
    reports `ok` when a key binding's command contains `tprompt`, else `warn ...
@@ -265,11 +278,12 @@ snippet becomes a prompt in the primary global prompts directory:
 - `tags: [wispr]` provenance tag (a starred snippet also gets `starred`)
 
 Imported prompts carry the **same frontmatter fields `tprompt new` scaffolds**
-(`title`, `description`, `tags`, `key`, `mode`, `enter`): `title`/`tags` are
-filled in from the snippet and the rest are left as empty stubs, so an imported
-prompt is as ready to edit (add a keybind, set the delivery mode) as a scaffolded
-one. The snippet-controlled fields are YAML-marshaled (not string-templated), so
-a phrase containing `:` or quotes cannot corrupt the written file.
+(`title`, `description`, `tags`, `key`, `mode`, `enter`, `variables`):
+`title`/`tags` are filled in from the snippet and the rest are left as empty
+stubs, so an imported prompt is as ready to edit (add a keybind, set the
+delivery mode, declare variables) as a scaffolded one. The snippet-controlled
+fields are YAML-marshaled (not string-templated), so a phrase containing `:` or
+quotes cannot corrupt the written file.
 
 Import is **idempotent**: a snippet whose id already exists as a prompt is
 **skipped** by default, so re-running never creates duplicates (use `--overwrite`

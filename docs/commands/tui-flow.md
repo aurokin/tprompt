@@ -14,10 +14,13 @@ Allow the user to select a prompt **or** paste the clipboard from the TUI, then 
 2. It captures the original target context passed in from tmux (pane id, client tty, session id).
 3. The built-in TUI presents the keybind board (pinned clipboard row + prompts).
 4. On selection:
-   - **Prompt row** — TUI resolves the prompt body and submits a handoff job with `source = "prompt"`.
-   - **Clipboard row** — TUI reads the clipboard, validates it, and submits a handoff job with `source = "clipboard"` and the captured bytes in `body`. If validation fails, the TUI shows an inline error and stays open.
+   - **Prompt row without variables** — TUI resolves the prompt body and submits through the prompt handoff path with `source = "prompt"`.
+   - **Prompt row with variables** — TUI resolves the prompt, asks for each
+     declared variable in order, validates the rendered size, and submits
+     through the prompt handoff path with `source = "prompt"`.
+   - **Clipboard row** — TUI reads the clipboard, validates it, and submits through the clipboard handoff path with `source = "clipboard"` and the captured bytes in `body`. If validation fails, the TUI shows an inline error and stays open.
    - **Search match** — same as the corresponding row above.
-5. TUI writes the job to a private per-user jobs directory, spawns `tprompt handoff --job <path>` detached, and exits.
+5. The submitter writes the job to a private per-user jobs directory, spawns `tprompt handoff --job <path>` detached, and the TUI exits.
 6. The worker waits until tmux state indicates the target pane is again the intended active target.
 7. The worker runs the sanitizer over the request body.
 8. The worker injects via the tmux adapter and removes the job file.
@@ -57,6 +60,21 @@ The TUI process is responsible for reading the clipboard, not the handoff worker
 
 The TUI passes the captured bytes inside the handoff job body. The worker treats clipboard-sourced and prompt-sourced jobs identically from that point on.
 
+## Template variables in the TUI flow
+
+Template prompting is owned by the TUI process before handoff submission. This
+keeps the worker non-interactive and preserves the existing popup invariant: once
+the TUI exits, the only remaining work is verification, sanitization, injection,
+and cleanup.
+
+Recoverable template-input errors stay in the TUI:
+
+- required value is empty
+- rendered prompt exceeds `max_paste_bytes`
+
+Invalid template declarations or malformed placeholders are prompt-store errors;
+they are discovered during preflight and fail before a handoff job is submitted.
+
 ## Recommended tmux binding style
 
 See `examples/tmux-bindings.md`.
@@ -69,7 +87,10 @@ If job submission fails:
 - the CLI surfaces the submit error on stderr with the normal exit-code mapping
 - background retry logic after submission is outside the current contract
 
-Inline TUI footer errors are reserved for recoverable, pre-submit choices such as empty clipboard content or an oversized prompt body. Once handoff has started, failures are not recoverable from inside the TUI.
+Inline TUI footer errors are reserved for recoverable, pre-submit choices such as
+empty clipboard content, missing required template values, or an oversized
+prompt body. Once handoff has started, failures are not recoverable from inside
+the TUI.
 
 ## Concurrency and replacement
 

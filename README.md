@@ -84,6 +84,13 @@ tprompt send code-review
 fresh install needs no hand-edited config. Pass `--project` to scaffold a per-repo
 overlay at `<gitroot>/tprompt/<id>.md` instead.
 
+Prompts can declare frontmatter variables and use `{{name}}` placeholders in the
+body. Direct sends pass those values as prompt-specific flags:
+
+```bash
+tprompt send pr-review --issue AUR-123 --focus "template UX"
+```
+
 ### Wire up the popup
 
 The popup workflow is the point of `tprompt`. Run `tprompt init` to print the exact
@@ -159,14 +166,17 @@ deliver synchronously. Nothing runs as a daemon. For the full data flow, see
 
 ## What tprompt guarantees
 
-Prompts are plain markdown (frontmatter is metadata; only the body is delivered).
-Delivery defaults to bracketed paste, sanitization defaults to `safe`, and `tprompt`
-guarantees *verified tmux-targeted delivery* — not that the receiving application
-interprets the text as you intended (a shell will; Vim in normal mode may not). The
-authoritative contract is [EXPECTATIONS.md](EXPECTATIONS.md).
+Prompts are plain markdown. Frontmatter is never injected, but it may declare
+metadata, delivery defaults, keybinds, and template variables; delivery injects
+the rendered markdown body. Delivery defaults to bracketed paste, sanitization
+defaults to `safe`, and `tprompt` guarantees *verified tmux-targeted delivery* —
+not that the receiving application interprets the text as you intended (a shell
+will; Vim in normal mode may not). The authoritative contract is
+[EXPECTATIONS.md](EXPECTATIONS.md).
 
-`tprompt` is intentionally narrow: no templating, no prompt composition, no cross-host
-clipboard sync, no GUI. See [EXPECTATIONS.md](EXPECTATIONS.md#non-goals) and
+`tprompt` is intentionally narrow: prompt variables are simple string
+substitutions, with no prompt composition, snippets, cross-host clipboard sync,
+or GUI. See [EXPECTATIONS.md](EXPECTATIONS.md#non-goals) and
 [docs/roadmap/future-phases.md](docs/roadmap/future-phases.md) for what is deliberately
 out of scope.
 

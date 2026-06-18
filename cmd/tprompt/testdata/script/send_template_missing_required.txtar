@@ -1,0 +1,18 @@
+# Templated send rejects a missing required variable before any tmux work.
+
+mkdir prompts
+
+! tprompt send review --config config.toml --target-pane %1
+stderr 'missing required template value --issue'
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- prompts/review.md --
+---
+variables:
+  - name: issue
+    required: true
+---
+
+Review {{issue}}.

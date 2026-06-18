@@ -71,10 +71,11 @@ func TestToPrompt_FrontmatterAndBodyRoundTrip(t *testing.T) {
 
 func TestToPrompt_EmitsFullScaffoldFieldSet(t *testing.T) {
 	// Imported prompts carry the same frontmatter field set `tprompt new`
-	// scaffolds (AUR-526): the description/key/mode/enter stubs are added so an
-	// imported prompt is as editable as a scaffolded one. The stubs are bare keys
-	// (no value): bare matches the scaffold and, for `enter:`, is the only form
-	// that round-trips into promptmeta.Meta's *bool without a parse error.
+	// scaffolds (AUR-526): the description/key/mode/enter/variables stubs are
+	// added so an imported prompt is as editable as a scaffolded one. Scalar
+	// stubs are bare keys (no value): bare matches the scaffold and, for
+	// `enter:`, is the only form that round-trips into promptmeta.Meta's *bool
+	// without a parse error.
 	s := Snippet{
 		ID:          "11111111-2222-3333-4444-555555555555",
 		Phrase:      "organize thoughts prompt",
@@ -89,6 +90,9 @@ func TestToPrompt_EmitsFullScaffoldFieldSet(t *testing.T) {
 		if !strings.Contains(string(md), stub) {
 			t.Errorf("frontmatter missing bare stub %q:\n%s", stub, md)
 		}
+	}
+	if !strings.Contains(string(md), "\nvariables: []\n") {
+		t.Errorf("frontmatter missing variables stub:\n%s", md)
 	}
 
 	// The stubbed file must load cleanly with the new fields treated as unset

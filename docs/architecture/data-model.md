@@ -17,6 +17,7 @@ Prompt {
   tags: []string        // optional frontmatter
   key: char?            // optional frontmatter; single printable char; case-insensitive
   body: string          // markdown body only
+  variables: []TemplateVariable // optional frontmatter; ordered string inputs
   defaults: {
     mode: "paste" | "type" | null
     enter: bool | null
@@ -29,6 +30,21 @@ Prompt {
 - duplicate across prompts → hard error
 - collision with a reserved key → hard error
 - malformed (multi-char, empty, non-printable) → hard error
+
+`variables` are validated at load time: names must be unique lowercase
+kebab-case, cannot collide with built-in send/root flags, and body placeholders
+in templated prompts must reference declared variables. Every declared variable
+must be used by at least one unescaped body placeholder.
+
+```text
+TemplateVariable {
+  name: string
+  label: string?
+  description: string?
+  default: string
+  required: bool
+}
+```
 
 ## Wispr snippet (import input)
 
@@ -50,9 +66,9 @@ Mapping is deterministic and one-way: the slug is the prompt id (with a
 collisions), the phrase is always preserved verbatim as the title, and the
 provenance tag (`wispr` by default) plus an optional `starred` tag are written to
 frontmatter. Imported prompts carry the full `tprompt new` frontmatter field set
-(`title, description, tags, key, mode, enter`); only `title`/`tags` are populated
-and the rest are empty stubs, so an imported prompt is as editable as a
-scaffolded one. See `DECISIONS.md` §34.
+(`title, description, tags, key, mode, enter, variables`); only `title`/`tags`
+are populated and the rest are empty stubs, so an imported prompt is as editable
+as a scaffolded one. See `DECISIONS.md` §34.
 
 ## Source scope and shadow markers
 
@@ -115,7 +131,7 @@ DeliveryRequest {
   source: "prompt" | "clipboard"
   prompt_id: string?            // set when source = "prompt"
   source_path: string?          // set when source = "prompt"
-  body: string                  // resolved content; already captured by the TUI when source = "clipboard"
+  body: string                  // rendered prompt body or captured clipboard content
   mode: "paste" | "type"
   press_enter: bool
   sanitize_mode: "off" | "safe" | "strict"
@@ -127,6 +143,9 @@ DeliveryRequest {
 Notes:
 
 - `source = "clipboard"` means the TUI already captured the bytes before exiting; the handoff worker does not re-read the clipboard.
+- `source = "prompt"` means any template variables were already collected and
+  rendered before request construction; the handoff worker does not re-read or
+  re-render prompt files.
 - `sanitize_mode` is resolved at request construction (flag > config > default) so the handoff worker does not need to re-resolve config.
 - `body` is the post-resolution content but **pre-sanitization**. The sanitizer runs in the delivery path immediately before the tmux adapter.
 

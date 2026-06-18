@@ -7,18 +7,20 @@ import (
 	"fmt"
 	"unicode/utf8"
 
+	"github.com/aurokin/tprompt/internal/prompttmpl"
 	"gopkg.in/yaml.v3"
 )
 
 // Meta holds the supported frontmatter keys (docs/storage/prompt-store.md).
 type Meta struct {
-	Title       string   `yaml:"title"`
-	Description string   `yaml:"description"`
-	Tags        []string `yaml:"tags"`
-	Mode        string   `yaml:"mode"`
-	Enter       *bool    `yaml:"enter"`
-	Key         *string  `yaml:"key"`
-	KeyDeclared bool     `yaml:"-"`
+	Title       string                `yaml:"title"`
+	Description string                `yaml:"description"`
+	Tags        []string              `yaml:"tags"`
+	Mode        string                `yaml:"mode"`
+	Enter       *bool                 `yaml:"enter"`
+	Key         *string               `yaml:"key"`
+	Variables   []prompttmpl.Variable `yaml:"variables"`
+	KeyDeclared bool                  `yaml:"-"`
 }
 
 // Parsed is the result of splitting a prompt file into metadata and body.

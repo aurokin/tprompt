@@ -32,7 +32,7 @@ belong in Linear milestones, not in the repo.
 - [CLI commands](commands/cli.md) - command-specific behavior.
 - [Error handling](implementation/error-handling.md) - exit codes and error taxonomy.
 - [Config](storage/config.md) - config fields and precedence.
-- [Prompt store](storage/prompt-store.md) - prompt IDs, frontmatter, and keybinds.
+- [Prompt store](storage/prompt-store.md) - prompt IDs, frontmatter, keybinds, and template variables.
 - [Testing harness](testing/harness.md) - app-level and testscript proof surfaces.
 
 ## I Want To Change The TUI
@@ -66,7 +66,7 @@ belong in Linear milestones, not in the repo.
 
 ## I Want To Change Prompt Storage Or Config
 
-- [Prompt store](storage/prompt-store.md) - discovery, frontmatter, IDs, shadowing, and keybinds.
+- [Prompt store](storage/prompt-store.md) - discovery, frontmatter, IDs, shadowing, keybinds, and template variables.
 - [Config](storage/config.md) - config fields, defaults, and validation.
 - [Clipboard](storage/clipboard.md) - same-host clipboard detection and validation.
 - [Testing harness](testing/harness.md) - store/config/clipboard proof surfaces.

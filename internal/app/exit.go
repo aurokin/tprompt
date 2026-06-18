@@ -9,6 +9,7 @@ import (
 	"github.com/aurokin/tprompt/internal/delivery"
 	"github.com/aurokin/tprompt/internal/keybind"
 	"github.com/aurokin/tprompt/internal/promptsource"
+	"github.com/aurokin/tprompt/internal/prompttmpl"
 	"github.com/aurokin/tprompt/internal/sanitize"
 	"github.com/aurokin/tprompt/internal/store"
 	"github.com/aurokin/tprompt/internal/submitter"
@@ -130,6 +131,19 @@ func ExitCode(err error) int {
 	}
 	var malformedKey *keybind.MalformedKeybindError
 	if errors.As(err, &malformedKey) {
+		return ExitPrompt
+	}
+
+	var missingTemplate *prompttmpl.MissingValueError
+	if errors.As(err, &missingTemplate) {
+		return ExitUsage
+	}
+	var invalidVariable *prompttmpl.InvalidVariableError
+	if errors.As(err, &invalidVariable) {
+		return ExitPrompt
+	}
+	var invalidPlaceholder *prompttmpl.InvalidPlaceholderError
+	if errors.As(err, &invalidPlaceholder) {
 		return ExitPrompt
 	}
 

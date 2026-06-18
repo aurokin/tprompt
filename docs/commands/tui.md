@@ -87,22 +87,47 @@ Triggered by `/`. All prompts (including overflow and shadowed prompts) are sear
   3. On validation failure, the TUI shows an **inline error** in the footer and stays open so the user can choose something else.
   4. On success, the TUI submits a handoff job with `source = clipboard` and exits.
 
+## Template input behavior
+
+When a selected prompt declares frontmatter `variables`, the TUI does not submit
+immediately. It enters template input mode and asks for one variable at a time in
+the order declared by the prompt.
+
+- The input view shows the prompt id, `N/M` progress, variable label (or name),
+  optional description, and the current value. Defaults are prefilled.
+- `Enter` accepts the current value and advances. On the final variable, `Enter`
+  validates the rendered prompt size and submits through the handoff path.
+- An empty required value shows an inline footer error and stays on the current
+  variable.
+- `Shift+Tab` moves back to the previous variable with entered values preserved.
+- `Backspace`, printable text, and space edit the current value.
+- `Esc` leaves template input and returns to the board without submitting.
+- `Ctrl+C` cancels the TUI and exits 0.
+- Rendered prompt size is checked against `max_paste_bytes` before submission; an
+  oversized rendered body stays in template input with an inline error.
+
+The handoff worker receives only the rendered body. It never prompts for
+variables and never re-renders a prompt.
+
 ## Footer / status line
 
 The TUI renders a single-line footer showing context-sensitive hints:
 
 - board view: `press a row's [key] to select  [/ search]  [Enter select]  [Esc cancel]`, or with `[/ search (N more)]` when overflow exists. The leading `press a row's [key] to select` legend is width-aware: it is dropped (functional hints kept) when the full line would exceed the terminal width, so the footer stays one line.
 - search view: `/query    [Esc exit search]  [Enter select]  [N matches]`
+- template input view: `[Enter next]  [Esc back]  [Ctrl+C cancel]`, adding
+  `[Shift+Tab prev]` after the first variable and switching to `[Enter submit]`
+  on the final variable
 - error view: `clipboard is empty — choose another option  [Esc cancel]`
 
 ## Selection
 
 There are two ways to deliver a row from the board:
 
-- **Single-key shortcut.** Press the printable rune in `[brackets]` next to the row (e.g. `c` for the `code-review` row). Submits immediately; works regardless of cursor position.
-- **Cursor + Select.** Move the cursor with `↑`/`↓`, then press the **Select** key (default `Enter`). Submits the row currently under the cursor. The Select binding is reconfigurable via `[reserved_keys]` in `config.toml`.
+- **Single-key shortcut.** Press the printable rune in `[brackets]` next to the row (e.g. `c` for the `code-review` row). Selects that row regardless of cursor position.
+- **Cursor + Select.** Move the cursor with `↑`/`↓`, then press the **Select** key (default `Enter`). Selects the row currently under the cursor. The Select binding is reconfigurable via `[reserved_keys]` in `config.toml`.
 
-Both paths route through the same `selectPrompt` / `selectClipboard` flow: the pinned clipboard row triggers a clipboard read; a prompt row resolves the body and submits a handoff job.
+Both paths route through the same `selectPrompt` / `selectClipboard` flow: the pinned clipboard row triggers a clipboard read; a non-template prompt row resolves the body and submits through the prompt handoff path; a templated prompt row collects variables before submission.
 
 ## Scrolling
 

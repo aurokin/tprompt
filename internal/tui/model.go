@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/aurokin/tprompt/internal/clipboard"
+	"github.com/aurokin/tprompt/internal/prompttmpl"
 	"github.com/aurokin/tprompt/internal/store"
 	layout "github.com/aurokin/tprompt/internal/tuilayout"
 )
@@ -92,6 +93,7 @@ type mode int
 const (
 	modeBoard mode = iota
 	modeSearch
+	modeTemplate
 )
 
 // Model is the single bubbletea model for the TUI.
@@ -116,6 +118,15 @@ type Model struct {
 	highlightedPromptID string
 	results             []MatchedRow
 	index               *SearchIndex
+
+	// Template input-mode state.
+	templatePromptID string
+	templateScope    string
+	templateBody     string
+	templateVars     []prompttmpl.Variable
+	templateValues   map[string]string
+	templateIndex    int
+	templateInput    string
 }
 
 // footerLines is the fixed chrome subtracted from terminal height to compute
@@ -209,6 +220,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateBoard(msg)
 		case modeSearch:
 			return m.updateSearch(msg)
+		case modeTemplate:
+			return m.updateTemplate(msg)
 		}
 	}
 	return m, nil
@@ -344,6 +357,9 @@ func (m Model) selectPrompt(row Row) (tea.Model, tea.Cmd) {
 		m.submitErr = err
 		return m, tea.Quit
 	}
+	if len(prompt.Variables) > 0 {
+		return m.enterTemplateInput(row, prompt), nil
+	}
 	if m.deps.MaxPasteBytes > 0 && int64(len(prompt.Body)) > m.deps.MaxPasteBytes {
 		m.inlineError = "prompt body exceeds max_paste_bytes — choose another prompt"
 		return m, nil
@@ -351,6 +367,24 @@ func (m Model) selectPrompt(row Row) (tea.Model, tea.Cmd) {
 	m.inlineError = ""
 	m.pendingSubmit = true
 	return m, submitCmd(m.deps.Submitter, Result{Action: ActionPrompt, PromptID: id, Scope: scope})
+}
+
+func (m Model) enterTemplateInput(row Row, prompt store.Prompt) Model {
+	values := prompttmpl.Defaults(prompt.Variables)
+	input := ""
+	if len(prompt.Variables) > 0 {
+		input = values[prompt.Variables[0].Name]
+	}
+	m.mode = modeTemplate
+	m.inlineError = ""
+	m.templatePromptID = row.PromptID
+	m.templateScope = row.Scope
+	m.templateBody = prompt.Body
+	m.templateVars = append([]prompttmpl.Variable(nil), prompt.Variables...)
+	m.templateValues = values
+	m.templateIndex = 0
+	m.templateInput = input
+	return m
 }
 
 // selectClipboard kicks off an async clipboard read via readClipboardCmd. The
@@ -364,6 +398,141 @@ func (m Model) selectClipboard() (tea.Model, tea.Cmd) {
 	m.inlineError = ""
 	m.pendingClipboard = true
 	return m, readClipboardCmd(m.deps.Clip, m.deps.MaxPasteBytes)
+}
+
+func (m Model) updateTemplate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type == tea.KeyCtrlC {
+		if m.pendingSubmit {
+			return m, nil
+		}
+		m.inlineError = ""
+		m.result = Result{Action: ActionCancel}
+		return m, tea.Quit
+	}
+	if msg.Type == tea.KeyEsc {
+		if m.pendingSubmit {
+			return m, nil
+		}
+		return m.exitTemplateInput(), nil
+	}
+	if m.pendingSubmit {
+		return m, nil
+	}
+
+	switch msg.Type {
+	case tea.KeyEnter:
+		return m.acceptTemplateInput()
+	case tea.KeyShiftTab:
+		return m.previousTemplateInput(), nil
+	case tea.KeyBackspace:
+		runes := []rune(m.templateInput)
+		if len(runes) > 0 {
+			m.templateInput = string(runes[:len(runes)-1])
+			m.inlineError = ""
+		}
+		return m, nil
+	case tea.KeySpace:
+		if !msg.Alt {
+			m.templateInput += " "
+			m.inlineError = ""
+		}
+		return m, nil
+	case tea.KeyRunes:
+		if len(msg.Runes) > 0 && !msg.Alt {
+			m.templateInput += string(msg.Runes)
+			m.inlineError = ""
+		}
+		return m, nil
+	default:
+		return m, nil
+	}
+}
+
+func (m Model) exitTemplateInput() Model {
+	m.mode = modeBoard
+	m.inlineError = ""
+	m.templatePromptID = ""
+	m.templateScope = ""
+	m.templateBody = ""
+	m.templateVars = nil
+	m.templateValues = nil
+	m.templateIndex = 0
+	m.templateInput = ""
+	return m
+}
+
+func (m Model) previousTemplateInput() Model {
+	if m.templateIndex <= 0 || m.templateIndex >= len(m.templateVars) {
+		return m
+	}
+	current := m.templateVars[m.templateIndex]
+	m.templateValues[current.Name] = m.templateInput
+	m.templateIndex--
+	previous := m.templateVars[m.templateIndex]
+	m.templateInput = m.templateValues[previous.Name]
+	m.inlineError = ""
+	return m
+}
+
+func (m Model) acceptTemplateInput() (tea.Model, tea.Cmd) {
+	if m.templateIndex < 0 || m.templateIndex >= len(m.templateVars) {
+		m.submitErr = fmt.Errorf("tui: template input index out of range")
+		m.result = Result{Action: ActionPrompt, PromptID: m.templatePromptID, Scope: m.templateScope}
+		return m, tea.Quit
+	}
+	current := m.templateVars[m.templateIndex]
+	if current.Required && strings.TrimSpace(m.templateInput) == "" {
+		m.inlineError = fmt.Sprintf("%s is required", templateVarLabel(current))
+		return m, nil
+	}
+	m.templateValues[current.Name] = m.templateInput
+	if m.templateIndex < len(m.templateVars)-1 {
+		m.templateIndex++
+		next := m.templateVars[m.templateIndex]
+		m.templateInput = m.templateValues[next.Name]
+		m.inlineError = ""
+		return m, nil
+	}
+	return m.submitTemplatePrompt()
+}
+
+func (m Model) submitTemplatePrompt() (tea.Model, tea.Cmd) {
+	rendered, err := prompttmpl.Render(m.templateBody, m.templateVars, m.templateValues)
+	if err != nil {
+		m.submitErr = err
+		m.result = Result{Action: ActionPrompt, PromptID: m.templatePromptID, Scope: m.templateScope}
+		return m, tea.Quit
+	}
+	if m.deps.MaxPasteBytes > 0 && int64(len(rendered)) > m.deps.MaxPasteBytes {
+		m.inlineError = "prompt body exceeds max_paste_bytes — edit a value or press Esc"
+		return m, nil
+	}
+	m.inlineError = ""
+	m.pendingSubmit = true
+	return m, submitCmd(m.deps.Submitter, Result{
+		Action:         ActionPrompt,
+		PromptID:       m.templatePromptID,
+		Scope:          m.templateScope,
+		TemplateValues: cloneTemplateValues(m.templateValues),
+	})
+}
+
+func cloneTemplateValues(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(values))
+	for name, value := range values {
+		cloned[name] = value
+	}
+	return cloned
+}
+
+func templateVarLabel(v prompttmpl.Variable) string {
+	if v.Label != "" {
+		return v.Label
+	}
+	return v.Name
 }
 
 // clipboardErrorText maps a clipboard read/validate error to the inline
@@ -574,9 +743,12 @@ func (m Model) searchAppendRune(r rune) Model {
 func (m Model) View() string {
 	width := m.viewWidth()
 	var body string
-	if m.mode == modeSearch {
+	switch m.mode {
+	case modeSearch:
 		body = m.viewSearch(width)
-	} else {
+	case modeTemplate:
+		body = m.viewTemplate(width)
+	default:
 		body = m.viewBoard(width)
 	}
 	if m.state.Banner == "" {
@@ -615,6 +787,27 @@ func (m Model) viewSearch(width int) string {
 	}
 	start, end := m.visibleSearchRowRange()
 	return renderRowList(rows[start:end], m.searchCursor-start, width, maxIDWidth(rows)) + m.footer()
+}
+
+func (m Model) viewTemplate(width int) string {
+	if len(m.templateVars) == 0 || m.templateIndex >= len(m.templateVars) {
+		return m.footer()
+	}
+	current := m.templateVars[m.templateIndex]
+	label := templateVarLabel(current)
+	if current.Required {
+		label += " *"
+	}
+
+	lines := []string{
+		fmt.Sprintf("%s  [%d/%d]", m.templatePromptID, m.templateIndex+1, len(m.templateVars)),
+		layout.TruncateToWidth(label, width),
+	}
+	if current.Description != "" {
+		lines = append(lines, layout.TruncateToWidth(current.Description, width))
+	}
+	lines = append(lines, "> "+layout.TruncateToWidth(m.templateInput, max(0, width-2)))
+	return strings.Join(lines, "\n") + "\n" + m.footer()
 }
 
 // renderRowList formats rows as the three-column keybind board, highlighting
@@ -687,8 +880,11 @@ func (m Model) footer() string {
 }
 
 func (m Model) footerHints() string {
-	if m.mode == modeSearch {
+	switch m.mode {
+	case modeSearch:
 		return m.searchFooterHints()
+	case modeTemplate:
+		return m.templateFooterHints()
 	}
 	if m.isEmptyStore() {
 		return m.emptyStoreFooter()
@@ -705,6 +901,19 @@ func (m Model) footerHints() string {
 	}
 	hints := strings.Join(parts, "  ")
 	return m.withKeyLegend(hints)
+}
+
+func (m Model) templateFooterHints() string {
+	action := "next"
+	if m.templateIndex == len(m.templateVars)-1 {
+		action = "submit"
+	}
+	parts := []string{fmt.Sprintf("[Enter %s]", action)}
+	if m.templateIndex > 0 {
+		parts = append(parts, "[Shift+Tab prev]")
+	}
+	parts = append(parts, "[Esc back]", "[Ctrl+C cancel]")
+	return strings.Join(parts, "  ")
 }
 
 // withKeyLegend prepends a legend telling users each board row's bracketed

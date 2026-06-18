@@ -112,6 +112,37 @@ func TestParseIgnoresUnknownFields(t *testing.T) {
 	}
 }
 
+func TestParseTemplateVariables(t *testing.T) {
+	content := []byte(`---
+title: Demo
+variables:
+  - name: issue-id
+    label: Issue
+    description: Linear issue identifier
+    default: AUR-123
+    required: true
+  - name: focus
+---
+body
+`)
+
+	parsed, err := Parse(content)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(parsed.Meta.Variables) != 2 {
+		t.Fatalf("Variables len = %d, want 2: %#v", len(parsed.Meta.Variables), parsed.Meta.Variables)
+	}
+	first := parsed.Meta.Variables[0]
+	if first.Name != "issue-id" || first.Label != "Issue" || first.Description != "Linear issue identifier" ||
+		first.Default != "AUR-123" || !first.Required {
+		t.Fatalf("first variable = %#v", first)
+	}
+	if parsed.Meta.Variables[1].Name != "focus" {
+		t.Fatalf("second variable = %#v", parsed.Meta.Variables[1])
+	}
+}
+
 func TestParseTreatsLeadingFenceWithoutClosingFenceAsBody(t *testing.T) {
 	content := []byte("---\nHeading below\n")
 
@@ -286,6 +317,9 @@ func TestParseStubEmptyFixtureLoadsCleanly(t *testing.T) {
 	}
 	if parsed.Meta.Enter != nil {
 		t.Fatalf("Enter = %v, want nil", parsed.Meta.Enter)
+	}
+	if len(parsed.Meta.Variables) != 0 {
+		t.Fatalf("Variables = %#v, want empty", parsed.Meta.Variables)
 	}
 	if parsed.Body != "Stubbed-empty body." {
 		t.Fatalf("Body = %q", parsed.Body)
