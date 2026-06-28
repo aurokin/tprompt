@@ -153,12 +153,12 @@ Prompts that declare frontmatter variables accept matching template flags after
 the prompt id, for example: tprompt send review --issue AUR-123.`,
 		DisableFlagParsing: true,
 		RunE: func(c *cobra.Command, args []string) error {
-			if sendArgsWantHelp(args) {
-				return c.Help()
-			}
 			parsed, err := parseSendKnownArgs(args, deps.ConfigPath)
 			if err != nil {
 				return err
+			}
+			if parsed.help {
+				return c.Help()
 			}
 			return runSend(deps, parsed.id, parsed.flags, parsed.templateArgs)
 		},
@@ -181,15 +181,7 @@ type parsedSendArgs struct {
 	id           string
 	flags        sendFlags
 	templateArgs []string
-}
-
-func sendArgsWantHelp(args []string) bool {
-	for _, arg := range args {
-		if arg == "--help" || arg == "-h" {
-			return true
-		}
-	}
-	return false
+	help         bool
 }
 
 func parseSendKnownArgs(args []string, configPath *string) (parsedSendArgs, error) {
@@ -207,9 +199,23 @@ func parseSendKnownArgs(args []string, configPath *string) (parsedSendArgs, erro
 			}
 			continue
 		}
+		if arg == "-h" {
+			if parsed.id == "" {
+				parsed.help = true
+				return parsed, nil
+			}
+			parsed.templateArgs = append(parsed.templateArgs, arg)
+			continue
+		}
 		if strings.HasPrefix(arg, "--") {
 			name, value, hasValue := splitLongFlag(arg)
 			switch name {
+			case "help":
+				if parsed.id == "" {
+					parsed.help = true
+					return parsed, nil
+				}
+				parsed.templateArgs = append(parsed.templateArgs, arg)
 			case "config":
 				got, next, err := flagValue(args, i, name, value, hasValue)
 				if err != nil {
@@ -257,6 +263,9 @@ func parseSendKnownArgs(args []string, configPath *string) (parsedSendArgs, erro
 			continue
 		}
 		parsed.templateArgs = append(parsed.templateArgs, arg)
+	}
+	if parsed.help {
+		return parsed, nil
 	}
 	if parsed.id == "" {
 		return parsedSendArgs{}, fmt.Errorf("accepts 1 arg(s), received 0")

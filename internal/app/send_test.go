@@ -200,6 +200,26 @@ func TestSend_TemplateFlagEqualsAllowsBuiltInFlagLookingValue(t *testing.T) {
 	}
 }
 
+func TestSend_TemplateValueCanBeHelpFlag(t *testing.T) {
+	for _, value := range []string{"-h", "--help"} {
+		t.Run(value, func(t *testing.T) {
+			p := basePrompt()
+			p.Body = "Review {{issue}}."
+			p.Variables = []prompttmpl.Variable{{Name: "issue", Required: true}}
+			adapter := &fakeAdapter{paneExists: true}
+			deps := sendDeps(t, p, adapter)
+
+			_, _, err := executeRootWith(t, deps, "send", "code-review", "--issue", value, "--target-pane", "%1")
+			if err != nil {
+				t.Fatalf("unexpected: %v", err)
+			}
+			if got := adapter.pasteCalls[0].Body; got != "Review "+value+"." {
+				t.Fatalf("body = %q", got)
+			}
+		})
+	}
+}
+
 func TestSend_MissingRequiredTemplateFlag(t *testing.T) {
 	p := basePrompt()
 	p.Body = "Review {{issue}}."
