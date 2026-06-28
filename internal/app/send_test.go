@@ -107,6 +107,10 @@ func basePrompt() store.Prompt {
 	}
 }
 
+func sendBoolPtr(v bool) *bool {
+	return &v
+}
+
 func TestSend_HappyPathPasteWithFlagTarget(t *testing.T) {
 	adapter := &fakeAdapter{paneExists: true}
 	deps := sendDeps(t, basePrompt(), adapter)
@@ -220,6 +224,25 @@ func TestSend_TemplateValueCanBeHelpFlag(t *testing.T) {
 	}
 }
 
+func TestSend_TemplateValueCanBeBuiltInFlagName(t *testing.T) {
+	p := basePrompt()
+	p.Body = "Review {{issue}}."
+	p.Variables = []prompttmpl.Variable{{Name: "issue", Required: true}}
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, p, adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "--issue", "--target-pane", "--target-pane", "%1")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if got := adapter.pasteCalls[0].Target.PaneID; got != "%1" {
+		t.Fatalf("target = %q, want %%1", got)
+	}
+	if got := adapter.pasteCalls[0].Body; got != "Review --target-pane." {
+		t.Fatalf("body = %q", got)
+	}
+}
+
 func TestSend_MissingRequiredTemplateFlag(t *testing.T) {
 	p := basePrompt()
 	p.Body = "Review {{issue}}."
@@ -269,6 +292,22 @@ func TestSend_RejectsTemplateFlagForNonTemplatePrompt(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown flag: --issue") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestSend_UnexpectedTemplateArgumentExitsUsage(t *testing.T) {
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, basePrompt(), adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "extra", "--target-pane", "%1")
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if !strings.Contains(err.Error(), "unexpected template argument") {
+		t.Fatalf("error = %v", err)
+	}
+	if ExitCode(err) != ExitUsage {
+		t.Fatalf("ExitCode = %d, want %d", ExitCode(err), ExitUsage)
 	}
 }
 
@@ -441,6 +480,21 @@ func TestSend_EnterFlag(t *testing.T) {
 	}
 	if !adapter.pasteCalls[0].Enter {
 		t.Fatal("expected Enter=true")
+	}
+}
+
+func TestSend_EnterFlagAcceptsSpaceSeparatedFalse(t *testing.T) {
+	p := basePrompt()
+	p.Defaults.Enter = sendBoolPtr(true)
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, p, adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "--target-pane", "%1", "--enter", "false")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if adapter.pasteCalls[0].Enter {
+		t.Fatal("expected Enter=false")
 	}
 }
 

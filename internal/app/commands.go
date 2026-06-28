@@ -216,6 +216,10 @@ func parseSendKnownArgs(args []string, configPath *string) (parsedSendArgs, erro
 					return parsed, nil
 				}
 				parsed.templateArgs = append(parsed.templateArgs, arg)
+				if !hasValue && i+1 < len(args) {
+					parsed.templateArgs = append(parsed.templateArgs, args[i+1])
+					i++
+				}
 			case "config":
 				got, next, err := flagValue(args, i, name, value, hasValue)
 				if err != nil {
@@ -245,16 +249,21 @@ func parseSendKnownArgs(args []string, configPath *string) (parsedSendArgs, erro
 				parsed.flags.sanitize = &got
 				i = next
 			case "enter":
-				got, err := boolFlagValue(name, value, hasValue)
+				got, next, err := boolFlagValue(args, i, name, value, hasValue)
 				if err != nil {
 					return parsedSendArgs{}, err
 				}
 				parsed.flags.pressEnter = &got
+				i = next
 			default:
 				if parsed.id == "" {
 					return parsedSendArgs{}, fmt.Errorf("unknown flag: --%s", name)
 				}
 				parsed.templateArgs = append(parsed.templateArgs, arg)
+				if !hasValue && i+1 < len(args) {
+					parsed.templateArgs = append(parsed.templateArgs, args[i+1])
+					i++
+				}
 			}
 			continue
 		}
@@ -291,10 +300,22 @@ func flagValue(args []string, idx int, name, value string, hasValue bool) (strin
 	return args[idx+1], idx + 1, nil
 }
 
-func boolFlagValue(name, value string, hasValue bool) (bool, error) {
-	if !hasValue {
-		return true, nil
+func boolFlagValue(args []string, idx int, name, value string, hasValue bool) (bool, int, error) {
+	if hasValue {
+		got, err := parseBoolFlagValue(name, value)
+		return got, idx, err
 	}
+	if idx+1 < len(args) {
+		switch args[idx+1] {
+		case "true", "1", "false", "0":
+			got, err := parseBoolFlagValue(name, args[idx+1])
+			return got, idx + 1, err
+		}
+	}
+	return true, idx, nil
+}
+
+func parseBoolFlagValue(name, value string) (bool, error) {
 	switch value {
 	case "true", "1":
 		return true, nil
