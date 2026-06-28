@@ -11,6 +11,7 @@ import (
 
 	"github.com/aurokin/tprompt/internal/clipboard"
 	"github.com/aurokin/tprompt/internal/prompttmpl"
+	"github.com/aurokin/tprompt/internal/sanitize"
 	"github.com/aurokin/tprompt/internal/store"
 	layout "github.com/aurokin/tprompt/internal/tuilayout"
 )
@@ -806,8 +807,12 @@ func (m Model) viewTemplate(width int) string {
 	if current.Description != "" {
 		lines = append(lines, layout.TruncateToWidth(current.Description, width))
 	}
-	lines = append(lines, "> "+layout.TruncateToWidth(m.templateInput, max(0, width-2)))
+	lines = append(lines, "> "+layout.TruncateToWidth(templateInputDisplay(m.templateInput), max(0, width-2)))
 	return strings.Join(lines, "\n") + "\n" + m.footer()
+}
+
+func templateInputDisplay(value string) string {
+	return string(sanitize.StripAll([]byte(value)))
 }
 
 // renderRowList formats rows as the three-column keybind board, highlighting

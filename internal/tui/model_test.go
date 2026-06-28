@@ -664,6 +664,48 @@ func TestUpdate_TemplatedPromptEntersInputMode(t *testing.T) {
 	}
 }
 
+func TestUpdate_TemplateDefaultEscapesAreStrippedOnlyForDisplay(t *testing.T) {
+	const rawDefault = "safe\x1b]0;pwned\x07value"
+	sub := &fakeSubmitter{}
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID:        "code-review",
+				Variables: []prompttmpl.Variable{{Name: "issue", Default: rawDefault}},
+			},
+			Body: "Review {{issue}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: sub, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(keyMsg("c"))
+	m = next.(Model)
+
+	out := m.View()
+	if strings.Contains(out, "\x1b") {
+		t.Fatalf("template view must not render escape bytes:\n%q", out)
+	}
+	if !strings.Contains(out, "safevalue") {
+		t.Fatalf("template view missing stripped display value:\n%q", out)
+	}
+	if m.templateInput != rawDefault {
+		t.Fatalf("templateInput = %q, want raw default preserved", m.templateInput)
+	}
+
+	next, cmd := m.Update(keyMsg("enter"))
+	got := next.(Model)
+	if !got.pendingSubmit || cmd == nil {
+		t.Fatal("default value should submit")
+	}
+	msg := runCmd(cmd)
+	sr, ok := msg.(submitResultMsg)
+	if !ok {
+		t.Fatalf("cmd emitted %T, want submitResultMsg", msg)
+	}
+	if sr.result.TemplateValues["issue"] != rawDefault {
+		t.Fatalf("submitted value = %q, want raw default", sr.result.TemplateValues["issue"])
+	}
+}
+
 func TestUpdate_TemplateRequiredValueStaysInline(t *testing.T) {
 	sub := &fakeSubmitter{}
 	st := &fakeStore{prompts: map[string]store.Prompt{
