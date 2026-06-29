@@ -279,7 +279,7 @@ func (p *sendArgParser) handleLongFlag(i int) (int, error) {
 	case "help":
 		return p.handleHelpFlag(i, hasValue)
 	case "enter":
-		got, next, err := boolFlagValue(p.args, i, name, value, hasValue)
+		got, next, err := boolFlagValue(p.args, i, name, value, hasValue, p.parsed.id != "")
 		if err != nil {
 			return 0, err
 		}
@@ -346,12 +346,17 @@ func flagValue(args []string, idx int, name, value string, hasValue bool) (strin
 	return args[idx+1], idx + 1, nil
 }
 
-func boolFlagValue(args []string, idx int, name, value string, hasValue bool) (bool, int, error) {
+// boolFlagValue resolves a "--name[=value]" boolean. A space-separated value
+// (--enter false) is only consumed once the id is known (consumeNext); before
+// the id a bare --enter must not swallow a boolean-looking prompt id such as
+// "1" or "false". Use the "--name=value" form to set an explicit value ahead of
+// the id.
+func boolFlagValue(args []string, idx int, name, value string, hasValue, consumeNext bool) (bool, int, error) {
 	if hasValue {
 		got, err := parseBoolFlagValue(name, value)
 		return got, idx, err
 	}
-	if idx+1 < len(args) {
+	if consumeNext && idx+1 < len(args) {
 		switch args[idx+1] {
 		case "true", "1", "false", "0":
 			got, err := parseBoolFlagValue(name, args[idx+1])

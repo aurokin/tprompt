@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/aurokin/tprompt/internal/clipboard"
 	"github.com/aurokin/tprompt/internal/prompttmpl"
@@ -1146,6 +1147,43 @@ func TestView_TemplateFocusedFieldShowsValueTail(t *testing.T) {
 	}
 	if strings.Contains(out, "012345") {
 		t.Fatalf("focused value should hide the head:\n%s", out)
+	}
+}
+
+func TestView_TemplateLongLabelKeepsValueColumn(t *testing.T) {
+	// A long label (or narrow popup) must not collapse the value column to zero:
+	// the caret stays visible and no row overflows the terminal width.
+	const width = 30
+	longLabel := strings.Repeat("x", 60)
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID:        "code-review",
+				Variables: []prompttmpl.Variable{{Name: "issue", Label: longLabel, Default: "AUR-1"}},
+			},
+			Body: "Review {{issue}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: &fakeSubmitter{}, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+	m = next.(Model)
+	m = applyKeys(m, "c")
+
+	out := m.View()
+	// The focused variable row is the one carrying the caret. It must keep the
+	// caret visible and must not overflow the popup width.
+	var row string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, layout.FieldCursor) {
+			row = line
+			break
+		}
+	}
+	if row == "" {
+		t.Fatalf("caret must stay visible with a long label:\n%s", out)
+	}
+	if w := lipgloss.Width(row); w > width {
+		t.Fatalf("variable row width %d exceeds %d: %q", w, width, row)
 	}
 }
 

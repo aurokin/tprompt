@@ -498,6 +498,27 @@ func TestSend_EnterFlagAcceptsSpaceSeparatedFalse(t *testing.T) {
 	}
 }
 
+func TestSend_EnterFlagBeforeBooleanLikeID(t *testing.T) {
+	// "--enter 1" before the id must deliver prompt "1" with Enter pressed, not
+	// swallow "1" as the flag's boolean value and strand the positional id.
+	p := basePrompt()
+	p.ID = "1"
+	p.Path = "/prompts/1.md"
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, p, adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "--enter", "1", "--target-pane", "%1")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(adapter.pasteCalls) != 1 {
+		t.Fatalf("expected one paste call, got %d", len(adapter.pasteCalls))
+	}
+	if !adapter.pasteCalls[0].Enter {
+		t.Fatal("expected Enter=true for prompt id 1")
+	}
+}
+
 func TestSend_InvalidModeFlag(t *testing.T) {
 	adapter := &fakeAdapter{paneExists: true}
 	deps := sendDeps(t, basePrompt(), adapter)

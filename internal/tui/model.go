@@ -916,6 +916,12 @@ func (m Model) viewTemplate(width int) string {
 		return m.footer()
 	}
 	labelWidth := templateLabelWidth(m.template.vars)
+	// Keep a usable value column even with long labels or a narrow popup: cap the
+	// label column (labels are truncated into it below) so the caret never fully
+	// disappears and a row never overflows the width.
+	if maxLabel := width - 4 - minTemplateValueCol; maxLabel < labelWidth {
+		labelWidth = max(0, maxLabel)
+	}
 	// "> " marker + padded label + "  " separator precede the value column.
 	valueCol := max(0, width-labelWidth-4)
 
@@ -941,13 +947,18 @@ func (m Model) viewTemplate(width int) string {
 		} else {
 			value = layout.TruncateToWidth(templateInputDisplay(m.template.values[v.Name]), valueCol)
 		}
-		lines = append(lines, marker+layout.PadRight(label, labelWidth)+"  "+value)
+		label = layout.PadRight(layout.TruncateToWidth(label, labelWidth), labelWidth)
+		lines = append(lines, marker+label+"  "+value)
 	}
 	if desc := m.focusedTemplateVar().Description; desc != "" {
 		lines = append(lines, layout.TruncateToWidth(desc, width))
 	}
 	return strings.Join(lines, "\n") + "\n" + m.footer()
 }
+
+// minTemplateValueCol is the value-column width viewTemplate tries to preserve
+// for the focused caret when labels are long or the popup is narrow.
+const minTemplateValueCol = 4
 
 // templateLabelWidth is the rendered width of the widest variable label
 // (including the required marker), so the value column aligns across rows.
