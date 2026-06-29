@@ -201,3 +201,9 @@ For a quick compile check, `go build ./cmd/tprompt`. For the full contributor wo
 toolchain, and contracts, start at [AGENTS.md](AGENTS.md). Testscripts execute real
 `tmux`; see [docs/testing/harness.md](docs/testing/harness.md) before running broad test
 targets in a shell with tmux state that matters.
+
+To exercise a local build from the tmux popup (and a bare `tprompt`), `make dogfood`
+copies it into `~/.local/bin` so a `resolve_bin`-style launcher prefers it over the
+packaged release; `make undogfood` reverts, and `make dogfood-status` shows the current
+state. It's a copy, so re-run `make dogfood` after each rebuild. dogfood will not
+overwrite (nor will undogfood delete) a `tprompt` you installed there by other means.

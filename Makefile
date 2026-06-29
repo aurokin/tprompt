@@ -16,6 +16,44 @@ LDFLAGS := -X github.com/aurokin/tprompt/internal/app.appVersion=$(VERSION)
 build:
 	go build -trimpath -ldflags '$(LDFLAGS)' -o bin/tprompt ./cmd/tprompt
 
+# dogfood copies the version-stamped build into ~/.local/bin, the "user-local
+# install" slot the dotfiles resolve_bin helper checks before the packaged mise
+# shim, so the tmux popup and a bare `tprompt` use this build. Mirrors Rust's
+# `cargo install --path .`: a copy (survives `git worktree remove`), so re-run
+# after each rebuild. A sentinel marks the copy as dogfood-managed so dogfood
+# never clobbers — and undogfood never deletes — a tprompt you installed there by
+# other means.
+LOCAL_BIN    := $(HOME)/.local/bin
+DOGFOOD_MARK := $(LOCAL_BIN)/.tprompt.dogfood
+
+.PHONY: dogfood
+dogfood: build
+	@if [ -e $(LOCAL_BIN)/tprompt ] && [ ! -e $(DOGFOOD_MARK) ]; then \
+		echo "refusing to overwrite $(LOCAL_BIN)/tprompt: not installed by 'make dogfood' — remove it first" >&2; \
+		exit 1; \
+	fi
+	@mkdir -p $(LOCAL_BIN)
+	@install -m 0755 bin/tprompt $(LOCAL_BIN)/tprompt
+	@touch $(DOGFOOD_MARK)
+	@echo "dogfood ON  → $(LOCAL_BIN)/tprompt overrides the packaged binary (run 'make undogfood' to revert)"
+
+.PHONY: undogfood
+undogfood:
+	@if [ -e $(DOGFOOD_MARK) ]; then \
+		rm -f $(LOCAL_BIN)/tprompt $(DOGFOOD_MARK); \
+		echo "dogfood OFF → tprompt resolves to the packaged (mise) binary"; \
+	else \
+		echo "nothing to do: no dogfood install at $(LOCAL_BIN)/tprompt"; \
+	fi
+
+.PHONY: dogfood-status
+dogfood-status:
+	@if [ -e $(DOGFOOD_MARK) ]; then \
+		echo "dogfood ON  → $(LOCAL_BIN)/tprompt"; \
+	else \
+		echo "dogfood OFF → packaged binary (mise shim)"; \
+	fi
+
 .PHONY: tools
 tools:
 	GOBIN=$(GOBIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
