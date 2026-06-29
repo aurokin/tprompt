@@ -22,7 +22,9 @@ build:
 # `cargo install --path .`: a copy (survives `git worktree remove`), so re-run
 # after each rebuild. A sentinel marks the copy as dogfood-managed so dogfood
 # never clobbers — and undogfood never deletes — a tprompt you installed there by
-# other means.
+# other means. The mark is claimed before the binary is written: a partial
+# failure can only leave a mark with no binary (which the next dogfood heals),
+# never a binary with no mark (which the guard would wedge).
 LOCAL_BIN    := $(HOME)/.local/bin
 DOGFOOD_MARK := $(LOCAL_BIN)/.tprompt.dogfood
 
@@ -33,8 +35,8 @@ dogfood: build
 		exit 1; \
 	fi
 	@mkdir -p $(LOCAL_BIN)
-	@install -m 0755 bin/tprompt $(LOCAL_BIN)/tprompt
 	@touch $(DOGFOOD_MARK)
+	@install -m 0755 bin/tprompt $(LOCAL_BIN)/tprompt
 	@echo "dogfood ON  → $(LOCAL_BIN)/tprompt overrides the packaged binary (run 'make undogfood' to revert)"
 
 .PHONY: undogfood
