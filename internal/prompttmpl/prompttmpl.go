@@ -53,7 +53,7 @@ type MissingValueError struct {
 }
 
 func (e *MissingValueError) Error() string {
-	return fmt.Sprintf("missing required template value --%s", e.Name)
+	return fmt.Sprintf("--%s is required", e.Name)
 }
 
 // ReservedFlagNames are command/root flags a prompt variable may not shadow.
@@ -228,36 +228,45 @@ func scanPlaceholders(body string, visit func(name string, offset int) error) er
 
 func scanTemplate(body string, text func(segment string, offset int) error, placeholder func(name string, offset int) error) error {
 	for i := 0; i < len(body); {
-		if strings.HasPrefix(body[i:], `\{{`) {
+		switch {
+		case strings.HasPrefix(body[i:], `\{{`):
 			if err := text("{{", i); err != nil {
 				return err
 			}
 			i += len(`\{{`)
-			continue
-		}
-		if strings.HasPrefix(body[i:], "{{") {
-			closeRel := strings.Index(body[i+2:], "}}")
-			if closeRel < 0 {
-				return &InvalidPlaceholderError{Offset: i, Reason: "missing closing }}"}
-			}
-			closeIdx := i + 2 + closeRel
-			name := strings.TrimSpace(body[i+2 : closeIdx])
-			if name == "" {
-				return &InvalidPlaceholderError{Offset: i, Reason: "empty placeholder name"}
-			}
-			if err := placeholder(name, i); err != nil {
+		case strings.HasPrefix(body[i:], "{{"):
+			next, err := emitPlaceholder(body, i, placeholder)
+			if err != nil {
 				return err
 			}
-			i = closeIdx + 2
-			continue
+			i = next
+		default:
+			next := nextSpecial(body, i)
+			if err := text(body[i:next], i); err != nil {
+				return err
+			}
+			i = next
 		}
-		next := nextSpecial(body, i)
-		if err := text(body[i:next], i); err != nil {
-			return err
-		}
-		i = next
 	}
 	return nil
+}
+
+// emitPlaceholder parses the `{{name}}` token at offset i, invokes placeholder,
+// and returns the offset just past the closing `}}`.
+func emitPlaceholder(body string, i int, placeholder func(name string, offset int) error) (int, error) {
+	closeRel := strings.Index(body[i+2:], "}}")
+	if closeRel < 0 {
+		return 0, &InvalidPlaceholderError{Offset: i, Reason: "missing closing }}"}
+	}
+	closeIdx := i + 2 + closeRel
+	name := strings.TrimSpace(body[i+2 : closeIdx])
+	if name == "" {
+		return 0, &InvalidPlaceholderError{Offset: i, Reason: "empty placeholder name"}
+	}
+	if err := placeholder(name, i); err != nil {
+		return 0, err
+	}
+	return closeIdx + 2, nil
 }
 
 func nextSpecial(body string, start int) int {

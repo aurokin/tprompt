@@ -21,8 +21,9 @@
 ### Template value errors
 
 - **required template value missing on `send`** — usage error (exit 2), naming
-  the missing flag (for example `missing required template value --issue`)
+  the missing flag (for example `--issue is required`)
 - **required template value empty in the TUI** — inline recoverable footer error
+  naming the field (for example `Issue is required`)
 - **rendered templated prompt exceeds `max_paste_bytes`** — rejected before
   handoff/delivery; the TUI keeps the input view open, while `send` exits with
   the normal oversize mapping

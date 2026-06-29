@@ -90,21 +90,32 @@ Triggered by `/`. All prompts (including overflow and shadowed prompts) are sear
 ## Template input behavior
 
 When a selected prompt declares frontmatter `variables`, the TUI does not submit
-immediately. It enters template input mode and asks for one variable at a time in
-the order declared by the prompt.
+immediately. It enters template input mode and shows all declared variables at
+once as a single form, in the order declared by the prompt.
 
-- The input view shows the prompt id, `N/M` progress, variable label (or name),
-  optional description, and the current value. Defaults are prefilled.
-- `Enter` accepts the current value and advances. On the final variable, `Enter`
-  validates the rendered prompt size and submits through the handoff path.
-- An empty required value shows an inline footer error and stays on the current
-  variable.
-- `Shift+Tab` moves back to the previous variable with entered values preserved.
-- `Backspace`, printable text, and space edit the current value.
+- The form shows the prompt id, then one row per variable: its label (or name),
+  a `*` marker when required, and its current value. Defaults are prefilled and
+  the first field is focused; the focused field's description (if any) is shown
+  below the form.
+- `Tab`/`↓` and `Shift+Tab`/`↑` move the focused field (clamped at the ends).
+  Moving focus parks the caret at the end of the newly focused field.
+- The focused field has an inline caret. `←`/`→` (or `Ctrl+B`/`Ctrl+F`) move it;
+  `Home`/`Ctrl+A` and `End`/`Ctrl+E` jump to the ends. Printable text and space
+  insert at the caret. `Backspace` deletes the rune before the caret;
+  `Delete`/`Ctrl+D` deletes the rune at the caret. `Ctrl+W` deletes the word
+  before the caret, `Ctrl+K` kills from the caret to the end of the line, and
+  `Ctrl+U` clears the whole field (handy for replacing a prefilled default). The
+  field scrolls horizontally to keep the caret visible, marking hidden text with
+  a leading/trailing `…`, so recently typed text stays on screen in a narrow
+  popup.
+- `Enter` validates the whole form and submits through the handoff path.
+- An empty required value shows an inline footer error and focuses the offending
+  field without submitting.
 - `Esc` leaves template input and returns to the board without submitting.
 - `Ctrl+C` cancels the TUI and exits 0.
 - Rendered prompt size is checked against `max_paste_bytes` before submission; an
-  oversized rendered body stays in template input with an inline error.
+  oversized rendered body stays in the form with an inline error (reporting how
+  many bytes over the limit).
 
 The handoff worker receives only the rendered body. It never prompts for
 variables and never re-renders a prompt.
@@ -115,9 +126,8 @@ The TUI renders a single-line footer showing context-sensitive hints:
 
 - board view: `press a row's [key] to select  [/ search]  [Enter select]  [Esc cancel]`, or with `[/ search (N more)]` when overflow exists. The leading `press a row's [key] to select` legend is width-aware: it is dropped (functional hints kept) when the full line would exceed the terminal width, so the footer stays one line.
 - search view: `/query    [Esc exit search]  [Enter select]  [N matches]`
-- template input view: `[Enter next]  [Esc back]  [Ctrl+C cancel]`, adding
-  `[Shift+Tab prev]` after the first variable and switching to `[Enter submit]`
-  on the final variable
+- template input view: `[Enter submit]  [Ctrl+U clear]  [Esc back]  [Ctrl+C cancel]`,
+  adding `[Tab/↑↓ move]` when the prompt declares more than one variable
 - error view: `clipboard is empty — choose another option  [Esc cancel]`
 
 ## Selection

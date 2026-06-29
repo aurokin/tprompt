@@ -129,9 +129,16 @@ tracker; planned work lives in Linear.
 - `/` enters fuzzy search over prompt ID, title, description, and tags.
 - Overflow prompts are not shown on the board but are reachable through search.
 - The TUI reads clipboard content only when the clipboard row is selected.
-- For templated prompts, the TUI asks for variable values one at a time before
-  submission. Required empty values are recoverable inline errors; `Esc` returns
-  to the board, `Shift+Tab` returns to the previous variable, and `Ctrl+C`
+- For templated prompts, the TUI presents all declared variables at once as a
+  single form (in declaration order, defaults prefilled, focused on the first
+  field). `Tab`/`↑`/`↓` and `Shift+Tab` move the focused field. The focused
+  field has an inline caret moved with `←`/`→`/`Home`/`End` (and their
+  `Ctrl+B`/`Ctrl+F`/`Ctrl+A`/`Ctrl+E` aliases); typing inserts at the caret,
+  `Backspace`/`Delete` remove a character, `Ctrl+W` deletes the previous word,
+  `Ctrl+K` kills to the end of the line, and `Ctrl+U` clears the whole field.
+  `Enter` validates and submits the whole form. A missing
+  required value or an oversized rendered body is a recoverable inline error
+  that focuses the offending field; `Esc` returns to the board and `Ctrl+C`
   cancels.
 - The TUI writes rendered prompt or clipboard content to a private handoff job, spawns a short-lived worker, then exits.
 - The handoff worker verifies target pane readiness using tmux state before injection.

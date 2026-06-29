@@ -3,7 +3,7 @@
 mkdir prompts
 
 ! tprompt send review --config config.toml --target-pane %1
-stderr 'missing required template value --issue'
+stderr '--issue is required'
 
 -- config.toml --
 prompts_dir = "prompts"

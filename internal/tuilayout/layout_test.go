@@ -1,6 +1,10 @@
 package tuilayout
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 func TestRowsPerFrame(t *testing.T) {
 	tests := []struct {
@@ -105,6 +109,37 @@ func TestTruncateToWidth(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := TruncateToWidth(tc.in, tc.width); got != tc.want {
 				t.Fatalf("TruncateToWidth(%q, %d) = %q, want %q", tc.in, tc.width, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRenderField(t *testing.T) {
+	cases := []struct {
+		name   string
+		value  string
+		cursor int
+		width  int
+		want   string
+	}{
+		{"empty shows only cursor", "", 0, 10, "│"},
+		{"fits with cursor mid", "abcd", 2, 10, "ab│cd"},
+		{"cursor at end fits", "abcd", 4, 10, "abcd│"},
+		{"cursor clamped past end", "abcd", 99, 10, "abcd│"},
+		{"scroll keeps tail at end", "0123456789abcdef", 16, 11, "…789abcdef│"},
+		{"scroll keeps head at start", "0123456789abcdef", 0, 11, "│012345678…"},
+		{"scroll both sides in middle", "0123456789abcdef", 8, 9, "…234567│…"},
+		{"wide rune accounted", "aあb", 3, 4, "…b│"},
+		{"zero width blank", "abc", 1, 0, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RenderField(tc.value, tc.cursor, tc.width)
+			if got != tc.want {
+				t.Fatalf("RenderField(%q, %d, %d) = %q, want %q", tc.value, tc.cursor, tc.width, got, tc.want)
+			}
+			if w := lipgloss.Width(got); tc.width > 0 && w > tc.width {
+				t.Fatalf("RenderField width = %d, exceeds %d (%q)", w, tc.width, got)
 			}
 		})
 	}

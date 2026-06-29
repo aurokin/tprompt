@@ -120,14 +120,22 @@ type Model struct {
 	results             []MatchedRow
 	index               *SearchIndex
 
-	// Template input-mode state.
-	templatePromptID string
-	templateScope    string
-	templateBody     string
-	templateVars     []prompttmpl.Variable
-	templateValues   map[string]string
-	templateIndex    int
-	templateInput    string
+	// Template input-mode state. Zero-valued outside modeTemplate.
+	template templateState
+}
+
+// templateState holds the in-progress template form: the selected prompt's
+// identity and body, its declared variables, the working values map (seeded
+// from defaults and edited in place), and the focused field index. It is the
+// zero value whenever the Model is not in modeTemplate.
+type templateState struct {
+	promptID string
+	scope    string
+	body     string
+	vars     []prompttmpl.Variable
+	values   map[string]string
+	focus    int
+	cursor   int // caret rune offset within the focused field's value
 }
 
 // footerLines is the fixed chrome subtracted from terminal height to compute
@@ -371,20 +379,17 @@ func (m Model) selectPrompt(row Row) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) enterTemplateInput(row Row, prompt store.Prompt) Model {
-	values := prompttmpl.Defaults(prompt.Variables)
-	input := ""
-	if len(prompt.Variables) > 0 {
-		input = values[prompt.Variables[0].Name]
-	}
 	m.mode = modeTemplate
 	m.inlineError = ""
-	m.templatePromptID = row.PromptID
-	m.templateScope = row.Scope
-	m.templateBody = prompt.Body
-	m.templateVars = append([]prompttmpl.Variable(nil), prompt.Variables...)
-	m.templateValues = values
-	m.templateIndex = 0
-	m.templateInput = input
+	m.template = templateState{
+		promptID: row.PromptID,
+		scope:    row.Scope,
+		body:     prompt.Body,
+		vars:     append([]prompttmpl.Variable(nil), prompt.Variables...),
+		values:   prompttmpl.Defaults(prompt.Variables),
+		focus:    0,
+	}
+	m.template.cursor = m.cursorAtEnd()
 	return m
 }
 
@@ -420,101 +425,217 @@ func (m Model) updateTemplate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// The template form shows every variable at once; Tab/Shift+Tab and the
+	// arrow keys move the focused field, Enter validates and submits the whole
+	// form, and any other key edits the focused field's value.
 	switch msg.Type {
 	case tea.KeyEnter:
-		return m.acceptTemplateInput()
-	case tea.KeyShiftTab:
-		return m.previousTemplateInput(), nil
-	case tea.KeyBackspace:
-		runes := []rune(m.templateInput)
-		if len(runes) > 0 {
-			m.templateInput = string(runes[:len(runes)-1])
-			m.inlineError = ""
-		}
-		return m, nil
-	case tea.KeySpace:
-		if !msg.Alt {
-			m.templateInput += " "
-			m.inlineError = ""
-		}
-		return m, nil
-	case tea.KeyRunes:
-		if len(msg.Runes) > 0 && !msg.Alt {
-			m.templateInput += string(msg.Runes)
-			m.inlineError = ""
-		}
-		return m, nil
+		return m.submitTemplateForm()
+	case tea.KeyTab, tea.KeyDown:
+		return m.moveTemplateFocus(+1), nil
+	case tea.KeyShiftTab, tea.KeyUp:
+		return m.moveTemplateFocus(-1), nil
 	default:
-		return m, nil
+		return m.editTemplateField(msg), nil
 	}
+}
+
+// editTemplateField applies a cursor-motion or text-editing key to the focused
+// field. Motion keeps the inline error (you are just looking around); edits
+// clear it. Any unhandled key is a no-op.
+func (m Model) editTemplateField(msg tea.KeyMsg) Model {
+	switch msg.Type {
+	case tea.KeyLeft, tea.KeyCtrlB:
+		return m.setCursor(m.template.cursor - 1)
+	case tea.KeyRight, tea.KeyCtrlF:
+		return m.setCursor(m.template.cursor + 1)
+	case tea.KeyHome, tea.KeyCtrlA:
+		return m.setCursor(0)
+	case tea.KeyEnd, tea.KeyCtrlE:
+		return m.setCursor(m.cursorAtEnd())
+	case tea.KeyBackspace:
+		return m.deleteBeforeCursor()
+	case tea.KeyDelete, tea.KeyCtrlD:
+		return m.deleteAtCursor()
+	case tea.KeyCtrlW:
+		return m.deleteWordBeforeCursor()
+	case tea.KeyCtrlK:
+		return m.killToLineEnd()
+	case tea.KeyCtrlU:
+		return m.clearField()
+	case tea.KeySpace:
+		if msg.Alt {
+			return m
+		}
+		return m.insertAtCursor(" ")
+	case tea.KeyRunes:
+		if msg.Alt || len(msg.Runes) == 0 {
+			return m
+		}
+		return m.insertAtCursor(string(msg.Runes))
+	default:
+		return m
+	}
+}
+
+// setCursor clamps the caret into [0, len] without touching the inline error.
+func (m Model) setCursor(pos int) Model {
+	n := m.cursorAtEnd()
+	switch {
+	case pos < 0:
+		pos = 0
+	case pos > n:
+		pos = n
+	}
+	m.template.cursor = pos
+	return m
+}
+
+// fieldRunes returns the focused field's runes and a caret clamped into range.
+func (m Model) fieldRunes() ([]rune, int) {
+	runes := []rune(m.focusedValue())
+	c := m.template.cursor
+	switch {
+	case c < 0:
+		c = 0
+	case c > len(runes):
+		c = len(runes)
+	}
+	return runes, c
+}
+
+func (m Model) setFieldValue(runes []rune, cursor int) Model {
+	m.template.values[m.focusedTemplateVar().Name] = string(runes)
+	m.template.cursor = cursor
+	m.inlineError = ""
+	return m
+}
+
+func (m Model) insertAtCursor(s string) Model {
+	runes, c := m.fieldRunes()
+	ins := []rune(s)
+	next := make([]rune, 0, len(runes)+len(ins))
+	next = append(next, runes[:c]...)
+	next = append(next, ins...)
+	next = append(next, runes[c:]...)
+	return m.setFieldValue(next, c+len(ins))
+}
+
+func (m Model) deleteBeforeCursor() Model {
+	runes, c := m.fieldRunes()
+	if c == 0 {
+		return m
+	}
+	return m.setFieldValue(append(runes[:c-1], runes[c:]...), c-1)
+}
+
+func (m Model) deleteAtCursor() Model {
+	runes, c := m.fieldRunes()
+	if c >= len(runes) {
+		return m
+	}
+	return m.setFieldValue(append(runes[:c], runes[c+1:]...), c)
+}
+
+// killToLineEnd deletes from the caret to the end of the field (readline Ctrl+K).
+func (m Model) killToLineEnd() Model {
+	runes, c := m.fieldRunes()
+	if c >= len(runes) {
+		return m
+	}
+	return m.setFieldValue(runes[:c], c)
+}
+
+// clearField wipes the whole field and parks the caret at the start (Ctrl+U).
+func (m Model) clearField() Model {
+	return m.setFieldValue(nil, 0)
+}
+
+// deleteWordBeforeCursor removes the whitespace-delimited word before the caret
+// (readline Ctrl+W): it skips spaces immediately left of the caret, then the
+// run of non-space runes.
+func (m Model) deleteWordBeforeCursor() Model {
+	runes, c := m.fieldRunes()
+	if c == 0 {
+		return m
+	}
+	start := c
+	for start > 0 && unicode.IsSpace(runes[start-1]) {
+		start--
+	}
+	for start > 0 && !unicode.IsSpace(runes[start-1]) {
+		start--
+	}
+	return m.setFieldValue(append(runes[:start], runes[c:]...), start)
 }
 
 func (m Model) exitTemplateInput() Model {
 	m.mode = modeBoard
 	m.inlineError = ""
-	m.templatePromptID = ""
-	m.templateScope = ""
-	m.templateBody = ""
-	m.templateVars = nil
-	m.templateValues = nil
-	m.templateIndex = 0
-	m.templateInput = ""
+	m.template = templateState{}
 	return m
 }
 
-func (m Model) previousTemplateInput() Model {
-	if m.templateIndex <= 0 || m.templateIndex >= len(m.templateVars) {
+// focusedTemplateVar returns the variable under the form's focus. modeTemplate
+// is only entered with at least one variable and focus is kept in range by
+// moveTemplateFocus, so the index is always valid here.
+func (m Model) focusedTemplateVar() prompttmpl.Variable {
+	return m.template.vars[m.template.focus]
+}
+
+// focusedValue is the current text of the focused field.
+func (m Model) focusedValue() string {
+	return m.template.values[m.focusedTemplateVar().Name]
+}
+
+// cursorAtEnd is the caret offset for the end of the focused field's value.
+func (m Model) cursorAtEnd() int {
+	return len([]rune(m.focusedValue()))
+}
+
+// moveTemplateFocus shifts the focused field by delta (±1), clamping at the
+// ends like the board cursor, and parks the caret at the end of the newly
+// focused field. A focus change is a real action, so it clears any inline error.
+func (m Model) moveTemplateFocus(delta int) Model {
+	next := m.template.focus + delta
+	if next < 0 || next >= len(m.template.vars) {
 		return m
 	}
-	current := m.templateVars[m.templateIndex]
-	m.templateValues[current.Name] = m.templateInput
-	m.templateIndex--
-	previous := m.templateVars[m.templateIndex]
-	m.templateInput = m.templateValues[previous.Name]
+	m.template.focus = next
+	m.template.cursor = m.cursorAtEnd()
 	m.inlineError = ""
 	return m
 }
 
-func (m Model) acceptTemplateInput() (tea.Model, tea.Cmd) {
-	if m.templateIndex < 0 || m.templateIndex >= len(m.templateVars) {
-		m.submitErr = fmt.Errorf("tui: template input index out of range")
-		m.result = Result{Action: ActionPrompt, PromptID: m.templatePromptID, Scope: m.templateScope}
-		return m, tea.Quit
+// submitTemplateForm validates required values, renders the body, and submits.
+// A missing required value focuses the offending field; an oversized rendered
+// body keeps the form open. Both surface a recoverable inline error.
+func (m Model) submitTemplateForm() (tea.Model, tea.Cmd) {
+	for i, v := range m.template.vars {
+		if v.Required && strings.TrimSpace(m.template.values[v.Name]) == "" {
+			m.template.focus = i
+			m.template.cursor = m.cursorAtEnd()
+			m.inlineError = fmt.Sprintf("%s is required", templateVarLabel(v))
+			return m, nil
+		}
 	}
-	current := m.templateVars[m.templateIndex]
-	if current.Required && strings.TrimSpace(m.templateInput) == "" {
-		m.inlineError = fmt.Sprintf("%s is required", templateVarLabel(current))
-		return m, nil
-	}
-	m.templateValues[current.Name] = m.templateInput
-	if m.templateIndex < len(m.templateVars)-1 {
-		m.templateIndex++
-		next := m.templateVars[m.templateIndex]
-		m.templateInput = m.templateValues[next.Name]
-		m.inlineError = ""
-		return m, nil
-	}
-	return m.submitTemplatePrompt()
-}
-
-func (m Model) submitTemplatePrompt() (tea.Model, tea.Cmd) {
-	rendered, err := prompttmpl.Render(m.templateBody, m.templateVars, m.templateValues)
+	rendered, err := prompttmpl.Render(m.template.body, m.template.vars, m.template.values)
 	if err != nil {
 		m.submitErr = err
-		m.result = Result{Action: ActionPrompt, PromptID: m.templatePromptID, Scope: m.templateScope}
+		m.result = Result{Action: ActionPrompt, PromptID: m.template.promptID, Scope: m.template.scope}
 		return m, tea.Quit
 	}
 	if m.deps.MaxPasteBytes > 0 && int64(len(rendered)) > m.deps.MaxPasteBytes {
-		m.inlineError = "prompt body exceeds max_paste_bytes — edit a value or press Esc"
+		m.inlineError = fmt.Sprintf("rendered prompt exceeds max_paste_bytes (%d > %d) — edit a value or press Esc", len(rendered), m.deps.MaxPasteBytes)
 		return m, nil
 	}
 	m.inlineError = ""
 	m.pendingSubmit = true
 	return m, submitCmd(m.deps.Submitter, Result{
 		Action:         ActionPrompt,
-		PromptID:       m.templatePromptID,
-		Scope:          m.templateScope,
-		TemplateValues: cloneTemplateValues(m.templateValues),
+		PromptID:       m.template.promptID,
+		Scope:          m.template.scope,
+		TemplateValues: cloneTemplateValues(m.template.values),
 	})
 }
 
@@ -791,28 +912,79 @@ func (m Model) viewSearch(width int) string {
 }
 
 func (m Model) viewTemplate(width int) string {
-	if len(m.templateVars) == 0 || m.templateIndex >= len(m.templateVars) {
+	if len(m.template.vars) == 0 || m.template.focus < 0 || m.template.focus >= len(m.template.vars) {
 		return m.footer()
 	}
-	current := m.templateVars[m.templateIndex]
-	label := templateVarLabel(current)
-	if current.Required {
-		label += " *"
-	}
+	labelWidth := templateLabelWidth(m.template.vars)
+	// "> " marker + padded label + "  " separator precede the value column.
+	valueCol := max(0, width-labelWidth-4)
 
-	lines := []string{
-		fmt.Sprintf("%s  [%d/%d]", m.templatePromptID, m.templateIndex+1, len(m.templateVars)),
-		layout.TruncateToWidth(label, width),
+	lines := []string{layout.TruncateToWidth(m.template.promptID, width)}
+	for i, v := range m.template.vars {
+		marker := "  "
+		if i == m.template.focus {
+			marker = "> "
+		}
+		label := templateVarLabel(v)
+		if v.Required {
+			label += " *"
+		}
+		// The focused field draws a caret and scrolls to keep it visible;
+		// unfocused fields are static and keep their head. Both render the
+		// sanitized value; the focused caret is mapped into sanitized-rune space
+		// so it lines up with the visible text even when StripAll drops escape
+		// bytes the caret has passed (the stored value stays raw).
+		var value string
+		if i == m.template.focus {
+			display, caret := templateInputDisplayCursor(m.template.values[v.Name], m.template.cursor)
+			value = layout.RenderField(display, caret, valueCol)
+		} else {
+			value = layout.TruncateToWidth(templateInputDisplay(m.template.values[v.Name]), valueCol)
+		}
+		lines = append(lines, marker+layout.PadRight(label, labelWidth)+"  "+value)
 	}
-	if current.Description != "" {
-		lines = append(lines, layout.TruncateToWidth(current.Description, width))
+	if desc := m.focusedTemplateVar().Description; desc != "" {
+		lines = append(lines, layout.TruncateToWidth(desc, width))
 	}
-	lines = append(lines, "> "+layout.TruncateToWidth(templateInputDisplay(m.templateInput), max(0, width-2)))
 	return strings.Join(lines, "\n") + "\n" + m.footer()
+}
+
+// templateLabelWidth is the rendered width of the widest variable label
+// (including the required marker), so the value column aligns across rows.
+func templateLabelWidth(vars []prompttmpl.Variable) int {
+	w := 0
+	for _, v := range vars {
+		label := templateVarLabel(v)
+		if v.Required {
+			label += " *"
+		}
+		if lw := lipgloss.Width(label); lw > w {
+			w = lw
+		}
+	}
+	return w
 }
 
 func templateInputDisplay(value string) string {
 	return string(sanitize.StripAll([]byte(value)))
+}
+
+// templateInputDisplayCursor sanitizes value for display and maps a caret
+// measured in raw runes into the equivalent offset in the sanitized string, so
+// the rendered caret lines up with the visible text even when StripAll removes
+// escape bytes the caret has passed. StripAll only drops ESC-initiated
+// sequences, so sanitizing the raw prefix yields a caret that is monotonic and
+// never exceeds the sanitized length. The stored value stays raw; editing keeps
+// indexing it directly — this mapping only affects rendering.
+func templateInputDisplayCursor(value string, cursor int) (string, int) {
+	runes := []rune(value)
+	switch {
+	case cursor < 0:
+		cursor = 0
+	case cursor > len(runes):
+		cursor = len(runes)
+	}
+	return templateInputDisplay(value), len([]rune(templateInputDisplay(string(runes[:cursor]))))
 }
 
 // renderRowList formats rows as the three-column keybind board, highlighting
@@ -909,15 +1081,11 @@ func (m Model) footerHints() string {
 }
 
 func (m Model) templateFooterHints() string {
-	action := "next"
-	if m.templateIndex == len(m.templateVars)-1 {
-		action = "submit"
+	parts := []string{"[Enter submit]"}
+	if len(m.template.vars) > 1 {
+		parts = append(parts, "[Tab/↑↓ move]")
 	}
-	parts := []string{fmt.Sprintf("[Enter %s]", action)}
-	if m.templateIndex > 0 {
-		parts = append(parts, "[Shift+Tab prev]")
-	}
-	parts = append(parts, "[Esc back]", "[Ctrl+C cancel]")
+	parts = append(parts, "[Ctrl+U clear]", "[Esc back]", "[Ctrl+C cancel]")
 	return strings.Join(parts, "  ")
 }
 

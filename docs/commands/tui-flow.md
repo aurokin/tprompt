@@ -15,9 +15,9 @@ Allow the user to select a prompt **or** paste the clipboard from the TUI, then 
 3. The built-in TUI presents the keybind board (pinned clipboard row + prompts).
 4. On selection:
    - **Prompt row without variables** — TUI resolves the prompt body and submits through the prompt handoff path with `source = "prompt"`.
-   - **Prompt row with variables** — TUI resolves the prompt, asks for each
-     declared variable in order, validates the rendered size, and submits
-     through the prompt handoff path with `source = "prompt"`.
+   - **Prompt row with variables** — TUI resolves the prompt, presents all
+     declared variables at once as a single form, validates the rendered size,
+     and submits through the prompt handoff path with `source = "prompt"`.
    - **Clipboard row** — TUI reads the clipboard, validates it, and submits through the clipboard handoff path with `source = "clipboard"` and the captured bytes in `body`. If validation fails, the TUI shows an inline error and stays open.
    - **Search match** — same as the corresponding row above.
 5. The submitter writes the job to a private per-user jobs directory, spawns `tprompt handoff --job <path>` detached, and the TUI exits.

@@ -135,8 +135,8 @@ TUIModelDeps {
 ```
 
 The production TUI model owns recoverable selection handling. It resolves prompt
-bodies, collects frontmatter-declared template variables one at a time, reads
-clipboard content, validates `max_paste_bytes`, and invokes the injected
+bodies, collects frontmatter-declared template variables through a single form,
+reads clipboard content, validates `max_paste_bytes`, and invokes the injected
 `Submitter` via a Bubble Tea command. `Renderer.Run` returns the final
 `TUIResult` plus any submit error so the command layer can apply normal
 exit-code mapping.

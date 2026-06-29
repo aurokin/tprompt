@@ -87,3 +87,96 @@ func TruncateToWidth(s string, maxWidth int) string {
 	}
 	return "…"
 }
+
+// FieldCursor is the glyph drawn at the caret of an active input field. It is a
+// plain rune (not a styled cell) so the rendered field stays assertable in
+// view tests and never emits escape bytes.
+const FieldCursor = "│"
+
+// RenderField renders value as an active single-line input of the given width,
+// drawing FieldCursor at the cursor rune offset and scrolling horizontally so
+// the cursor stays visible. A leading/trailing "…" marks hidden text. cursor is
+// clamped into [0, len([]rune(value))].
+func RenderField(value string, cursor, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	switch {
+	case cursor < 0:
+		cursor = 0
+	case cursor > len(runes):
+		cursor = len(runes)
+	}
+	withCursor := string(runes[:cursor]) + FieldCursor + string(runes[cursor:])
+	if lipgloss.Width(withCursor) <= width {
+		return withCursor
+	}
+	if width < 3 {
+		// Too narrow to window meaningfully; degrade without overflowing.
+		return TruncateToWidth(withCursor, width)
+	}
+
+	start, end, left, right := fieldWindowWithEllipses(runes, cursor, width-1)
+	var b strings.Builder
+	if left {
+		b.WriteString("…")
+	}
+	b.WriteString(string(runes[start:cursor]))
+	b.WriteString(FieldCursor)
+	b.WriteString(string(runes[cursor:end]))
+	if right {
+		b.WriteString("…")
+	}
+	return b.String()
+}
+
+// fieldWindowWithEllipses picks the [start, end) window around cursor and which
+// sides are truncated, reserving a column for each ellipsis it will draw. It
+// iterates to a fixed point because reserving for one ellipsis can shrink the
+// window enough to truncate (and thus need an ellipsis on) the other side.
+func fieldWindowWithEllipses(runes []rune, cursor, budget int) (start, end int, left, right bool) {
+	for reserve := 0; ; {
+		start, end = fieldWindow(runes, cursor, budget-reserve)
+		left, right = start > 0, end < len(runes)
+		need := 0
+		if left {
+			need++
+		}
+		if right {
+			need++
+		}
+		if need <= reserve {
+			return start, end, left, right
+		}
+		reserve = need
+	}
+}
+
+// fieldWindow grows a [start, end) rune window outward from cursor, left first
+// (so an end-of-field caret keeps its tail visible), until the rendered width
+// of the included runes would exceed budget.
+func fieldWindow(runes []rune, cursor, budget int) (int, int) {
+	start, end, used := cursor, cursor, 0
+	for start > 0 {
+		w := runeWidth(runes[start-1])
+		if used+w > budget {
+			break
+		}
+		used += w
+		start--
+	}
+	for end < len(runes) {
+		w := runeWidth(runes[end])
+		if used+w > budget {
+			break
+		}
+		used += w
+		end++
+	}
+	return start, end
+}
+
+func runeWidth(r rune) int {
+	return lipgloss.Width(string(r))
+}

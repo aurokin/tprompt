@@ -184,102 +184,148 @@ type parsedSendArgs struct {
 	help         bool
 }
 
+// sendArgParser walks the raw `send` argv (cobra flag parsing is disabled so a
+// template value may itself look like a flag) and splits it into the prompt id,
+// recognized delivery flags, and the leftover template arguments.
+type sendArgParser struct {
+	args       []string
+	configPath *string
+	parsed     parsedSendArgs
+}
+
+// sendStringFlags maps each string-valued built-in flag to the field it sets,
+// collapsing the otherwise-identical "read a value, store it" cases.
+var sendStringFlags = map[string]func(p *sendArgParser, value string){
+	"config":      func(p *sendArgParser, v string) { *p.configPath = v },
+	"target-pane": func(p *sendArgParser, v string) { p.parsed.flags.targetPane = v },
+	"mode":        func(p *sendArgParser, v string) { p.parsed.flags.mode = &v },
+	"sanitize":    func(p *sendArgParser, v string) { p.parsed.flags.sanitize = &v },
+}
+
 func parseSendKnownArgs(args []string, configPath *string) (parsedSendArgs, error) {
-	var parsed parsedSendArgs
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			if parsed.id == "" {
-				i++
-				if i >= len(args) {
-					return parsedSendArgs{}, fmt.Errorf("accepts 1 arg(s), received 0")
-				}
-				parsed.id = args[i]
-				continue
-			}
-			continue
+	p := &sendArgParser{args: args, configPath: configPath}
+	for i := 0; i < len(args); {
+		next, err := p.step(i)
+		if err != nil {
+			return parsedSendArgs{}, err
 		}
-		if arg == "-h" {
-			if parsed.id == "" {
-				parsed.help = true
-				return parsed, nil
-			}
-			parsed.templateArgs = append(parsed.templateArgs, arg)
-			continue
+		if p.parsed.help {
+			return p.parsed, nil
 		}
-		if strings.HasPrefix(arg, "--") {
-			name, value, hasValue := splitLongFlag(arg)
-			switch name {
-			case "help":
-				if parsed.id == "" {
-					parsed.help = true
-					return parsed, nil
-				}
-				parsed.templateArgs = append(parsed.templateArgs, arg)
-				if !hasValue && i+1 < len(args) {
-					parsed.templateArgs = append(parsed.templateArgs, args[i+1])
-					i++
-				}
-			case "config":
-				got, next, err := flagValue(args, i, name, value, hasValue)
-				if err != nil {
-					return parsedSendArgs{}, err
-				}
-				*configPath = got
-				i = next
-			case "target-pane":
-				got, next, err := flagValue(args, i, name, value, hasValue)
-				if err != nil {
-					return parsedSendArgs{}, err
-				}
-				parsed.flags.targetPane = got
-				i = next
-			case "mode":
-				got, next, err := flagValue(args, i, name, value, hasValue)
-				if err != nil {
-					return parsedSendArgs{}, err
-				}
-				parsed.flags.mode = &got
-				i = next
-			case "sanitize":
-				got, next, err := flagValue(args, i, name, value, hasValue)
-				if err != nil {
-					return parsedSendArgs{}, err
-				}
-				parsed.flags.sanitize = &got
-				i = next
-			case "enter":
-				got, next, err := boolFlagValue(args, i, name, value, hasValue)
-				if err != nil {
-					return parsedSendArgs{}, err
-				}
-				parsed.flags.pressEnter = &got
-				i = next
-			default:
-				if parsed.id == "" {
-					return parsedSendArgs{}, fmt.Errorf("unknown flag: --%s", name)
-				}
-				parsed.templateArgs = append(parsed.templateArgs, arg)
-				if !hasValue && i+1 < len(args) {
-					parsed.templateArgs = append(parsed.templateArgs, args[i+1])
-					i++
-				}
-			}
-			continue
-		}
-		if parsed.id == "" {
-			parsed.id = arg
-			continue
-		}
-		parsed.templateArgs = append(parsed.templateArgs, arg)
+		i = next
 	}
-	if parsed.help {
-		return parsed, nil
-	}
-	if parsed.id == "" {
+	if p.parsed.id == "" {
 		return parsedSendArgs{}, fmt.Errorf("accepts 1 arg(s), received 0")
 	}
-	return parsed, nil
+	return p.parsed, nil
+}
+
+// step consumes the argument(s) starting at i and returns the next index to
+// read. A help request sets p.parsed.help; the caller stops the loop on it.
+func (p *sendArgParser) step(i int) (int, error) {
+	arg := p.args[i]
+	switch {
+	case arg == "--":
+		return p.handleDashDash(i)
+	case arg == "-h":
+		return p.handleShortHelp(i), nil
+	case strings.HasPrefix(arg, "--"):
+		return p.handleLongFlag(i)
+	default:
+		return p.handlePositional(i), nil
+	}
+}
+
+// handleDashDash treats "--" before the id as "the next token is the id" and,
+// once the id is known, as a harmless separator.
+func (p *sendArgParser) handleDashDash(i int) (int, error) {
+	if p.parsed.id != "" {
+		return i + 1, nil
+	}
+	if i+1 >= len(p.args) {
+		return 0, fmt.Errorf("accepts 1 arg(s), received 0")
+	}
+	p.parsed.id = p.args[i+1]
+	return i + 2, nil
+}
+
+// handleShortHelp requests help when "-h" precedes the id; afterwards a bare
+// "-h" is a template value.
+func (p *sendArgParser) handleShortHelp(i int) int {
+	if p.parsed.id == "" {
+		p.parsed.help = true
+		return i + 1
+	}
+	p.parsed.templateArgs = append(p.parsed.templateArgs, p.args[i])
+	return i + 1
+}
+
+// handlePositional records the first bare token as the id and any later ones as
+// template arguments.
+func (p *sendArgParser) handlePositional(i int) int {
+	if p.parsed.id == "" {
+		p.parsed.id = p.args[i]
+		return i + 1
+	}
+	p.parsed.templateArgs = append(p.parsed.templateArgs, p.args[i])
+	return i + 1
+}
+
+// handleLongFlag dispatches a "--name[=value]" token to its built-in handler,
+// or falls through to help/template handling for everything else.
+func (p *sendArgParser) handleLongFlag(i int) (int, error) {
+	name, value, hasValue := splitLongFlag(p.args[i])
+	switch name {
+	case "help":
+		return p.handleHelpFlag(i, hasValue)
+	case "enter":
+		got, next, err := boolFlagValue(p.args, i, name, value, hasValue)
+		if err != nil {
+			return 0, err
+		}
+		p.parsed.flags.pressEnter = &got
+		return next + 1, nil
+	default:
+		if setter, ok := sendStringFlags[name]; ok {
+			got, next, err := flagValue(p.args, i, name, value, hasValue)
+			if err != nil {
+				return 0, err
+			}
+			setter(p, got)
+			return next + 1, nil
+		}
+		return p.handleUnknownFlag(i, name, hasValue)
+	}
+}
+
+// handleHelpFlag requests help when "--help" precedes the id; afterwards it is a
+// template value.
+func (p *sendArgParser) handleHelpFlag(i int, hasValue bool) (int, error) {
+	if p.parsed.id == "" {
+		p.parsed.help = true
+		return i + 1, nil
+	}
+	return p.appendTemplateArg(i, hasValue), nil
+}
+
+// handleUnknownFlag rejects an unrecognized flag before the id is known;
+// afterwards it is passed through as a template value.
+func (p *sendArgParser) handleUnknownFlag(i int, name string, hasValue bool) (int, error) {
+	if p.parsed.id == "" {
+		return 0, fmt.Errorf("unknown flag: --%s", name)
+	}
+	return p.appendTemplateArg(i, hasValue), nil
+}
+
+// appendTemplateArg records args[i] as a template argument, also pulling in the
+// following token as its value when the flag had no "=value" form.
+func (p *sendArgParser) appendTemplateArg(i int, hasValue bool) int {
+	p.parsed.templateArgs = append(p.parsed.templateArgs, p.args[i])
+	if !hasValue && i+1 < len(p.args) {
+		p.parsed.templateArgs = append(p.parsed.templateArgs, p.args[i+1])
+		return i + 2
+	}
+	return i + 1
 }
 
 func splitLongFlag(arg string) (name, value string, hasValue bool) {
@@ -371,18 +417,23 @@ func runSend(deps Deps, id string, f sendFlags, templateArgs []string) error {
 	}
 	body = string(cleaned)
 
+	return sendToTmux(deps, f.targetPane, delivery, body)
+}
+
+// sendToTmux resolves the target pane and injects body via the configured
+// delivery mode. A user-supplied --target-pane is verified to exist; the
+// current-pane context is trusted implicitly since it is our own pane.
+func sendToTmux(deps Deps, targetPane string, delivery config.Delivery, body string) error {
 	adapter, err := deps.NewTmux()
 	if err != nil {
 		return err
 	}
 
-	target, err := resolveSendTarget(f.targetPane, adapter, deps.Env)
+	target, err := resolveSendTarget(targetPane, adapter, deps.Env)
 	if err != nil {
 		return err
 	}
-	// CurrentContext() returns our own pane, so existence is implicit — only
-	// verify a user-supplied --target-pane.
-	if f.targetPane != "" {
+	if targetPane != "" {
 		exists, err := adapter.PaneExists(context.Background(), target.PaneID)
 		if err != nil {
 			return err
