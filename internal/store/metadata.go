@@ -17,6 +17,10 @@ func sanitizeMeta(meta *promptmeta.Meta) {
 	for i, tag := range meta.Tags {
 		meta.Tags[i] = stripEscapes(tag)
 	}
+	for i := range meta.Variables {
+		meta.Variables[i].Label = stripEscapes(meta.Variables[i].Label)
+		meta.Variables[i].Description = stripEscapes(meta.Variables[i].Description)
+	}
 }
 
 func stripEscapes(value string) string {

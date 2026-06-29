@@ -17,6 +17,7 @@ import (
 	"github.com/aurokin/tprompt/internal/keybind"
 	"github.com/aurokin/tprompt/internal/promptmeta"
 	"github.com/aurokin/tprompt/internal/promptsource"
+	"github.com/aurokin/tprompt/internal/prompttmpl"
 )
 
 // Summary is the light-weight view of a prompt used for listings.
@@ -32,6 +33,7 @@ type Summary struct {
 	Shadowed    bool
 	ShadowedBy  string
 	ShadowPath  string
+	Variables   []prompttmpl.Variable
 }
 
 // KeySource identifies how a prompt's resolved board key was assigned.
@@ -404,6 +406,9 @@ func discoverPromptFiles(root string, source promptsource.Source) ([]discoveredP
 	if err := validatePromptDefaults(entries); err != nil {
 		return nil, err
 	}
+	if err := validatePromptTemplates(entries); err != nil {
+		return nil, err
+	}
 	return entries, nil
 }
 
@@ -462,6 +467,7 @@ func buildDiscoveredPrompt(path string, source promptsource.Source, parsed promp
 				Tags:        append([]string(nil), parsed.Meta.Tags...),
 				Path:        path,
 				Scope:       scope,
+				Variables:   cloneVariables(parsed.Meta.Variables),
 			},
 			Body: parsed.Body,
 			Defaults: DeliveryDefaults{
@@ -529,6 +535,15 @@ func validatePromptDefaults(entries []discoveredPrompt) error {
 	return nil
 }
 
+func validatePromptTemplates(entries []discoveredPrompt) error {
+	for _, entry := range entries {
+		if err := prompttmpl.Validate(entry.prompt.Variables, entry.prompt.Body); err != nil {
+			return fmt.Errorf("validate prompt template %s: %w", entry.prompt.Path, err)
+		}
+	}
+	return nil
+}
+
 func clonePrompt(prompt Prompt) Prompt {
 	prompt.Summary = cloneSummary(prompt.Summary)
 	prompt.Defaults.Enter = cloneBoolPtr(prompt.Defaults.Enter)
@@ -545,7 +560,12 @@ func cloneSummaries(summaries []Summary) []Summary {
 
 func cloneSummary(summary Summary) Summary {
 	summary.Tags = append([]string(nil), summary.Tags...)
+	summary.Variables = cloneVariables(summary.Variables)
 	return summary
+}
+
+func cloneVariables(vars []prompttmpl.Variable) []prompttmpl.Variable {
+	return append([]prompttmpl.Variable(nil), vars...)
 }
 
 func promptRef(summary Summary) string {

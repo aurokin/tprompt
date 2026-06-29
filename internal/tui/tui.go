@@ -18,6 +18,9 @@ type Result struct {
 	Action   Action
 	PromptID string // populated when Action == ActionPrompt
 	Scope    string // optional; disambiguates shadowed cross-tier prompts.
+	// TemplateValues carries frontmatter-declared variable values collected by
+	// the TUI before handoff submission. Empty for non-template prompts.
+	TemplateValues map[string]string
 	// ClipboardBody is captured by the Renderer at the moment of intent so the
 	// handoff worker never re-reads the clipboard. Populated when Action == ActionClipboard.
 	ClipboardBody []byte

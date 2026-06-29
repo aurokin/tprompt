@@ -8,6 +8,7 @@ import (
 
 	"github.com/aurokin/tprompt/internal/keybind"
 	"github.com/aurokin/tprompt/internal/promptsource"
+	"github.com/aurokin/tprompt/internal/prompttmpl"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -207,6 +208,78 @@ func TestFSStoreRejectsInvalidPromptMode(t *testing.T) {
 	}
 	if modeErr.Value != "turbo" {
 		t.Fatalf("Value = %q, want %q", modeErr.Value, "turbo")
+	}
+}
+
+func TestFSStoreCarriesTemplateVariables(t *testing.T) {
+	dir := t.TempDir()
+	writePrompt(t, dir, "templated.md", `---
+variables:
+  - name: issue-id
+    label: Issue
+    required: true
+  - name: focus
+    default: correctness
+---
+Review {{issue-id}} for {{focus}}.
+`)
+
+	s := NewFS(dir, nil, []rune("123"))
+	prompt, err := s.Resolve("templated")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	want := []prompttmpl.Variable{
+		{Name: "issue-id", Label: "Issue", Required: true},
+		{Name: "focus", Default: "correctness"},
+	}
+	if diff := cmp.Diff(want, prompt.Variables); diff != "" {
+		t.Fatalf("Variables mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestFSStoreRejectsInvalidTemplate(t *testing.T) {
+	tests := map[string]struct {
+		body string
+		want any
+	}{
+		"bad variable": {
+			body: "---\nvariables:\n  - name: Issue\n---\nbody\n",
+			want: &prompttmpl.InvalidVariableError{},
+		},
+		"unused variable": {
+			body: "---\nvariables:\n  - name: issue\n  - name: focus\n---\n{{issue}}\n",
+			want: &prompttmpl.InvalidVariableError{},
+		},
+		"unknown placeholder": {
+			body: "---\nvariables:\n  - name: issue\n---\n{{focus}}\n",
+			want: &prompttmpl.InvalidPlaceholderError{},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			writePrompt(t, dir, "alpha.md", tc.body)
+
+			s := NewFS(dir, nil, []rune("123"))
+			err := s.Discover()
+			if err == nil {
+				t.Fatal("want error, got nil")
+			}
+			switch tc.want.(type) {
+			case *prompttmpl.InvalidVariableError:
+				var got *prompttmpl.InvalidVariableError
+				if !errors.As(err, &got) {
+					t.Fatalf("err = %T: %v, want InvalidVariableError", err, err)
+				}
+			case *prompttmpl.InvalidPlaceholderError:
+				var got *prompttmpl.InvalidPlaceholderError
+				if !errors.As(err, &got) {
+					t.Fatalf("err = %T: %v, want InvalidPlaceholderError", err, err)
+				}
+			}
+		})
 	}
 }
 

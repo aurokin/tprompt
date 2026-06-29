@@ -13,6 +13,20 @@
 - **duplicate frontmatter `key:` across prompts** (case-insensitive)
 - **frontmatter `key:` collides with a reserved key**
 - **malformed frontmatter `key:`** (multi-char, empty, non-printable, symbolic like `ctrl+x`)
+- **malformed frontmatter `variables` declaration** (missing/invalid/duplicate
+  name, unused declaration, or a name colliding with a built-in flag)
+- **malformed template placeholder** (unknown variable, invalid name, empty
+  placeholder, or unclosed `{{`)
+
+### Template value errors
+
+- **required template value missing on `send`** — usage error (exit 2), naming
+  the missing flag (for example `--issue is required`)
+- **required template value empty in the TUI** — inline recoverable footer error
+  naming the field (for example `Issue is required`)
+- **rendered templated prompt exceeds `max_paste_bytes`** — rejected before
+  handoff/delivery; the TUI keeps the input view open, while `send` exits with
+  the normal oversize mapping
 
 ### Environment errors
 
@@ -79,6 +93,8 @@ Invalid frontmatter key 'ctrl+x' in /prompts/review/commit.md: must be a single 
 No clipboard reader available; install pbpaste, wl-paste, xclip, or xsel, or set `clipboard_read_command`
 Clipboard content exceeds max_paste_bytes (4823104 > 2097152)
 Content rejected by sanitizer (mode=strict): escape sequence detected at byte 142 (OSC)
+Missing required template value --issue
+Invalid template placeholder "focus" at byte 42: not declared in frontmatter variables
 ```
 
 ## Example bad error

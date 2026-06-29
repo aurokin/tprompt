@@ -38,8 +38,8 @@ func frontmatterKeys(md string) []string {
 // frontmatter keys, in the same order, as `tprompt new` scaffolds. The field set
 // is defined in two places by necessity — new.go's scaffoldTemplate (a literal)
 // and wispr.buildFrontmatter (marshaled) — so this test, not a shared
-// abstraction, is the contract that keeps them in sync. Add a 7th field to one
-// side without the other and this fails loudly.
+// abstraction, is the contract that keeps them in sync. Add a field to one side
+// without the other and this fails loudly.
 func TestImportFrontmatterMatchesNewScaffold(t *testing.T) {
 	scaffoldKeys := frontmatterKeys(scaffoldTemplate)
 	if len(scaffoldKeys) == 0 {

@@ -11,6 +11,7 @@ import (
 	"github.com/aurokin/tprompt/internal/clipboard"
 	"github.com/aurokin/tprompt/internal/config"
 	"github.com/aurokin/tprompt/internal/delivery"
+	"github.com/aurokin/tprompt/internal/prompttmpl"
 	"github.com/aurokin/tprompt/internal/store"
 	"github.com/aurokin/tprompt/internal/tmux"
 	"github.com/aurokin/tprompt/internal/tui"
@@ -59,7 +60,7 @@ type submitter struct {
 func (s *submitter) Submit(result tui.Result) error {
 	switch result.Action {
 	case tui.ActionPrompt:
-		return s.submitPrompt(result.PromptID, result.Scope)
+		return s.submitPrompt(result.PromptID, result.Scope, result.TemplateValues)
 	case tui.ActionClipboard:
 		return s.submitClipboard(result.ClipboardBody)
 	case tui.ActionCancel:
@@ -69,7 +70,7 @@ func (s *submitter) Submit(result tui.Result) error {
 	}
 }
 
-func (s *submitter) submitPrompt(id, scope string) error {
+func (s *submitter) submitPrompt(id, scope string, values map[string]string) error {
 	var (
 		prompt store.Prompt
 		err    error
@@ -95,7 +96,11 @@ func (s *submitter) submitPrompt(id, scope string) error {
 		return err
 	}
 
-	body := []byte(prompt.Body)
+	rendered, err := prompttmpl.Render(prompt.Body, prompt.Variables, values)
+	if err != nil {
+		return err
+	}
+	body := []byte(rendered)
 	if s.cfg.MaxPasteBytes > 0 && int64(len(body)) > s.cfg.MaxPasteBytes {
 		return &BodyTooLargeError{Bytes: len(body), Limit: s.cfg.MaxPasteBytes}
 	}

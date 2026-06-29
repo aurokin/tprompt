@@ -8,6 +8,7 @@ import (
 	"github.com/aurokin/tprompt/internal/clipboard"
 	"github.com/aurokin/tprompt/internal/config"
 	"github.com/aurokin/tprompt/internal/delivery"
+	"github.com/aurokin/tprompt/internal/prompttmpl"
 	"github.com/aurokin/tprompt/internal/store"
 	"github.com/aurokin/tprompt/internal/tmux"
 	"github.com/aurokin/tprompt/internal/tui"
@@ -147,6 +148,49 @@ func TestSubmit_FrontmatterOverridesDelivery(t *testing.T) {
 	}
 	if !dc.lastReq.Job.Enter {
 		t.Error("Enter = false, want true (frontmatter override)")
+	}
+}
+
+func TestSubmit_RendersTemplateValuesIntoPromptJob(t *testing.T) {
+	prompt := basePrompt()
+	prompt.Body = "Review {{issue}} for {{focus}}."
+	prompt.Variables = []prompttmpl.Variable{
+		{Name: "issue", Required: true},
+		{Name: "focus", Default: "correctness"},
+	}
+	fs := &fakeStore{prompts: map[string]store.Prompt{"demo": prompt}}
+	dc := &fakeDeliveryClient{resp: delivery.SubmitResponse{Accepted: true}}
+
+	s := New(fs, dc, baseCfg(), baseTarget())
+	err := s.Submit(tui.Result{
+		Action:         tui.ActionPrompt,
+		PromptID:       "demo",
+		TemplateValues: map[string]string{"issue": "AUR-123"},
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	if got := string(dc.lastReq.Job.Body); got != "Review AUR-123 for correctness." {
+		t.Fatalf("job body = %q", got)
+	}
+}
+
+func TestSubmit_MissingTemplateValueReturnsTypedError(t *testing.T) {
+	prompt := basePrompt()
+	prompt.Body = "Review {{issue}}."
+	prompt.Variables = []prompttmpl.Variable{{Name: "issue", Required: true}}
+	fs := &fakeStore{prompts: map[string]store.Prompt{"demo": prompt}}
+	dc := &fakeDeliveryClient{}
+
+	s := New(fs, dc, baseCfg(), baseTarget())
+	err := s.Submit(tui.Result{Action: tui.ActionPrompt, PromptID: "demo"})
+	var missing *prompttmpl.MissingValueError
+	if !errors.As(err, &missing) {
+		t.Fatalf("want MissingValueError, got %T: %v", err, err)
+	}
+	if dc.calls != 0 {
+		t.Fatalf("handoff calls = %d, want 0", dc.calls)
 	}
 }
 

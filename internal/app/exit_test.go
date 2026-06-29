@@ -9,6 +9,7 @@ import (
 	"github.com/aurokin/tprompt/internal/delivery"
 	"github.com/aurokin/tprompt/internal/keybind"
 	"github.com/aurokin/tprompt/internal/promptsource"
+	"github.com/aurokin/tprompt/internal/prompttmpl"
 	"github.com/aurokin/tprompt/internal/sanitize"
 	"github.com/aurokin/tprompt/internal/store"
 	"github.com/aurokin/tprompt/internal/submitter"
@@ -47,6 +48,8 @@ func TestExitCodePromptErrors(t *testing.T) {
 		{"DuplicateKeybind", &keybind.DuplicateKeybindError{Key: 'a'}},
 		{"ReservedKeybind", &keybind.ReservedKeybindError{Key: 'p', Action: "clipboard"}},
 		{"MalformedKeybind", &keybind.MalformedKeybindError{Value: "ctrl+x"}},
+		{"InvalidTemplateVariable", &prompttmpl.InvalidVariableError{Name: "Issue", Reason: "bad"}},
+		{"InvalidTemplatePlaceholder", &prompttmpl.InvalidPlaceholderError{Placeholder: "focus", Reason: "bad"}},
 		{"StrictReject", &sanitize.StrictRejectError{Class: "OSC", Offset: 0}},
 		{"BodyTooLarge", &submitter.BodyTooLargeError{Bytes: 10, Limit: 5}},
 		{"ClipboardEmpty", &clipboard.EmptyClipboardError{}},
@@ -58,6 +61,12 @@ func TestExitCodePromptErrors(t *testing.T) {
 				t.Fatalf("ExitCode(%T) = %d, want %d", tc.err, got, ExitPrompt)
 			}
 		})
+	}
+}
+
+func TestExitCodeMissingTemplateValueIsUsage(t *testing.T) {
+	if got := ExitCode(&prompttmpl.MissingValueError{Name: "issue"}); got != ExitUsage {
+		t.Fatalf("ExitCode(MissingValueError) = %d, want %d", got, ExitUsage)
 	}
 }
 

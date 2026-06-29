@@ -29,10 +29,11 @@ type Reader interface {
 }
 
 // buildFrontmatter renders the prompt header in the same field order and shape
-// that `tprompt new` scaffolds (title, description, tags, key, mode, enter), so
-// an imported prompt is as immediately editable as a scaffolded one (AUR-526).
-// Only title and tags are populated; description/key/mode/enter are empty stubs
-// the author fills in later.
+// that `tprompt new` scaffolds (title, description, tags, key, mode, enter,
+// variables), so an imported prompt is as immediately editable as a scaffolded
+// one (AUR-526). Only title and tags are populated; description/key/mode/enter
+// are empty stubs, and variables starts as an empty list for the author to fill
+// in later.
 //
 // title and tags are the only snippet-controlled fields — a phrase may contain
 // ':' or quotes, and a --tag value is arbitrary — so they are YAML-marshaled to
@@ -61,6 +62,7 @@ func buildFrontmatter(phrase string, tags []string) []byte {
 	b.WriteString("key:\n")
 	b.WriteString("mode:\n")
 	b.WriteString("enter:\n")
+	b.WriteString("variables: []\n")
 	return []byte(b.String())
 }
 

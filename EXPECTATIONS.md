@@ -19,14 +19,26 @@ tracker; planned work lives in Linear.
   (`global` by default). The losing prompt is shadowed, remains visible in
   `list`, and remains searchable in the TUI.
 - Optional YAML frontmatter may define metadata such as `title`,
-  `description`, `tags`, delivery defaults, and `key`.
-- Frontmatter is metadata only. Delivery injects the markdown body, not the frontmatter.
+  `description`, `tags`, delivery defaults, `key`, and `variables`.
+- Frontmatter is never injected. Delivery injects the markdown body after
+  applying any declared template variables.
+- Template variables are ordered string inputs declared in frontmatter
+  `variables`. Placeholder syntax is `{{name}}`; `\{{name}}` renders a literal
+  placeholder. No conditionals, functions, includes, snippets, or prompt
+  composition are supported.
+- Variable names must be lowercase kebab-case, must be unique within the prompt,
+  and must not collide with built-in `send`/root flags such as `mode`, `enter`,
+  `target-pane`, `sanitize`, `config`, or `help`.
+- Every declared variable must be used by at least one unescaped placeholder in
+  the prompt body.
 - The parser strips one leading line break after the closing frontmatter fence and one trailing line break (`\n` or `\r\n`) from the body, so the canonical blank-line-after-fence and POSIX EOF newline that editors enforce do not become extra blank lines at paste time.
 - Duplicate, reserved, or malformed `key:` values are invalid.
 
 ## CLI Behavior
 
-- `tprompt send <id>` performs direct prompt delivery.
+- `tprompt send <id>` performs direct prompt delivery. If the prompt declares
+  variables, matching prompt-specific flags after `<id>` provide values (for
+  example `tprompt send review --issue AUR-123`).
 - `tprompt paste` performs direct clipboard delivery.
 - `tprompt pick` invokes the configured external picker and prints the selected prompt ID.
 - `tprompt tui` launches the built-in TUI and submits delivery through a short-lived handoff worker.
@@ -69,9 +81,10 @@ tracker; planned work lives in Linear.
 - It reads **only snippets** (Wispr `Dictionary` rows that are snippets and not
   deleted); it never reads dictation History.
 - Imported prompts carry the same frontmatter fields that `tprompt new`
-  scaffolds (`title`, `description`, `tags`, `key`, `mode`, `enter`): `title` and
-  `tags` come from the snippet and the rest are empty stubs, so an imported prompt
-  is as ready to edit (add a keybind, set the delivery mode) as a scaffolded one.
+  scaffolds (`title`, `description`, `tags`, `key`, `mode`, `enter`,
+  `variables`): `title` and `tags` come from the snippet and the rest are empty
+  stubs, so an imported prompt is as ready to edit (add a keybind, set the
+  delivery mode, declare variables) as a scaffolded one.
 - Import is idempotent and **skip-by-default**: a snippet whose id already
   exists as a prompt is skipped, so re-runs never create duplicates. `--overwrite`
   refreshes existing prompts from Wispr; `--dry-run` previews without writing;
@@ -109,11 +122,25 @@ tracker; planned work lives in Linear.
 - The TUI is built in; it is separate from the external `pick` command.
 - The board shows single-key prompt shortcuts plus a pinned clipboard row when enabled. The clipboard row is labeled `clipboard` in the id column.
 - Explicitly keybound prompts render above auto-assigned ones on the board; each group stays alphabetical by id.
-- A row is delivered either by pressing its single-key shortcut, or by moving the cursor with `↑`/`↓` and pressing the **Select** key (default `Enter`). Both paths submit through the same flow.
+- A row is selected either by pressing its single-key shortcut, or by moving the
+  cursor with `↑`/`↓` and pressing the **Select** key (default `Enter`). For
+  non-template prompts selection submits through the prompt flow; for templated
+  prompts it first enters template input.
 - `/` enters fuzzy search over prompt ID, title, description, and tags.
 - Overflow prompts are not shown on the board but are reachable through search.
 - The TUI reads clipboard content only when the clipboard row is selected.
-- The TUI writes prompt or clipboard content to a private handoff job, spawns a short-lived worker, then exits.
+- For templated prompts, the TUI presents all declared variables at once as a
+  single form (in declaration order, defaults prefilled, focused on the first
+  field). `Tab`/`↑`/`↓` and `Shift+Tab` move the focused field. The focused
+  field has an inline caret moved with `←`/`→`/`Home`/`End` (and their
+  `Ctrl+B`/`Ctrl+F`/`Ctrl+A`/`Ctrl+E` aliases); typing inserts at the caret,
+  `Backspace`/`Delete` remove a character, `Ctrl+W` deletes the previous word,
+  `Ctrl+K` kills to the end of the line, and `Ctrl+U` clears the whole field.
+  `Enter` validates and submits the whole form. A missing
+  required value or an oversized rendered body is a recoverable inline error
+  that focuses the offending field; `Esc` returns to the board and `Ctrl+C`
+  cancels.
+- The TUI writes rendered prompt or clipboard content to a private handoff job, spawns a short-lived worker, then exits.
 - The handoff worker verifies target pane readiness using tmux state before injection.
 - The worker fails cleanly if the target pane vanishes or becomes invalid.
 - Handoff jobs are per selection; no long-running queue or daemon is required for the TUI path.
@@ -185,7 +212,6 @@ That boundary is intentional.
 
 ## Non-Goals
 
-- Prompt templating variables.
 - Prompt snippets or composition.
 - Cross-host clipboard sync.
 - Per-application readiness adapters.

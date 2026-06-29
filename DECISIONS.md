@@ -64,9 +64,17 @@ Two delivery modes are required:
 - `paste` (default)
 - `type` (fallback)
 
-### 9. Prompt body is what gets injected
+### 9. Rendered prompt body is what gets injected
 
-If markdown files include YAML frontmatter, only the markdown body is injected. Frontmatter is metadata only.
+If markdown files include YAML frontmatter, the frontmatter itself is never
+injected. Frontmatter may declare metadata, delivery defaults, keybinds, and
+template variables; delivery injects the markdown body after applying any
+declared variable substitutions.
+
+Template variables are intentionally narrow: ordered string inputs declared in
+frontmatter, `{{name}}` placeholders in the body, and `\{{name}}` for a literal
+placeholder. There are no conditionals, functions, includes, prompt snippets, or
+composition.
 
 The parser strips one leading and one trailing line break from the body so the
 canonical layout (a blank line after the closing fence, a POSIX EOF newline)
@@ -325,11 +333,11 @@ files. The contract is locked:
   never reads dictation history. The open must not leave a `-wal`/`-shm` sidecar.
 - **Mapping.** Per snippet: `phrase` → `title:` (verbatim) **and** the slug used
   for the filename id; `replacement` → the markdown body (byte-for-byte through
-  the [§9 trim contract](#9-prompt-body-is-what-gets-injected), so a second source
+  the [§9 trim contract](#9-rendered-prompt-body-is-what-gets-injected), so a second source
   must not assume verbatim bytes); a starred snippet appends a `starred` tag. Every prompt
   carries a provenance tag (`wispr` by default, `--tag` overrides). Imported
   prompts carry the **full `tprompt new` frontmatter field set** (`title,
-  description, tags, key, mode, enter`, in scaffold order) so an imported prompt
+  description, tags, key, mode, enter, variables`, in scaffold order) so an imported prompt
   is as editable as a scaffolded one; only `title`/`tags` are populated and the
   rest are empty stubs. The snippet-controlled fields (`title`/`tags`) are
   YAML-marshaled — never string-templated — so a `:`/quote in a phrase cannot

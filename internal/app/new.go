@@ -29,6 +29,7 @@ tags: []
 key:
 mode:
 enter:
+variables: []
 ---
 `
 

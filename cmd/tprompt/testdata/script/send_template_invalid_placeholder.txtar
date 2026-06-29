@@ -1,0 +1,18 @@
+# Templated prompt placeholders must reference declared variables.
+
+mkdir prompts
+
+! tprompt send review --config config.toml --target-pane %1 --issue AUR-123
+stderr 'invalid template placeholder "focus"'
+stderr 'not declared in frontmatter variables'
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- prompts/review.md --
+---
+variables:
+  - name: issue
+---
+
+Review {{focus}}.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/aurokin/tprompt/internal/clipboard"
 	"github.com/aurokin/tprompt/internal/config"
+	"github.com/aurokin/tprompt/internal/prompttmpl"
 	"github.com/aurokin/tprompt/internal/sanitize"
 	"github.com/aurokin/tprompt/internal/store"
 	"github.com/aurokin/tprompt/internal/tmux"
@@ -106,6 +107,10 @@ func basePrompt() store.Prompt {
 	}
 }
 
+func sendBoolPtr(v bool) *bool {
+	return &v
+}
+
 func TestSend_HappyPathPasteWithFlagTarget(t *testing.T) {
 	adapter := &fakeAdapter{paneExists: true}
 	deps := sendDeps(t, basePrompt(), adapter)
@@ -126,6 +131,183 @@ func TestSend_HappyPathPasteWithFlagTarget(t *testing.T) {
 	}
 	if call.Enter {
 		t.Fatal("enter should default to false")
+	}
+}
+
+func TestSend_AcceptsEndOfFlagsBeforePromptID(t *testing.T) {
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, basePrompt(), adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "--target-pane", "%5", "--", "code-review")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(adapter.pasteCalls) != 1 {
+		t.Fatalf("want 1 paste call, got %d", len(adapter.pasteCalls))
+	}
+	if adapter.pasteCalls[0].Target.PaneID != "%5" {
+		t.Fatalf("target = %q, want %%5", adapter.pasteCalls[0].Target.PaneID)
+	}
+}
+
+func TestSend_RendersTemplateFlags(t *testing.T) {
+	p := basePrompt()
+	p.Body = "Review {{issue-id}} for {{focus}}."
+	p.Variables = []prompttmpl.Variable{
+		{Name: "issue-id", Required: true},
+		{Name: "focus", Default: "correctness"},
+	}
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, p, adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "--issue-id", "AUR-123", "--target-pane", "%1")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if got := adapter.pasteCalls[0].Body; got != "Review AUR-123 for correctness." {
+		t.Fatalf("body = %q", got)
+	}
+}
+
+func TestSend_TemplateFlagsCanUseEquals(t *testing.T) {
+	p := basePrompt()
+	p.Body = "Review {{issue-id}} for {{focus}}."
+	p.Variables = []prompttmpl.Variable{
+		{Name: "issue-id", Required: true},
+		{Name: "focus"},
+	}
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, p, adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "--issue-id=AUR-123", "--focus=security", "--target-pane", "%1")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if got := adapter.pasteCalls[0].Body; got != "Review AUR-123 for security." {
+		t.Fatalf("body = %q", got)
+	}
+}
+
+func TestSend_TemplateFlagEqualsAllowsBuiltInFlagLookingValue(t *testing.T) {
+	p := basePrompt()
+	p.Body = "Review {{issue}}."
+	p.Variables = []prompttmpl.Variable{{Name: "issue", Required: true}}
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, p, adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "--issue=--target-pane", "--target-pane", "%1")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if got := adapter.pasteCalls[0].Body; got != "Review --target-pane." {
+		t.Fatalf("body = %q", got)
+	}
+}
+
+func TestSend_TemplateValueCanBeHelpFlag(t *testing.T) {
+	for _, value := range []string{"-h", "--help"} {
+		t.Run(value, func(t *testing.T) {
+			p := basePrompt()
+			p.Body = "Review {{issue}}."
+			p.Variables = []prompttmpl.Variable{{Name: "issue", Required: true}}
+			adapter := &fakeAdapter{paneExists: true}
+			deps := sendDeps(t, p, adapter)
+
+			_, _, err := executeRootWith(t, deps, "send", "code-review", "--issue", value, "--target-pane", "%1")
+			if err != nil {
+				t.Fatalf("unexpected: %v", err)
+			}
+			if got := adapter.pasteCalls[0].Body; got != "Review "+value+"." {
+				t.Fatalf("body = %q", got)
+			}
+		})
+	}
+}
+
+func TestSend_TemplateValueCanBeBuiltInFlagName(t *testing.T) {
+	p := basePrompt()
+	p.Body = "Review {{issue}}."
+	p.Variables = []prompttmpl.Variable{{Name: "issue", Required: true}}
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, p, adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "--issue", "--target-pane", "--target-pane", "%1")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if got := adapter.pasteCalls[0].Target.PaneID; got != "%1" {
+		t.Fatalf("target = %q, want %%1", got)
+	}
+	if got := adapter.pasteCalls[0].Body; got != "Review --target-pane." {
+		t.Fatalf("body = %q", got)
+	}
+}
+
+func TestSend_MissingRequiredTemplateFlag(t *testing.T) {
+	p := basePrompt()
+	p.Body = "Review {{issue}}."
+	p.Variables = []prompttmpl.Variable{{Name: "issue", Required: true}}
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, p, adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "--target-pane", "%1")
+	var missing *prompttmpl.MissingValueError
+	if !errors.As(err, &missing) {
+		t.Fatalf("want MissingValueError, got %T: %v", err, err)
+	}
+	if ExitCode(err) != ExitUsage {
+		t.Fatalf("ExitCode = %d, want %d", ExitCode(err), ExitUsage)
+	}
+	if len(adapter.pasteCalls) != 0 {
+		t.Fatal("should reject before invoking adapter")
+	}
+}
+
+func TestSend_UnknownTemplateFlag(t *testing.T) {
+	p := basePrompt()
+	p.Body = "Review {{issue}}."
+	p.Variables = []prompttmpl.Variable{{Name: "issue"}}
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, p, adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "--unknown", "x", "--target-pane", "%1")
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if !strings.Contains(err.Error(), "unknown flag: --unknown") {
+		t.Fatalf("error = %v", err)
+	}
+	if ExitCode(err) != ExitUsage {
+		t.Fatalf("ExitCode = %d, want %d", ExitCode(err), ExitUsage)
+	}
+}
+
+func TestSend_RejectsTemplateFlagForNonTemplatePrompt(t *testing.T) {
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, basePrompt(), adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "--issue", "AUR-123", "--target-pane", "%1")
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if !strings.Contains(err.Error(), "unknown flag: --issue") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestSend_UnexpectedTemplateArgumentExitsUsage(t *testing.T) {
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, basePrompt(), adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "extra", "--target-pane", "%1")
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if !strings.Contains(err.Error(), "unexpected template argument") {
+		t.Fatalf("error = %v", err)
+	}
+	if ExitCode(err) != ExitUsage {
+		t.Fatalf("ExitCode = %d, want %d", ExitCode(err), ExitUsage)
 	}
 }
 
@@ -298,6 +480,61 @@ func TestSend_EnterFlag(t *testing.T) {
 	}
 	if !adapter.pasteCalls[0].Enter {
 		t.Fatal("expected Enter=true")
+	}
+}
+
+func TestSend_EnterFlagAcceptsSpaceSeparatedFalse(t *testing.T) {
+	p := basePrompt()
+	p.Defaults.Enter = sendBoolPtr(true)
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, p, adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "--target-pane", "%1", "--enter", "false")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if adapter.pasteCalls[0].Enter {
+		t.Fatal("expected Enter=false")
+	}
+}
+
+func TestSend_EnterFlagBeforeBooleanLikeID(t *testing.T) {
+	// "--enter 1" before the id must deliver prompt "1" with Enter pressed, not
+	// swallow "1" as the flag's boolean value and strand the positional id.
+	p := basePrompt()
+	p.ID = "1"
+	p.Path = "/prompts/1.md"
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, p, adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "--enter", "1", "--target-pane", "%1")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(adapter.pasteCalls) != 1 {
+		t.Fatalf("expected one paste call, got %d", len(adapter.pasteCalls))
+	}
+	if !adapter.pasteCalls[0].Enter {
+		t.Fatal("expected Enter=true for prompt id 1")
+	}
+}
+
+func TestSend_EnterFlagRejectsInvalidSpacedValue(t *testing.T) {
+	// After the id, "--enter <non-boolean>" must not silently keep enter at its
+	// default and skip the token. The token is left for the next parse step,
+	// becomes a template argument, and fails loudly — no delivery happens.
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, basePrompt(), adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "--target-pane", "%1", "--enter", "flase")
+	if err == nil {
+		t.Fatal("want error for invalid spaced --enter value")
+	}
+	if !strings.Contains(err.Error(), "flase") {
+		t.Fatalf("error should name the offending token, got %v", err)
+	}
+	if len(adapter.pasteCalls) != 0 {
+		t.Fatalf("must not deliver on an invalid value, got %d paste calls", len(adapter.pasteCalls))
 	}
 }
 

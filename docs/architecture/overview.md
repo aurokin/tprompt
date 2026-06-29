@@ -94,7 +94,7 @@ The SQLite driver (`modernc.org/sqlite`, pure-Go) is **isolated to `internal/wis
 
 ### Direct send (`tprompt send <id>`, `tprompt paste` from CLI)
 
-1. CLI resolves the source (prompt body from store, or clipboard via reader)
+1. CLI resolves the source (rendered prompt body from store/template values, or clipboard via reader)
 2. Sanitizer processes the content
 3. CLI resolves the target tmux pane
 4. Adapter delivers immediately
@@ -104,8 +104,8 @@ The SQLite driver (`modernc.org/sqlite`, pure-Go) is **isolated to `internal/wis
 1. `tprompt tui` (or bare `tprompt` when in tmux + tty) launches — typically inside a tmux popup — with target context passed in
 2. Built-in TUI renders the board + clipboard row
 3. User selects a prompt, the clipboard row, or searches
-4. If clipboard: TUI reads and validates the clipboard; on success, writes a handoff job with `source = clipboard`
-5. If prompt: TUI writes a handoff job with `source = prompt` and the resolved body
+4. If clipboard: TUI reads and validates the clipboard; on success, the submitter writes a handoff job with `source = clipboard`
+5. If prompt: TUI collects variables when needed; the submitter renders the prompt body and writes a handoff job with `source = prompt`
 6. TUI process exits
 7. Handoff worker verifies the target pane has returned to selection
 8. Sanitizer processes the content in the worker's context

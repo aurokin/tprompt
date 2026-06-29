@@ -185,7 +185,7 @@ per selection.
 
 ## `max_paste_bytes`
 
-Applies to both `tprompt paste` and prompt body delivery. Content exceeding this cap is rejected before any tmux command runs.
+Applies to both `tprompt paste` and rendered prompt body delivery. Content exceeding this cap is rejected before any tmux command runs.
 
 Default: 2 MiB (2,097,152 bytes). The cap exists to bound accidental large pastes (truncated binaries, runaway logs); the primary defense against malicious payloads is sanitization (default `safe`). Raise it in config if you legitimately paste larger content. The adapter still caps per-chunk size in `type` mode (see `docs/tmux/delivery.md`).
 

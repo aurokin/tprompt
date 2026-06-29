@@ -9,9 +9,12 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/aurokin/tprompt/internal/clipboard"
+	"github.com/aurokin/tprompt/internal/prompttmpl"
 	"github.com/aurokin/tprompt/internal/store"
+	layout "github.com/aurokin/tprompt/internal/tuilayout"
 )
 
 func sampleState() State {
@@ -37,12 +40,38 @@ func keyMsg(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyEsc}
 	case "ctrl+c":
 		return tea.KeyMsg{Type: tea.KeyCtrlC}
+	case "ctrl+k":
+		return tea.KeyMsg{Type: tea.KeyCtrlK}
+	case "ctrl+u":
+		return tea.KeyMsg{Type: tea.KeyCtrlU}
+	case "ctrl+w":
+		return tea.KeyMsg{Type: tea.KeyCtrlW}
+	case "ctrl+a":
+		return tea.KeyMsg{Type: tea.KeyCtrlA}
+	case "ctrl+e":
+		return tea.KeyMsg{Type: tea.KeyCtrlE}
+	case "ctrl+d":
+		return tea.KeyMsg{Type: tea.KeyCtrlD}
 	case "up":
 		return tea.KeyMsg{Type: tea.KeyUp}
 	case "down":
 		return tea.KeyMsg{Type: tea.KeyDown}
+	case "left":
+		return tea.KeyMsg{Type: tea.KeyLeft}
+	case "right":
+		return tea.KeyMsg{Type: tea.KeyRight}
+	case "home":
+		return tea.KeyMsg{Type: tea.KeyHome}
+	case "end":
+		return tea.KeyMsg{Type: tea.KeyEnd}
+	case "delete":
+		return tea.KeyMsg{Type: tea.KeyDelete}
+	case "backspace":
+		return tea.KeyMsg{Type: tea.KeyBackspace}
 	case "tab":
 		return tea.KeyMsg{Type: tea.KeyTab}
+	case "shift+tab":
+		return tea.KeyMsg{Type: tea.KeyShiftTab}
 	case "enter":
 		return tea.KeyMsg{Type: tea.KeyEnter}
 	case "space":
@@ -515,8 +544,9 @@ func (f *fakeSubmitter) Submit(r Result) error {
 }
 
 type fakeStore struct {
-	bodies map[string]string
-	err    error
+	bodies  map[string]string
+	prompts map[string]store.Prompt
+	err     error
 }
 
 func (f *fakeStore) Discover() error                { return nil }
@@ -524,6 +554,13 @@ func (f *fakeStore) List() ([]store.Summary, error) { return nil, nil }
 func (f *fakeStore) Resolve(id string) (store.Prompt, error) {
 	if f.err != nil {
 		return store.Prompt{}, f.err
+	}
+	if f.prompts != nil {
+		p, ok := f.prompts[id]
+		if !ok {
+			return store.Prompt{}, &store.NotFoundError{ID: id}
+		}
+		return p, nil
 	}
 	body, ok := f.bodies[id]
 	if !ok {
@@ -610,6 +647,578 @@ func TestUpdate_BoundKeyUppercaseAlsoSubmits(t *testing.T) {
 	}
 	if len(sub.calls) != 1 || sub.calls[0].PromptID != "code-review" {
 		t.Fatalf("Submitter.Submit calls = %+v, want one call for code-review", sub.calls)
+	}
+}
+
+func TestUpdate_TemplatedPromptEntersInputMode(t *testing.T) {
+	sub := &fakeSubmitter{}
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID: "code-review",
+				Variables: []prompttmpl.Variable{{
+					Name:        "issue",
+					Label:       "Issue",
+					Description: "Linear issue id",
+					Required:    true,
+				}},
+			},
+			Body: "Review {{issue}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: sub, Store: st, MaxPasteBytes: 1 << 20})
+
+	next, cmd := m.Update(keyMsg("c"))
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("template selection must not submit immediately, got cmd %T", cmd())
+	}
+	if got.mode != modeTemplate {
+		t.Fatalf("mode = %v, want modeTemplate", got.mode)
+	}
+	if got.template.promptID != "code-review" || got.template.focus != 0 {
+		t.Fatalf("template state = id %q focus %d", got.template.promptID, got.template.focus)
+	}
+	if got.template.values["issue"] != "" {
+		t.Fatalf("seeded value = %q, want empty", got.template.values["issue"])
+	}
+	if len(sub.calls) != 0 {
+		t.Fatalf("Submitter.Submit called %d times, want 0", len(sub.calls))
+	}
+	out := got.View()
+	if !strings.Contains(out, "code-review") || !strings.Contains(out, "> Issue *") ||
+		!strings.Contains(out, "Linear issue id") {
+		t.Fatalf("template form missing prompt/variable context:\n%s", out)
+	}
+}
+
+func TestUpdate_TemplateDefaultEscapesAreStrippedOnlyForDisplay(t *testing.T) {
+	const rawDefault = "safe\x1b]0;pwned\x07value"
+	sub := &fakeSubmitter{}
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID:        "code-review",
+				Variables: []prompttmpl.Variable{{Name: "issue", Default: rawDefault}},
+			},
+			Body: "Review {{issue}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: sub, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(keyMsg("c"))
+	m = next.(Model)
+
+	out := m.View()
+	if strings.Contains(out, "\x1b") {
+		t.Fatalf("template view must not render escape bytes:\n%q", out)
+	}
+	if !strings.Contains(out, "safevalue") {
+		t.Fatalf("template view missing stripped display value:\n%q", out)
+	}
+	if m.template.values["issue"] != rawDefault {
+		t.Fatalf("stored value = %q, want raw default preserved", m.template.values["issue"])
+	}
+
+	next, cmd := m.Update(keyMsg("enter"))
+	got := next.(Model)
+	if !got.pendingSubmit || cmd == nil {
+		t.Fatal("default value should submit")
+	}
+	msg := runCmd(cmd)
+	sr, ok := msg.(submitResultMsg)
+	if !ok {
+		t.Fatalf("cmd emitted %T, want submitResultMsg", msg)
+	}
+	if sr.result.TemplateValues["issue"] != rawDefault {
+		t.Fatalf("submitted value = %q, want raw default", sr.result.TemplateValues["issue"])
+	}
+}
+
+func TestUpdate_TemplateRequiredValueStaysInline(t *testing.T) {
+	// Submitting with a required value empty stays in the form, focuses the
+	// offending field, and surfaces a recoverable inline error.
+	sub := &fakeSubmitter{}
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID: "code-review",
+				Variables: []prompttmpl.Variable{
+					{Name: "title"},
+					{Name: "issue", Label: "Issue", Required: true},
+				},
+			},
+			Body: "{{title}} {{issue}}",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: sub, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(keyMsg("c"))
+	m = next.(Model)
+
+	next, cmd := m.Update(keyMsg("enter"))
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("missing required value must not submit, got cmd %T", cmd())
+	}
+	if got.mode != modeTemplate {
+		t.Fatalf("mode = %v, want modeTemplate", got.mode)
+	}
+	if got.template.focus != 1 {
+		t.Fatalf("focus = %d, want offending required field 1", got.template.focus)
+	}
+	if !strings.Contains(got.inlineError, "Issue is required") {
+		t.Fatalf("inlineError = %q", got.inlineError)
+	}
+	if len(sub.calls) != 0 {
+		t.Fatalf("Submitter.Submit called %d times, want 0", len(sub.calls))
+	}
+}
+
+func TestUpdate_TemplateFormSubmitsFromFocusedField(t *testing.T) {
+	// Enter submits the whole form from any field; unedited fields keep their
+	// declared defaults.
+	sub := &fakeSubmitter{}
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID: "code-review",
+				Variables: []prompttmpl.Variable{
+					{Name: "issue", Required: true},
+					{Name: "focus", Default: "correctness"},
+				},
+			},
+			Body: "Review {{issue}} for {{focus}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: sub, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(keyMsg("c"))
+	m = next.(Model)
+
+	next, _ = m.Update(keyMsg("AUR-123"))
+	m = next.(Model)
+	next, cmd := m.Update(keyMsg("enter"))
+	got := next.(Model)
+	if !got.pendingSubmit || cmd == nil {
+		t.Fatal("Enter must submit the form")
+	}
+	msg := runCmd(cmd)
+	sr, ok := msg.(submitResultMsg)
+	if !ok {
+		t.Fatalf("cmd emitted %T, want submitResultMsg", msg)
+	}
+	if sr.result.PromptID != "code-review" {
+		t.Fatalf("result PromptID = %q", sr.result.PromptID)
+	}
+	if sr.result.TemplateValues["issue"] != "AUR-123" ||
+		sr.result.TemplateValues["focus"] != "correctness" {
+		t.Fatalf("TemplateValues = %#v", sr.result.TemplateValues)
+	}
+	if len(sub.calls) != 1 {
+		t.Fatalf("Submitter.Submit calls = %d, want 1", len(sub.calls))
+	}
+}
+
+func TestUpdate_TemplateTabMovesFocusAndEdits(t *testing.T) {
+	// Tab/Shift+Tab move the focused field without submitting; each field keeps
+	// its own value as focus moves between them.
+	sub := &fakeSubmitter{}
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID: "code-review",
+				Variables: []prompttmpl.Variable{
+					{Name: "issue", Required: true},
+					{Name: "focus", Default: "correctness"},
+				},
+			},
+			Body: "Review {{issue}} for {{focus}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: sub, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(keyMsg("c"))
+	m = next.(Model)
+	next, _ = m.Update(keyMsg("AUR-123"))
+	m = next.(Model)
+
+	next, cmd := m.Update(keyMsg("tab"))
+	m = next.(Model)
+	if cmd != nil {
+		t.Fatalf("Tab should only move focus, got cmd %T", cmd())
+	}
+	if m.template.focus != 1 {
+		t.Fatalf("focus = %d, want 1 after Tab", m.template.focus)
+	}
+	next, _ = m.Update(keyMsg(" and tests"))
+	m = next.(Model)
+	if m.template.values["focus"] != "correctness and tests" {
+		t.Fatalf("focus value = %q, want edited second field", m.template.values["focus"])
+	}
+
+	next, _ = m.Update(keyMsg("shift+tab"))
+	m = next.(Model)
+	if m.template.focus != 0 || m.template.values["issue"] != "AUR-123" {
+		t.Fatalf("focus/issue = %d/%q, want 0/AUR-123 preserved", m.template.focus, m.template.values["issue"])
+	}
+
+	next, cmd = m.Update(keyMsg("enter"))
+	m = next.(Model)
+	sr, ok := runCmd(cmd).(submitResultMsg)
+	if !ok {
+		t.Fatalf("Enter must submit the form")
+	}
+	if sr.result.TemplateValues["issue"] != "AUR-123" ||
+		sr.result.TemplateValues["focus"] != "correctness and tests" {
+		t.Fatalf("TemplateValues = %#v", sr.result.TemplateValues)
+	}
+}
+
+// templatedFieldModel returns a model already in the form, focused on a single
+// field seeded with def, caret parked at the end.
+func templatedFieldModel(t *testing.T, def string) Model {
+	t.Helper()
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID:        "code-review",
+				Variables: []prompttmpl.Variable{{Name: "issue", Default: def}},
+			},
+			Body: "Review {{issue}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: &fakeSubmitter{}, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(keyMsg("c"))
+	m = next.(Model)
+	if m.template.cursor != len([]rune(def)) {
+		t.Fatalf("caret = %d on entry, want end %d", m.template.cursor, len([]rune(def)))
+	}
+	return m
+}
+
+func applyKeys(m Model, keys ...string) Model {
+	for _, k := range keys {
+		next, _ := m.Update(keyMsg(k))
+		m = next.(Model)
+	}
+	return m
+}
+
+func TestUpdate_TemplateCtrlUClearsFocusedField(t *testing.T) {
+	// Ctrl+U wipes the whole field regardless of caret position.
+	m := templatedFieldModel(t, "correctness and tests")
+	m = applyKeys(m, "home", "right", "right") // caret mid-field
+	m = applyKeys(m, "ctrl+u")
+	if m.template.values["issue"] != "" || m.template.cursor != 0 {
+		t.Fatalf("after Ctrl+U: value=%q cursor=%d, want empty/0", m.template.values["issue"], m.template.cursor)
+	}
+	m = applyKeys(m, "security")
+	if m.template.values["issue"] != "security" {
+		t.Fatalf("value = %q, want replacement text", m.template.values["issue"])
+	}
+}
+
+func TestUpdate_TemplateCtrlKKillsToLineEnd(t *testing.T) {
+	// Ctrl+K deletes from the caret to the end of the field (readline).
+	m := templatedFieldModel(t, "hello world")
+	m = applyKeys(m, "home", "right", "right", "right", "right", "right") // caret after "hello"
+	if m.template.cursor != 5 {
+		t.Fatalf("caret = %d, want 5", m.template.cursor)
+	}
+	m = applyKeys(m, "ctrl+k")
+	if m.template.values["issue"] != "hello" || m.template.cursor != 5 {
+		t.Fatalf("after Ctrl+K: value=%q cursor=%d, want \"hello\"/5", m.template.values["issue"], m.template.cursor)
+	}
+}
+
+func TestUpdate_TemplateCursorInsertAndDelete(t *testing.T) {
+	m := templatedFieldModel(t, "")
+	m = applyKeys(m, "ab")   // value "ab", caret 2
+	m = applyKeys(m, "left") // caret 1
+	m = applyKeys(m, "Z")    // insert at caret -> "aZb", caret 2
+	if m.template.values["issue"] != "aZb" || m.template.cursor != 2 {
+		t.Fatalf("after insert: value=%q cursor=%d, want aZb/2", m.template.values["issue"], m.template.cursor)
+	}
+	m = applyKeys(m, "backspace") // delete rune before caret (Z) -> "ab", caret 1
+	if m.template.values["issue"] != "ab" || m.template.cursor != 1 {
+		t.Fatalf("after backspace: value=%q cursor=%d, want ab/1", m.template.values["issue"], m.template.cursor)
+	}
+	m = applyKeys(m, "delete") // delete rune at caret (b) -> "a", caret 1
+	if m.template.values["issue"] != "a" || m.template.cursor != 1 {
+		t.Fatalf("after delete: value=%q cursor=%d, want a/1", m.template.values["issue"], m.template.cursor)
+	}
+}
+
+func TestUpdate_TemplateHomeEndAndWordDelete(t *testing.T) {
+	m := templatedFieldModel(t, "hello world") // caret 11
+	m = applyKeys(m, "home")
+	if m.template.cursor != 0 {
+		t.Fatalf("Home caret = %d, want 0", m.template.cursor)
+	}
+	m = applyKeys(m, "end")
+	if m.template.cursor != 11 {
+		t.Fatalf("End caret = %d, want 11", m.template.cursor)
+	}
+	m = applyKeys(m, "ctrl+w") // delete previous word ("world"), keep leading space
+	if m.template.values["issue"] != "hello " || m.template.cursor != 6 {
+		t.Fatalf("after Ctrl+W: value=%q cursor=%d, want \"hello \"/6", m.template.values["issue"], m.template.cursor)
+	}
+}
+
+func TestUpdate_TemplateFocusParksCaretAtEnd(t *testing.T) {
+	sub := &fakeSubmitter{}
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID: "code-review",
+				Variables: []prompttmpl.Variable{
+					{Name: "issue"},
+					{Name: "focus", Default: "correctness"},
+				},
+			},
+			Body: "Review {{issue}} for {{focus}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: sub, Store: st, MaxPasteBytes: 1 << 20})
+	m = applyKeys(m, "c")
+	// Tab to the second field: caret parks at the end of its default.
+	m = applyKeys(m, "tab")
+	if m.template.focus != 1 || m.template.cursor != len("correctness") {
+		t.Fatalf("focus=%d caret=%d, want 1/%d", m.template.focus, m.template.cursor, len("correctness"))
+	}
+	// Shift+Tab back: caret parks at the end of the (empty) first field.
+	m = applyKeys(m, "shift+tab")
+	if m.template.focus != 0 || m.template.cursor != 0 {
+		t.Fatalf("focus=%d caret=%d, want 0/0", m.template.focus, m.template.cursor)
+	}
+}
+
+func TestUpdate_TemplateFocusClampsAtEnds(t *testing.T) {
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID:        "code-review",
+				Variables: []prompttmpl.Variable{{Name: "a"}, {Name: "b"}, {Name: "c"}},
+			},
+			Body: "{{a}}{{b}}{{c}}",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: &fakeSubmitter{}, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(keyMsg("c"))
+	m = next.(Model)
+
+	next, _ = m.Update(keyMsg("up"))
+	m = next.(Model)
+	if m.template.focus != 0 {
+		t.Fatalf("focus = %d, want clamp at 0", m.template.focus)
+	}
+	for _, k := range []string{"down", "tab", "down"} {
+		next, _ = m.Update(keyMsg(k))
+		m = next.(Model)
+	}
+	if m.template.focus != 2 {
+		t.Fatalf("focus = %d, want clamp at 2", m.template.focus)
+	}
+}
+
+func TestUpdate_TemplateRenderedOversizeStaysInline(t *testing.T) {
+	sub := &fakeSubmitter{}
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID:        "code-review",
+				Variables: []prompttmpl.Variable{{Name: "issue", Required: true}},
+			},
+			Body: "{{issue}}",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: sub, Store: st, MaxPasteBytes: 3})
+	next, _ := m.Update(keyMsg("c"))
+	m = next.(Model)
+	next, _ = m.Update(keyMsg("AUR-123"))
+	m = next.(Model)
+
+	next, cmd := m.Update(keyMsg("enter"))
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("oversize rendered prompt must not submit, got cmd %T", cmd())
+	}
+	if !strings.Contains(got.inlineError, "max_paste_bytes") {
+		t.Fatalf("inlineError = %q", got.inlineError)
+	}
+	if len(sub.calls) != 0 {
+		t.Fatalf("Submitter.Submit calls = %d, want 0", len(sub.calls))
+	}
+}
+
+func TestUpdate_TemplateEscReturnsToBoard(t *testing.T) {
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID:        "code-review",
+				Variables: []prompttmpl.Variable{{Name: "issue"}},
+			},
+			Body: "{{issue}}",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: &fakeSubmitter{}, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(keyMsg("c"))
+	m = next.(Model)
+
+	next, cmd := m.Update(keyMsg("esc"))
+	got := next.(Model)
+
+	if cmd != nil {
+		t.Fatalf("Esc in template mode must not quit, got cmd %T", cmd())
+	}
+	if got.mode != modeBoard {
+		t.Fatalf("mode = %v, want modeBoard", got.mode)
+	}
+	if got.template.promptID != "" || got.template.values != nil {
+		t.Fatalf("template state not cleared: %+v", got.template)
+	}
+}
+
+func TestUpdate_TemplateCancelIgnoredWhileSubmitPending(t *testing.T) {
+	// Once a template submit is in flight, Esc and Ctrl+C are no-ops so the
+	// in-progress handoff is never abandoned, matching board-mode behavior.
+	sub := &fakeSubmitter{}
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID:        "code-review",
+				Variables: []prompttmpl.Variable{{Name: "issue", Required: true}},
+			},
+			Body: "Review {{issue}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: sub, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(keyMsg("c"))
+	m = next.(Model)
+	next, _ = m.Update(keyMsg("AUR-123"))
+	m = next.(Model)
+	next, cmd := m.Update(keyMsg("enter"))
+	m = next.(Model)
+	if !m.pendingSubmit || cmd == nil {
+		t.Fatal("Enter should start the submit")
+	}
+
+	for _, k := range []string{"esc", "ctrl+c"} {
+		next, cmd := m.Update(keyMsg(k))
+		got := next.(Model)
+		if cmd != nil {
+			t.Fatalf("%s during pending submit must be a no-op, got cmd %T", k, cmd())
+		}
+		if got.mode != modeTemplate || !got.pendingSubmit {
+			t.Fatalf("%s during pending submit changed state: mode=%v pending=%v", k, got.mode, got.pendingSubmit)
+		}
+		if got.result.Action == ActionCancel {
+			t.Fatalf("%s during pending submit must not cancel", k)
+		}
+	}
+}
+
+func TestView_TemplateFocusedFieldShowsValueTail(t *testing.T) {
+	// In a narrow popup the focused field keeps its tail visible (where the
+	// caret sits) rather than its head, so users see what they just typed.
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID:        "code-review",
+				Variables: []prompttmpl.Variable{{Name: "issue"}},
+			},
+			Body: "Review {{issue}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: &fakeSubmitter{}, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 20, Height: 24})
+	m = next.(Model)
+	next, _ = m.Update(keyMsg("c"))
+	m = next.(Model)
+	next, _ = m.Update(keyMsg("0123456789abcdef"))
+	m = next.(Model)
+
+	out := m.View()
+	if !strings.Contains(out, "abcdef"+layout.FieldCursor) {
+		t.Fatalf("focused value should show the tail with the caret:\n%s", out)
+	}
+	if !strings.Contains(out, "…") {
+		t.Fatalf("focused value should mark the hidden head with a left ellipsis:\n%s", out)
+	}
+	if strings.Contains(out, "012345") {
+		t.Fatalf("focused value should hide the head:\n%s", out)
+	}
+}
+
+func TestView_TemplateLongLabelKeepsValueColumn(t *testing.T) {
+	// A long label (or narrow popup) must not collapse the value column to zero:
+	// the caret stays visible and no row overflows the terminal width.
+	const width = 30
+	longLabel := strings.Repeat("x", 60)
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID:        "code-review",
+				Variables: []prompttmpl.Variable{{Name: "issue", Label: longLabel, Default: "AUR-1"}},
+			},
+			Body: "Review {{issue}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: &fakeSubmitter{}, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+	m = next.(Model)
+	m = applyKeys(m, "c")
+
+	out := m.View()
+	// The focused variable row is the one carrying the caret. It must keep the
+	// caret visible and must not overflow the popup width.
+	var row string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, layout.FieldCursor) {
+			row = line
+			break
+		}
+	}
+	if row == "" {
+		t.Fatalf("caret must stay visible with a long label:\n%s", out)
+	}
+	if w := lipgloss.Width(row); w > width {
+		t.Fatalf("variable row width %d exceeds %d: %q", w, width, row)
+	}
+}
+
+func TestView_TemplateFocusedCaretMapsPastStrippedEscapes(t *testing.T) {
+	// A prefilled default can carry escape bytes that StripAll removes from the
+	// display. Editing keeps indexing the raw value, but the rendered caret must
+	// land relative to the visible (sanitized) text, not the raw runes.
+	def := "ab\x1b]0;title\x07cd" // displays as "abcd"
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID:        "code-review",
+				Variables: []prompttmpl.Variable{{Name: "issue", Default: def}},
+			},
+			Body: "Review {{issue}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: &fakeSubmitter{}, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 24})
+	m = next.(Model)
+	m = applyKeys(m, "c")
+	// Caret parks at the raw end; the escape bytes are gone from the display, so
+	// the caret renders after the visible "abcd".
+	if out := m.View(); !strings.Contains(out, "abcd"+layout.FieldCursor) {
+		t.Fatalf("caret at end should render after visible text:\n%s", out)
+	}
+	// Move the caret left twice. In raw-rune space that lands between the BEL and
+	// 'c'/'d'; in display space it must sit between 'b' and 'c' (after "ab").
+	m = applyKeys(m, "left", "left")
+	if out := m.View(); !strings.Contains(out, "ab"+layout.FieldCursor+"cd") {
+		t.Fatalf("caret should map into sanitized display space:\n%s", out)
+	}
+	// The stored value is never sanitized — submission still sees the raw bytes.
+	if got := m.template.values["issue"]; got != def {
+		t.Fatalf("stored value mutated: %q, want raw default", got)
 	}
 }
 

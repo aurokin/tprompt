@@ -9,6 +9,7 @@ import (
 	"github.com/aurokin/tprompt/internal/delivery"
 	"github.com/aurokin/tprompt/internal/keybind"
 	"github.com/aurokin/tprompt/internal/promptsource"
+	"github.com/aurokin/tprompt/internal/prompttmpl"
 	"github.com/aurokin/tprompt/internal/sanitize"
 	"github.com/aurokin/tprompt/internal/store"
 	"github.com/aurokin/tprompt/internal/submitter"
@@ -133,6 +134,19 @@ func ExitCode(err error) int {
 		return ExitPrompt
 	}
 
+	var missingTemplate *prompttmpl.MissingValueError
+	if errors.As(err, &missingTemplate) {
+		return ExitUsage
+	}
+	var invalidVariable *prompttmpl.InvalidVariableError
+	if errors.As(err, &invalidVariable) {
+		return ExitPrompt
+	}
+	var invalidPlaceholder *prompttmpl.InvalidPlaceholderError
+	if errors.As(err, &invalidPlaceholder) {
+		return ExitPrompt
+	}
+
 	var strictReject *sanitize.StrictRejectError
 	if errors.As(err, &strictReject) {
 		return ExitPrompt
@@ -229,6 +243,8 @@ func isCobraUsageError(err error) bool {
 	case strings.HasPrefix(msg, "bad flag syntax"):
 		return true
 	case strings.HasPrefix(msg, "invalid argument"):
+		return true
+	case strings.HasPrefix(msg, "unexpected template argument"):
 		return true
 	case strings.Contains(msg, "arg(s), received"):
 		return true

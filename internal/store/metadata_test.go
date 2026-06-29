@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/aurokin/tprompt/internal/promptmeta"
+	"github.com/aurokin/tprompt/internal/prompttmpl"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -99,6 +100,25 @@ func TestSanitizeMetaStripsDangerousEscapes(t *testing.T) {
 				Enter:       boolPtr(true),
 				Key:         stringPtr("c"),
 				KeyDeclared: true,
+			},
+		},
+		{
+			name: "template variable display fields stripped but default untouched",
+			in: promptmeta.Meta{
+				Variables: []prompttmpl.Variable{{
+					Name:        "issue",
+					Label:       "Issue\x1b]0;x\x07 ID",
+					Description: "Pick\x1b[31m one",
+					Default:     "keep\x1b]0;x\x07default",
+				}},
+			},
+			want: promptmeta.Meta{
+				Variables: []prompttmpl.Variable{{
+					Name:        "issue",
+					Label:       "Issue ID",
+					Description: "Pick one",
+					Default:     "keep\x1b]0;x\x07default",
+				}},
 			},
 		},
 		{

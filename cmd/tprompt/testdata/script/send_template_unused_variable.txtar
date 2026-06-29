@@ -1,0 +1,19 @@
+# Templated prompts must use every declared variable in the body.
+
+mkdir prompts
+
+! tprompt send review --config config.toml --target-pane %1 --issue AUR-123 --focus correctness
+stderr 'invalid template variable "focus"'
+stderr 'declared but not used in body'
+
+-- config.toml --
+prompts_dir = "prompts"
+
+-- prompts/review.md --
+---
+variables:
+  - name: issue
+  - name: focus
+---
+
+Review {{issue}}.

@@ -7,7 +7,6 @@ records product ideas that are intentionally outside the current repo contract.
 
 - recent prompt history
 - favorites or aliases
-- prompt templating variables
 - prompt composition or snippets
 - shell completions
 - project-specific prompt folders merged with the global prompt store

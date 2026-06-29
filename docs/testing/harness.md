@@ -70,6 +70,8 @@ Assert:
 - body extraction with and without frontmatter
 - unsupported file extensions ignored
 - supported frontmatter fields parsed
+- template variables parsed, validated, rendered, and rejected clearly when
+  required values, placeholders, or declarations are invalid
 - invalid prompt delivery defaults rejected
 - metadata escape stripping preserves body bytes (after the parser's single
   leading and single trailing line-break trim — see
