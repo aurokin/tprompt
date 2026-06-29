@@ -351,6 +351,12 @@ func flagValue(args []string, idx int, name, value string, hasValue bool) (strin
 // the id a bare --enter must not swallow a boolean-looking prompt id such as
 // "1" or "false". Use the "--name=value" form to set an explicit value ahead of
 // the id.
+//
+// A space-separated token that is not a boolean literal (e.g. --enter flase) is
+// deliberately left unconsumed: idx is returned unchanged, so the caller's
+// next+1 leaves that token for the next parse step. There it is read as a
+// template argument and fails loudly (a bareword is "unexpected"); it is never
+// skipped or silently dropped, so the flag never mis-delivers on a typo'd value.
 func boolFlagValue(args []string, idx int, name, value string, hasValue, consumeNext bool) (bool, int, error) {
 	if hasValue {
 		got, err := parseBoolFlagValue(name, value)

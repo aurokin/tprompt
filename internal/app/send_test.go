@@ -519,6 +519,25 @@ func TestSend_EnterFlagBeforeBooleanLikeID(t *testing.T) {
 	}
 }
 
+func TestSend_EnterFlagRejectsInvalidSpacedValue(t *testing.T) {
+	// After the id, "--enter <non-boolean>" must not silently keep enter at its
+	// default and skip the token. The token is left for the next parse step,
+	// becomes a template argument, and fails loudly — no delivery happens.
+	adapter := &fakeAdapter{paneExists: true}
+	deps := sendDeps(t, basePrompt(), adapter)
+
+	_, _, err := executeRootWith(t, deps, "send", "code-review", "--target-pane", "%1", "--enter", "flase")
+	if err == nil {
+		t.Fatal("want error for invalid spaced --enter value")
+	}
+	if !strings.Contains(err.Error(), "flase") {
+		t.Fatalf("error should name the offending token, got %v", err)
+	}
+	if len(adapter.pasteCalls) != 0 {
+		t.Fatalf("must not deliver on an invalid value, got %d paste calls", len(adapter.pasteCalls))
+	}
+}
+
 func TestSend_InvalidModeFlag(t *testing.T) {
 	adapter := &fakeAdapter{paneExists: true}
 	deps := sendDeps(t, basePrompt(), adapter)
