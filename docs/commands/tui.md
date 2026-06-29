@@ -122,12 +122,14 @@ variables and never re-renders a prompt.
 
 ## Footer / status line
 
-The TUI renders a single-line footer showing context-sensitive hints:
+The TUI renders a single-line footer showing context-sensitive hints. At narrow
+widths, the footer sheds or elides lower-priority segments before wrapping, so
+the rendered footer always fits the terminal width reserved by `footerLines = 1`.
 
 - board view: `press a row's [key] to select  [/ search]  [Enter select]  [Esc cancel]`, or with `[/ search (N more)]` when overflow exists. The leading `press a row's [key] to select` legend is width-aware: it is dropped (functional hints kept) when the full line would exceed the terminal width, so the footer stays one line.
-- search view: `/query    [Esc exit search]  [Enter select]  [N matches]`
+- search view: `/query    [Esc exit search]  [Enter select]  [N matches]`; long query text is elided before action hints are removed
 - template input view: `[Enter submit]  [Ctrl+U clear]  [Esc back]  [Ctrl+C cancel]`,
-  adding `[Tab/↑↓ move]` when the prompt declares more than one variable
+  adding `[Tab/↑↓ move]` when the prompt declares more than one variable; lower-priority hints drop first at narrow widths
 - error view: `clipboard is empty — choose another option  [Esc cancel]`
 
 ## Selection

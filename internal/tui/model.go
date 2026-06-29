@@ -1056,81 +1056,179 @@ func maxIDWidth(rows []Row) int {
 	return max
 }
 
-func (m Model) footer() string {
-	base := m.footerHints()
-	if m.inlineError == "" {
-		return base
-	}
-	if base == "" {
-		return m.inlineError
-	}
-	return m.inlineError + "  " + base
+const footerSeparator = "  "
+
+const (
+	footerRankDecorative = 10
+	footerRankStatus     = 20
+	footerRankAuxiliary  = 30
+	footerRankSecondary  = 40
+	footerRankTertiary   = 70
+	footerRankAction     = 80
+	footerRankExit       = 90
+)
+
+type footerSegment struct {
+	text       string
+	shrinkRank int
+	dropRank   int
+	minWidth   int
 }
 
-func (m Model) footerHints() string {
+func (m Model) footer() string {
+	segments := m.footerSegments()
+	if m.inlineError != "" {
+		segments = append([]footerSegment{{
+			text:       m.inlineError,
+			shrinkRank: footerRankStatus,
+			minWidth:   1,
+		}}, segments...)
+	}
+	return fitFooterSegments(segments, m.viewWidth())
+}
+
+func (m Model) footerSegments() []footerSegment {
 	switch m.mode {
 	case modeSearch:
-		return m.searchFooterHints()
+		return m.searchFooterSegments()
 	case modeTemplate:
-		return m.templateFooterHints()
+		return m.templateFooterSegments()
 	}
 	if m.isEmptyStore() {
-		return m.emptyStoreFooter()
+		return []footerSegment{{
+			text:       m.emptyStoreFooter(),
+			shrinkRank: footerRankStatus,
+			minWidth:   1,
+		}}
 	}
-	var parts []string
+	segments := []footerSegment{{
+		text:     "press a row's [key] to select",
+		dropRank: footerRankDecorative,
+	}}
 	if search := m.boardSearchHint(); search != "" {
-		parts = append(parts, search)
+		segments = append(segments, footerSegment{text: search, dropRank: footerRankTertiary})
 	}
 	if sel := footerHint(m.state.Reserved.Select, "select"); sel != "" {
-		parts = append(parts, sel)
+		segments = append(segments, footerSegment{text: sel, dropRank: footerRankAction})
 	}
 	if cancel := footerHint(m.state.Reserved.Cancel, "cancel"); cancel != "" {
-		parts = append(parts, cancel)
+		segments = append(segments, footerSegment{text: cancel, dropRank: footerRankExit})
 	}
-	hints := strings.Join(parts, "  ")
-	return m.withKeyLegend(hints)
+	return segments
 }
 
-func (m Model) templateFooterHints() string {
-	parts := []string{"[Enter submit]"}
+func (m Model) templateFooterSegments() []footerSegment {
+	segments := []footerSegment{{text: "[Enter submit]"}}
 	if len(m.template.vars) > 1 {
-		parts = append(parts, "[Tab/↑↓ move]")
+		segments = append(segments, footerSegment{text: "[Tab/↑↓ move]", dropRank: footerRankAuxiliary})
 	}
-	parts = append(parts, "[Ctrl+U clear]", "[Esc back]", "[Ctrl+C cancel]")
-	return strings.Join(parts, "  ")
+	return append(segments,
+		footerSegment{text: "[Ctrl+U clear]", dropRank: footerRankSecondary},
+		footerSegment{text: "[Esc back]", dropRank: footerRankExit},
+		footerSegment{text: "[Ctrl+C cancel]", dropRank: footerRankAction},
+	)
 }
 
-// withKeyLegend prepends a legend telling users each board row's bracketed
-// [key] (e.g. `[c]`) is pressable — the primary, otherwise-undiscoverable
-// selection mechanism (AUR-449). The legend is only added when the whole
-// footer line still fits the current width: rowsPerFrame reserves exactly one
-// footer line (footerLines = 1), so a wrapped footer would push the bottom
-// board row out of view. Under width pressure (narrow terminal, large overflow
-// `(N more)` suffix, or a long inline error) the legend is dropped — never the
-// functional hints.
-func (m Model) withKeyLegend(hints string) string {
-	const legend = "press a row's [key] to select"
-	width := m.width
+// fitFooterSegments renders the footer as one physical line. It first applies
+// explicit shrink/drop priorities so unbounded or decorative segments yield
+// before action hints. The final truncation is the last-resort guard that keeps
+// footerLines = 1 true at pathological terminal widths.
+func fitFooterSegments(segments []footerSegment, width int) string {
 	if width <= 0 {
-		width = 80
+		return ""
 	}
-	// Model the exact rendered footer width: footer() prepends the inline
-	// error with a two-space separator when present, and the legend is joined
-	// to the hints with two spaces only when hints are non-empty.
-	full := lipgloss.Width(legend)
-	if hints != "" {
-		full += 2 + lipgloss.Width(hints)
+	segments = compactFooterSegments(segments)
+	for lipgloss.Width(joinFooterSegments(segments)) > width {
+		shrinkIdx, shrinkRank := nextShrinkFooterSegment(segments)
+		dropIdx, dropRank := nextDropFooterSegment(segments)
+		switch {
+		case shrinkIdx >= 0 && (dropIdx < 0 || shrinkRank <= dropRank):
+			shrinkFooterSegment(segments, shrinkIdx, width)
+			segments = compactFooterSegments(segments)
+		case dropIdx >= 0:
+			segments = append(segments[:dropIdx], segments[dropIdx+1:]...)
+		default:
+			return layout.TruncateToWidth(joinFooterSegments(segments), width)
+		}
 	}
-	if m.inlineError != "" {
-		full += lipgloss.Width(m.inlineError) + 2
+	return layout.TruncateToWidth(joinFooterSegments(segments), width)
+}
+
+func compactFooterSegments(segments []footerSegment) []footerSegment {
+	out := segments[:0]
+	for _, segment := range segments {
+		if segment.text == "" {
+			continue
+		}
+		out = append(out, segment)
 	}
-	if full > width {
-		return hints
+	return out
+}
+
+func joinFooterSegments(segments []footerSegment) string {
+	parts := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		if segment.text != "" {
+			parts = append(parts, segment.text)
+		}
 	}
-	if hints == "" {
-		return legend
+	return strings.Join(parts, footerSeparator)
+}
+
+func nextShrinkFooterSegment(segments []footerSegment) (int, int) {
+	idx, rank := -1, 0
+	for i, segment := range segments {
+		if segment.shrinkRank <= 0 || lipgloss.Width(segment.text) <= segment.minWidth {
+			continue
+		}
+		if idx < 0 || segment.shrinkRank < rank {
+			idx, rank = i, segment.shrinkRank
+		}
 	}
-	return legend + "  " + hints
+	return idx, rank
+}
+
+func nextDropFooterSegment(segments []footerSegment) (int, int) {
+	idx, rank := -1, 0
+	for i, segment := range segments {
+		if segment.dropRank <= 0 {
+			continue
+		}
+		if idx < 0 || segment.dropRank < rank {
+			idx, rank = i, segment.dropRank
+		}
+	}
+	return idx, rank
+}
+
+func shrinkFooterSegment(segments []footerSegment, idx, width int) {
+	segment := segments[idx]
+	budget := footerSegmentBudget(segments, idx, width)
+	if budget < segment.minWidth && segment.dropRank > 0 {
+		segments[idx].text = ""
+		segments[idx].shrinkRank = 0
+		segments[idx].dropRank = 0
+		return
+	}
+	if budget < segment.minWidth {
+		budget = segment.minWidth
+	}
+	segments[idx].text = layout.TruncateToWidth(segment.text, budget)
+	segments[idx].shrinkRank = 0
+}
+
+func footerSegmentBudget(segments []footerSegment, idx, width int) int {
+	var other []footerSegment
+	for i, segment := range segments {
+		if i != idx {
+			other = append(other, segment)
+		}
+	}
+	budget := width - lipgloss.Width(joinFooterSegments(other))
+	if len(compactFooterSegments(other)) > 0 {
+		budget -= lipgloss.Width(footerSeparator)
+	}
+	return budget
 }
 
 // boardSearchHint returns the `[/ search]` hint with ` (N more)` suffixed
@@ -1144,16 +1242,30 @@ func (m Model) boardSearchHint() string {
 	return strings.TrimSuffix(label, "]") + fmt.Sprintf(" (%d more)]", len(m.state.Overflow))
 }
 
-// searchFooterHints renders the search-mode footer:
+// searchFooterSegments renders the search-mode footer:
 // `/query  [Esc exit search]  [Enter select]  [N matches]`.
-func (m Model) searchFooterHints() string {
-	parts := []string{"/" + m.query}
-	parts = append(parts, "[Esc exit search]")
-	if sel := footerHint(m.state.Reserved.Select, "select"); sel != "" {
-		parts = append(parts, sel)
+func (m Model) searchFooterSegments() []footerSegment {
+	queryMinWidth := 1
+	if m.query != "" {
+		queryMinWidth = 2
 	}
-	parts = append(parts, fmt.Sprintf("[%d matches]", len(m.results)))
-	return strings.Join(parts, "  ")
+	segments := []footerSegment{
+		{
+			text:       "/" + m.query,
+			shrinkRank: footerRankDecorative,
+			dropRank:   footerRankDecorative,
+			minWidth:   queryMinWidth,
+		},
+		{text: "[Esc exit search]"},
+	}
+	if sel := footerHint(m.state.Reserved.Select, "select"); sel != "" {
+		segments = append(segments, footerSegment{text: sel, dropRank: footerRankAction})
+	}
+	segments = append(segments, footerSegment{
+		text:     fmt.Sprintf("[%d matches]", len(m.results)),
+		dropRank: footerRankAuxiliary,
+	})
+	return segments
 }
 
 func (m Model) emptyStoreFooter() string {

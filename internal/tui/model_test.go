@@ -81,6 +81,20 @@ func keyMsg(s string) tea.KeyMsg {
 	}
 }
 
+func viewFooterLine(out string) string {
+	lines := strings.Split(out, "\n")
+	return lines[len(lines)-1]
+}
+
+func requireFooterWithinWidth(t *testing.T, out string, width int) string {
+	t.Helper()
+	footer := viewFooterLine(out)
+	if w := lipgloss.Width(footer); w > width {
+		t.Fatalf("footer width %d exceeds %d: %q", w, width, footer)
+	}
+	return footer
+}
+
 func cmdIsQuit(cmd tea.Cmd) bool {
 	if cmd == nil {
 		return false
@@ -431,6 +445,18 @@ func TestView_BoardFooterLegendDroppedWhenNarrow(t *testing.T) {
 	// The functional hints must survive when the legend is dropped.
 	if !strings.Contains(out, "[Esc cancel]") {
 		t.Fatalf("functional hints must survive when legend is dropped. Got:\n%s", out)
+	}
+}
+
+func TestView_BoardFooterFitsWithLongInlineError(t *testing.T) {
+	const width = 20
+	m := NewModel(sampleState(), ModelDeps{})
+	m.width = width
+	m.inlineError = strings.Repeat("prompt body exceeds max_paste_bytes ", 4)
+
+	footer := requireFooterWithinWidth(t, m.View(), width)
+	if !strings.Contains(footer, "[Esc cancel]") {
+		t.Fatalf("board footer should keep the cancel hint after truncating error text: %q", footer)
 	}
 }
 
@@ -1184,6 +1210,85 @@ func TestView_TemplateLongLabelKeepsValueColumn(t *testing.T) {
 	}
 	if w := lipgloss.Width(row); w > width {
 		t.Fatalf("variable row width %d exceeds %d: %q", w, width, row)
+	}
+}
+
+func TestView_TemplateFooterFitsNarrowWidth(t *testing.T) {
+	const width = 30
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID: "code-review",
+				Variables: []prompttmpl.Variable{
+					{Name: "issue", Default: "AUR-597"},
+					{Name: "focus", Default: "footer layout"},
+				},
+			},
+			Body: "Review {{issue}} for {{focus}}.",
+		},
+	}}
+	m := NewModel(sampleState(), ModelDeps{Submitter: &fakeSubmitter{}, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+	m = next.(Model)
+	m = applyKeys(m, "c")
+
+	footer := requireFooterWithinWidth(t, m.View(), width)
+	if !strings.Contains(footer, "[Enter submit]") || !strings.Contains(footer, "[Esc back]") {
+		t.Fatalf("template footer should keep primary actions under width pressure: %q", footer)
+	}
+}
+
+func TestFooterWidthInvariantAcrossModes(t *testing.T) {
+	board := NewModel(sampleState(), ModelDeps{})
+	board.inlineError = strings.Repeat("prompt body exceeds max_paste_bytes ", 4)
+
+	search := NewModel(searchStateWithRows([]Row{{Key: '1', PromptID: "alpha"}}, nil), ModelDeps{})
+	search = enterSearchViaSlash(t, search)
+	for i := 0; i < 80; i++ {
+		search = applyKeys(search, "a")
+	}
+	search.inlineError = strings.Repeat("search failure ", 8)
+
+	st := &fakeStore{prompts: map[string]store.Prompt{
+		"code-review": {
+			Summary: store.Summary{
+				ID: "code-review",
+				Variables: []prompttmpl.Variable{
+					{Name: "issue", Default: "AUR-597"},
+					{Name: "focus", Default: "footer layout"},
+				},
+			},
+			Body: "Review {{issue}} for {{focus}}.",
+		},
+	}}
+	template := NewModel(sampleState(), ModelDeps{Submitter: &fakeSubmitter{}, Store: st, MaxPasteBytes: 1 << 20})
+	next, _ := template.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	template = next.(Model)
+	template = applyKeys(template, "c")
+	template.inlineError = strings.Repeat("template validation failed ", 6)
+
+	tests := []struct {
+		name  string
+		model Model
+	}{
+		{"board", board},
+		{"search", search},
+		{"template", template},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for width := 1; width <= 80; width++ {
+				m := tt.model
+				m.width = width
+				footer := m.footer()
+				if strings.Contains(footer, "\n") {
+					t.Fatalf("width %d: footer contains newline: %q", width, footer)
+				}
+				if w := lipgloss.Width(footer); w > width {
+					t.Fatalf("width %d: footer rendered width %d: %q", width, w, footer)
+				}
+			}
+		})
 	}
 }
 

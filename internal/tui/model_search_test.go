@@ -531,6 +531,29 @@ func TestView_SearchFooterShowsMatchCount(t *testing.T) {
 	}
 }
 
+func TestView_SearchFooterElidesLongQueryBeforeActions(t *testing.T) {
+	board := []Row{
+		{Key: '1', PromptID: "alpha"},
+		{Key: '2', PromptID: "beta"},
+	}
+	const width = 50
+	m := NewModel(searchStateWithRows(board, nil), ModelDeps{})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 10})
+	m = next.(Model)
+	m = enterSearchViaSlash(t, m)
+	for i := 0; i < 80; i++ {
+		m = applyKeys(m, "a")
+	}
+
+	footer := requireFooterWithinWidth(t, m.View(), width)
+	if !strings.Contains(footer, "[Esc exit search]") || !strings.Contains(footer, "[Enter select]") {
+		t.Fatalf("search actions should survive before the long query text: %q", footer)
+	}
+	if strings.Contains(footer, strings.Repeat("a", 10)) {
+		t.Fatalf("search query should be elided before action hints overflow: %q", footer)
+	}
+}
+
 func TestView_SearchSlicesRowsToViewport(t *testing.T) {
 	board := []Row{
 		{Key: '1', PromptID: "alpha", Description: "first"},
