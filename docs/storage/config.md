@@ -90,7 +90,9 @@ auto-created — a missing explicit directory remains a hard error
 
 `additional_prompts_dirs` entries are appended after the primary global source.
 Missing additional directories are skipped at runtime and reported as doctor
-warnings. Duplicate prompt IDs within the global tier are hard errors.
+warnings. Duplicate prompt IDs within the global tier are hard errors. See
+[Organizing prompt sources](prompt-store.md#organizing-prompt-sources) for the
+recommended multi-source (synced directories) workflow.
 
 ## Source resolution order
 

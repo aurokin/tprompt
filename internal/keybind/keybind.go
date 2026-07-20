@@ -42,7 +42,12 @@ func (e *DuplicateKeybindError) Error() string {
 	if len(e.Paths) == 0 {
 		return fmt.Sprintf("duplicate keybind %q declared", string(e.Key))
 	}
-	return fmt.Sprintf("duplicate keybind %q declared by: %s", string(e.Key), strings.Join(e.Paths, ", "))
+	var b strings.Builder
+	fmt.Fprintf(&b, "duplicate keybind %q declared by:", string(e.Key))
+	for _, path := range e.Paths {
+		fmt.Fprintf(&b, "\n- %s", path)
+	}
+	return b.String()
 }
 
 // ReservedKeybindError reports a frontmatter key colliding with a reserved

@@ -109,9 +109,10 @@ On startup, list, send, or doctor, the tool should detect collisions and return 
 Example:
 
 ```text
-Duplicate prompt ID detected: code-review
+duplicate prompt ID detected: code-review
 - /home/user/.config/tprompt/prompts/agents/code-review.md
 - /home/user/.config/tprompt/prompts/reviews/code-review.md
+prompt IDs are filename stems and must be unique; rename one file to resolve
 ```
 
 Implementations must not silently disambiguate duplicate IDs.
@@ -487,3 +488,25 @@ files. The contract is locked:
   is a terminal and the **bare path** when piped/redirected. The bare-path form is
   the unchanged scripting contract; the friendly form replaces the old
   path-on-stdout + hint-on-stderr pair, which repeated the path in a terminal.
+
+### 36. Composable prompt sources, no new mechanism
+
+- **Sync topology is the consumer's business.** Prompts sync across machines
+  through whatever channels the user runs (public dotfiles, private overlay,
+  work repo; stow, git, rsync). tprompt never learns about those tools; its
+  contract is to compose N sources into one store deterministically and fail
+  legibly on conflict.
+- **The composition surface is the existing config, blessed as the feature:**
+  `prompts_dir` (primary global source and the write target for `tprompt new`
+  / `import`), `additional_prompts_dirs` (any number of extra global sources,
+  optional-when-missing, order semantically meaningless), and `prompt_priority`
+  (cross-tier only). Subdirectories inside a source stay free-form and never
+  affect IDs (§3).
+- **Rejected non-features** (not deferrals): named/labeled source tables in
+  config, per-source priority or enable flags, and intra-tier overriding. All
+  global sources are one tier; a duplicate stem or `key:` within it stays a
+  hard error (§4, §18) — rename-on-collision is the accepted resolution,
+  forever. Collision errors must name every offending absolute path.
+- **A source path that is itself a symlink is resolved before discovery** so a
+  symlinked source directory (the common dotfiles shape) discovers normally.
+  Deeper in-walk symlink following stays unsupported.

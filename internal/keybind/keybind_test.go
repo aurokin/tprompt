@@ -88,6 +88,20 @@ func TestResolveRejectsDuplicateKeybindCaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestDuplicateKeybindErrorNamesAllPaths(t *testing.T) {
+	err := &DuplicateKeybindError{
+		Key:   'c',
+		IDs:   []string{"alpha", "bravo"},
+		Paths: []string{"/prompts/alpha.md", "/prompts/bravo.md"},
+	}
+	want := "duplicate keybind \"c\" declared by:\n" +
+		"- /prompts/alpha.md\n" +
+		"- /prompts/bravo.md"
+	if got := err.Error(); got != want {
+		t.Fatalf("Error() = %q, want %q", got, want)
+	}
+}
+
 func TestResolveRejectsReservedKeyCollision(t *testing.T) {
 	_, err := Resolve(
 		[]Input{{ID: "alpha", Key: "P", HasKey: true, Path: "/prompts/alpha.md"}},

@@ -67,6 +67,7 @@ belong in Linear milestones, not in the repo.
 ## I Want To Change Prompt Storage Or Config
 
 - [Prompt store](storage/prompt-store.md) - discovery, frontmatter, IDs, shadowing, keybinds, and template variables.
+- [Organizing prompt sources](storage/prompt-store.md#organizing-prompt-sources) - composing multiple synced source directories into one store.
 - [Config](storage/config.md) - config fields, defaults, and validation.
 - [Clipboard](storage/clipboard.md) - same-host clipboard detection and validation.
 - [Testing harness](testing/harness.md) - store/config/clipboard proof surfaces.

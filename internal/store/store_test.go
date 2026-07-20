@@ -125,6 +125,69 @@ func TestFSStoreDetectsDuplicatePromptIDs(t *testing.T) {
 	}
 }
 
+func TestDuplicatePromptIDErrorNamesAllPaths(t *testing.T) {
+	err := &DuplicatePromptIDError{
+		ID:    "code-review",
+		Paths: []string{"/prompts/agents/code-review.md", "/prompts/reviews/code-review.md"},
+	}
+	want := "duplicate prompt ID detected: code-review\n" +
+		"- /prompts/agents/code-review.md\n" +
+		"- /prompts/reviews/code-review.md\n" +
+		"prompt IDs are filename stems and must be unique; rename one file to resolve"
+	if got := err.Error(); got != want {
+		t.Fatalf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestFSStoreDiscoversThroughSymlinkedRoot(t *testing.T) {
+	target := t.TempDir()
+	writePrompt(t, target, "alpha.md", "body\n")
+	link := filepath.Join(t.TempDir(), "prompts")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("Symlink(): %v", err)
+	}
+
+	store := NewFS(link, nil, []rune("1"))
+	if err := store.Discover(); err != nil {
+		t.Fatalf("Discover(): %v", err)
+	}
+	summaries, err := store.List()
+	if err != nil {
+		t.Fatalf("List(): %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].ID != "alpha" {
+		t.Fatalf("summaries = %+v, want one prompt with ID alpha", summaries)
+	}
+}
+
+func TestCountPromptFiles(t *testing.T) {
+	dir := t.TempDir()
+	writePrompt(t, dir, "alpha.md", "a\n")
+	writePrompt(t, dir, filepath.Join("nested", "bravo.md"), "b\n")
+	writePrompt(t, dir, filepath.Join(".hidden", "charlie.md"), "c\n")
+	writePrompt(t, dir, "notes.txt", "not a prompt\n")
+
+	count, err := CountPromptFiles(promptsource.Source{Path: dir, Scope: promptsource.ScopeGlobal})
+	if err != nil {
+		t.Fatalf("CountPromptFiles(): %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("count = %d, want 2", count)
+	}
+
+	missing, err := CountPromptFiles(promptsource.Source{
+		Path:     filepath.Join(dir, "absent"),
+		Scope:    promptsource.ScopeGlobal,
+		Optional: true,
+	})
+	if err != nil {
+		t.Fatalf("CountPromptFiles(missing optional): %v", err)
+	}
+	if missing != 0 {
+		t.Fatalf("missing optional count = %d, want 0", missing)
+	}
+}
+
 func TestFSStoreSurfacesKeybindValidationErrors(t *testing.T) {
 	tests := []struct {
 		name     string
