@@ -110,9 +110,20 @@ func checkPromptSource(w io.Writer, cfg config.Resolved, source promptsource.Sou
 		printFail(w, missingErr.Error())
 		return missingErr
 	}
-	printOK(w, fmt.Sprintf("prompts directory exists (scope %s, %s) %s",
-		source.Scope, path, sourceOriginLabel(source, cfg)))
+	printOK(w, fmt.Sprintf("prompts directory exists (scope %s, %s) %s%s",
+		source.Scope, path, sourceOriginLabel(source, cfg), sourcePromptCount(source)))
 	return nil
+}
+
+// sourcePromptCount renders the per-source prompt count so a post-sync doctor
+// run shows which source changed. Count failures are omitted rather than
+// failing the check — discovery reports them with full context.
+func sourcePromptCount(source promptsource.Source) string {
+	count, err := store.CountPromptFiles(source)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf(" (%d prompts)", count)
 }
 
 func reportPromptSourceStatError(w io.Writer, cfg config.Resolved, source promptsource.Source, err error) error {

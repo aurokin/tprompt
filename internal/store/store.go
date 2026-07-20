@@ -74,7 +74,13 @@ type DuplicatePromptIDError struct {
 }
 
 func (e *DuplicatePromptIDError) Error() string {
-	return fmt.Sprintf("duplicate prompt ID detected: %s: %s", e.ID, strings.Join(e.Paths, ", "))
+	var b strings.Builder
+	fmt.Fprintf(&b, "duplicate prompt ID detected: %s", e.ID)
+	for _, path := range e.Paths {
+		fmt.Fprintf(&b, "\n- %s", path)
+	}
+	b.WriteString("\nprompt IDs are filename stems and must be unique; rename one file to resolve")
+	return b.String()
 }
 
 // InvalidPromptModeError reports an unsupported frontmatter mode default.
@@ -206,7 +212,33 @@ func prepareSource(source promptsource.Source) (string, bool, error) {
 	if !info.IsDir() {
 		return "", false, &PromptsDirMissingError{Path: root}
 	}
-	return root, true, nil
+	return resolveSymlinkRoot(root)
+}
+
+// resolveSymlinkRoot resolves root when the path itself is a symlink (e.g. a
+// stow-managed source directory). WalkDir lstats its root, so an unresolved
+// symlink root would silently discover zero prompts. Paths whose final
+// component is a real directory are returned unchanged.
+func resolveSymlinkRoot(root string) (string, bool, error) {
+	info, err := os.Lstat(root)
+	if err != nil {
+		return "", false, fmt.Errorf("stat prompts directory %s: %w", root, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return root, true, nil
+	}
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve prompts directory %s: %w", root, err)
+	}
+	resolvedInfo, err := os.Stat(resolved)
+	if err != nil {
+		return "", false, fmt.Errorf("stat prompts directory %s: %w", resolved, err)
+	}
+	if !resolvedInfo.IsDir() {
+		return "", false, &PromptsDirMissingError{Path: root}
+	}
+	return resolved, true, nil
 }
 
 func (s *FSStore) Discover() error {
@@ -412,6 +444,39 @@ func discoverPromptFiles(root string, source promptsource.Source) ([]discoveredP
 	return entries, nil
 }
 
+// CountPromptFiles counts the markdown files discovery would consider in
+// source, without parsing them, so doctor can report per-source counts even
+// when a file would fail validation. A missing optional source counts as zero.
+func CountPromptFiles(source promptsource.Source) (int, error) {
+	root, exists, err := prepareSource(normalizeSource(source))
+	if err != nil {
+		return 0, err
+	}
+	if !exists {
+		return 0, nil
+	}
+	count := 0
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if shouldSkipPath(root, path, d) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.IsDir() && filepath.Ext(path) == ".md" {
+			count++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func promptFileWalker(root string, source promptsource.Source, entries *[]discoveredPrompt) fs.WalkDirFunc {
 	return func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -487,6 +552,8 @@ func readPromptFile(path string) ([]byte, error) {
 }
 
 func validateUniqueIDs(entries []discoveredPrompt) error {
+	// Invariant: every path sharing the duplicated stem is aggregated before
+	// erroring, so the error names all N colliding files, not the first pair.
 	byID := make(map[string][]string)
 	for _, entry := range entries {
 		byID[entry.prompt.ID] = append(byID[entry.prompt.ID], entry.prompt.Path)

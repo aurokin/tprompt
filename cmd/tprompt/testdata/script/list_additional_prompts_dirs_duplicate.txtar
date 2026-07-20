@@ -3,9 +3,10 @@
 mkdir prompts
 mkdir team-prompts
 ! tprompt list --config config.toml
-stderr 'duplicate prompt ID detected: alpha:'
-stderr 'prompts/alpha\.md'
-stderr 'team-prompts/alpha\.md'
+stderr 'duplicate prompt ID detected: alpha'
+stderr '- .*prompts/alpha\.md'
+stderr '- .*team-prompts/alpha\.md'
+stderr 'rename one file to resolve'
 ! stdout .
 
 -- config.toml --

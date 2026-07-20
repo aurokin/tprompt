@@ -14,7 +14,14 @@ tracker; planned work lives in Linear.
 - Prompt IDs are derived from the filename stem only.
 - Directories are organizational only and do not namespace IDs.
 - Duplicate filename-stem IDs within the same tier are invalid and must fail
-  with clear conflicting paths.
+  with an error naming every conflicting path (one per line). Duplicate
+  frontmatter `key:` declarations report the same all-paths shape.
+- Multiple global sources compose into one tier organized however the user
+  likes: `additional_prompts_dirs` entries are optional (missing directories
+  are skipped with a doctor warning), source order carries no meaning, and a
+  source path that is itself a symlink is resolved before discovery. There is
+  no per-source priority and no intra-tier overriding. `tprompt doctor`
+  reports each source with a per-source prompt count.
 - Cross-tier global/project ID collisions are resolved by `prompt_priority`
   (`global` by default). The losing prompt is shadowed, remains visible in
   `list`, and remains searchable in the TUI.

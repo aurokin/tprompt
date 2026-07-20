@@ -524,6 +524,34 @@ func TestDoctorMissingAdditionalPromptsDirIsWarning(t *testing.T) {
 	assertContains(t, stdout, "warn 0 prompts discovered (run 'tprompt new <id>' to create one)")
 }
 
+func TestDoctorReportsPerSourcePromptCounts(t *testing.T) {
+	primary := t.TempDir()
+	additional := t.TempDir()
+	if err := os.WriteFile(filepath.Join(primary, "alpha.md"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"bravo.md", "charlie.md"} {
+		if err := os.WriteFile(filepath.Join(additional, name), []byte("b\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fs := &fakeStore{summaries: []store.Summary{{ID: "alpha"}}}
+	deps := workingDeps(t, fs)
+	deps.LoadConfig = func(string) (config.Resolved, error) {
+		return config.Resolved{
+			PromptsDir:            primary,
+			AdditionalPromptsDirs: []string{additional},
+		}, nil
+	}
+
+	stdout, _, err := executeRootWith(t, deps, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertContains(t, stdout, "ok   prompts directory exists (scope global, "+primary+") [explicit] (1 prompts)")
+	assertContains(t, stdout, "ok   prompts directory exists (scope global, "+additional+") [additional] (2 prompts)")
+}
+
 func TestDoctorAdditionalPromptsDirThatIsFileIsFailure(t *testing.T) {
 	primary := t.TempDir()
 	fileSource := filepath.Join(t.TempDir(), "team-prompts")

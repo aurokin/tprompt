@@ -88,7 +88,9 @@ delivery-layer exit 6 is the wrong bucket.
 
 ```text
 Unable to deliver prompt 'code-review': target pane %12 no longer exists
-Duplicate keybind 'c' declared by: /prompts/agents/code-review.md, /prompts/review/commit.md
+Duplicate keybind 'c' declared by:
+- /prompts/agents/code-review.md
+- /prompts/review/commit.md
 Invalid frontmatter key 'ctrl+x' in /prompts/review/commit.md: must be a single printable character
 No clipboard reader available; install pbpaste, wl-paste, xclip, or xsel, or set `clipboard_read_command`
 Clipboard content exceeds max_paste_bytes (4823104 > 2097152)

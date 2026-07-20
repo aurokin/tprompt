@@ -25,7 +25,60 @@ Directories do not contribute to the ID.
 
 Prompt discovery must detect duplicate stems.
 
-This is a hard error, not a warning.
+This is a hard error, not a warning. The error names every conflicting path:
+
+```text
+duplicate prompt ID detected: code-review
+- /home/user/.config/tprompt/prompts/agents/code-review.md
+- /home/user/team-prompts/code-review.md
+prompt IDs are filename stems and must be unique; rename one file to resolve
+```
+
+Duplicate frontmatter `key:` declarations report the same all-paths shape.
+
+## Organizing prompt sources
+
+The store composes any number of prompt sources; how those directories are
+created, named, and synced is entirely the consumer's business (DECISIONS.md
+§36). tprompt knows nothing about stow, git, or dotfiles — it only merges
+sources and fails legibly on conflict. The composition surface is three
+existing config keys:
+
+- `prompts_dir` — the primary global source **and the write target for
+  `tprompt new` / `tprompt import`**. Recommended topology: point it at your
+  main *synced* prompts directory (e.g. a dotfiles-managed path) so authored
+  prompts sync by default.
+- `additional_prompts_dirs` — one entry per additional channel (private
+  overlay, work repo, team repo). Entries are tilde-expanded and optional: a
+  missing directory is skipped and reported as a doctor warning, so one
+  `config.toml` works on machines that carry only a subset of sources. Order
+  is semantically meaningless — all global sources form one tier.
+- `prompt_priority` — cross-tier (global vs project) only; it never arbitrates
+  between global sources.
+
+Subdirectories inside any source remain free-form and never affect prompt IDs.
+A source path that is itself a symlink is resolved before discovery, so a
+symlinked source directory works; deeper in-walk symlinks are unsupported.
+
+Example — a public dotfiles source plus a work overlay (stow shown as one
+possible sync tool, not a dependency):
+
+```toml
+prompts_dir = "~/dotfiles/tprompt/prompts"        # main synced source, write target
+additional_prompts_dirs = ["~/work/prompts"]      # extra channel, optional
+```
+
+Workflow notes:
+
+- **After any sync changes a source, run `tprompt doctor`.** It reports each
+  source with its per-source prompt count and fails on collisions, so a bad
+  pull is caught before delivery.
+- **Collisions across sources are resolved by renaming.** All global sources
+  share one ID namespace; there is deliberately no per-source priority or
+  intra-tier overriding (rejected non-features, DECISIONS.md §36).
+- **Pin `key:` frontmatter for cross-machine muscle memory.** Auto-assigned
+  board keys depend on the full prompt set, so machines carrying different
+  source subsets assign different keys; explicit `key:` values stay put.
 
 ## Frontmatter
 
