@@ -160,6 +160,25 @@ func TestFSStoreDiscoversThroughSymlinkedRoot(t *testing.T) {
 	}
 }
 
+func TestFSStoreRejectsSymlinkedRootToFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.md")
+	if err := os.WriteFile(target, []byte("body\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(): %v", err)
+	}
+	link := filepath.Join(dir, "prompts")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("Symlink(): %v", err)
+	}
+
+	store := NewFS(link, nil, []rune("1"))
+	err := store.Discover()
+	var missingErr *PromptsDirMissingError
+	if !errors.As(err, &missingErr) {
+		t.Fatalf("want PromptsDirMissingError, got %T: %v", err, err)
+	}
+}
+
 func TestCountPromptFiles(t *testing.T) {
 	dir := t.TempDir()
 	writePrompt(t, dir, "alpha.md", "a\n")

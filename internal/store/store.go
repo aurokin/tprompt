@@ -231,6 +231,13 @@ func resolveSymlinkRoot(root string) (string, bool, error) {
 	if err != nil {
 		return "", false, fmt.Errorf("resolve prompts directory %s: %w", root, err)
 	}
+	resolvedInfo, err := os.Stat(resolved)
+	if err != nil {
+		return "", false, fmt.Errorf("stat prompts directory %s: %w", resolved, err)
+	}
+	if !resolvedInfo.IsDir() {
+		return "", false, &PromptsDirMissingError{Path: root}
+	}
 	return resolved, true, nil
 }
 
