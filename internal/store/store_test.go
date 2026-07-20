@@ -795,12 +795,15 @@ func TestMultiSourceStoreRejectsDuplicateIDsWithinOneSource(t *testing.T) {
 func TestMultiSourceStoreRejectsCrossGlobalDuplicateIDs(t *testing.T) {
 	primary := t.TempDir()
 	additional := t.TempDir()
+	third := t.TempDir()
 	writePrompt(t, primary, "alpha.md", "primary\n")
 	writePrompt(t, additional, "alpha.md", "additional\n")
+	writePrompt(t, third, "alpha.md", "third\n")
 
 	store := NewMultiSource([]promptsource.Source{
 		{Path: primary, Scope: promptsource.ScopeGlobal},
 		{Path: additional, Scope: promptsource.ScopeGlobal, Optional: true},
+		{Path: third, Scope: promptsource.ScopeGlobal, Optional: true},
 	}, nil, []rune("1"))
 
 	err := store.Discover()
@@ -811,7 +814,11 @@ func TestMultiSourceStoreRejectsCrossGlobalDuplicateIDs(t *testing.T) {
 	if dupErr.ID != "alpha" {
 		t.Fatalf("ID = %q, want alpha", dupErr.ID)
 	}
-	wantPaths := sortedStrings([]string{filepath.Join(additional, "alpha.md"), filepath.Join(primary, "alpha.md")})
+	wantPaths := sortedStrings([]string{
+		filepath.Join(additional, "alpha.md"),
+		filepath.Join(primary, "alpha.md"),
+		filepath.Join(third, "alpha.md"),
+	})
 	if diff := cmp.Diff(wantPaths, dupErr.Paths); diff != "" {
 		t.Fatalf("Paths mismatch (-want +got):\n%s", diff)
 	}

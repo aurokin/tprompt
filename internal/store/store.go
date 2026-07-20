@@ -552,6 +552,8 @@ func readPromptFile(path string) ([]byte, error) {
 }
 
 func validateUniqueIDs(entries []discoveredPrompt) error {
+	// Invariant: every path sharing the duplicated stem is aggregated before
+	// erroring, so the error names all N colliding files, not the first pair.
 	byID := make(map[string][]string)
 	for _, entry := range entries {
 		byID[entry.prompt.ID] = append(byID[entry.prompt.ID], entry.prompt.Path)

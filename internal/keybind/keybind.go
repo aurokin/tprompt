@@ -124,6 +124,8 @@ func groupPrompts(prompts []Input, reserved map[rune]string) (map[rune][]Input, 
 	return frontmatterByKey, auto, nil
 }
 
+// bindFrontmatter runs after groupPrompts has grouped every declaration, so a
+// duplicate error names all N declaring paths, not the first pair.
 func bindFrontmatter(bindings map[rune]string, frontmatterByKey map[rune][]Input) error {
 	for _, key := range sortedKeys(frontmatterByKey) {
 		bound := frontmatterByKey[key]

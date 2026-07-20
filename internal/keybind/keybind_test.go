@@ -68,6 +68,7 @@ func TestResolveRejectsDuplicateKeybindCaseInsensitive(t *testing.T) {
 		[]Input{
 			{ID: "alpha", Key: "C", HasKey: true, Path: "/prompts/alpha.md"},
 			{ID: "bravo", Key: "c", HasKey: true, Path: "/prompts/bravo.md"},
+			{ID: "charlie", Key: "c", HasKey: true, Path: "/prompts/charlie.md"},
 		},
 		nil,
 		nil,
@@ -83,7 +84,8 @@ func TestResolveRejectsDuplicateKeybindCaseInsensitive(t *testing.T) {
 	if dupErr.Key != 'c' {
 		t.Fatalf("Key = %q, want %q", string(dupErr.Key), "c")
 	}
-	if diff := cmp.Diff([]string{"/prompts/alpha.md", "/prompts/bravo.md"}, dupErr.Paths); diff != "" {
+	want := []string{"/prompts/alpha.md", "/prompts/bravo.md", "/prompts/charlie.md"}
+	if diff := cmp.Diff(want, dupErr.Paths); diff != "" {
 		t.Fatalf("Paths mismatch (-want +got):\n%s", diff)
 	}
 }
