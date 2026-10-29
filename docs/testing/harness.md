@@ -14,8 +14,8 @@ mirror private helper structure.
   tmux command shape, rendered TUI behavior, or stored prompt metadata.
 - Prefer the narrowest seam that proves the contract: pure unit test, fake
   runner/client, Unix socket round trip, testscript, then live tmux smoke.
-- Keep planning artifacts out of the repo. Put PRDs and issue splits in Linear;
-  keep repo docs focused on contracts, invariants, interfaces, and proof.
+- Keep in-flight planning in GitHub issues (PRDs, issue splits); keep repo
+  docs focused on contracts, invariants, interfaces, and proof.
 - When a contract changes, update three things together: the user-facing doc,
   the implementation seam, and the proof surface.
 - Do not assert private helper structure unless the helper is the seam being

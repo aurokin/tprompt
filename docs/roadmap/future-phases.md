@@ -1,7 +1,7 @@
 # Deferred Ideas
 
-Execution tracking and prioritized roadmap work live in Linear. This file only
-records product ideas that are intentionally outside the current repo contract.
+Active work is tracked in GitHub issues. This file only records product ideas
+that are intentionally outside the current repo contract.
 
 ## Deferred Product Ideas
 
@@ -22,5 +22,5 @@ records product ideas that are intentionally outside the current repo contract.
 - web or desktop management UI
 - stdin as a source for arbitrary delivery
 
-Do not implement these from repo docs alone. Promote an idea into Linear first,
-with a scoped contract and proof surface.
+Do not implement these from repo docs alone. Promote an idea into a GitHub
+issue first, with a scoped contract and proof surface.

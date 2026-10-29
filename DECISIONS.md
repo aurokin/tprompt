@@ -240,6 +240,8 @@ Users can override via `clipboard_read_command` in `config.toml`. `doctor` repor
 
 Originally defaulted to `off` on a fail-open posture: assume the user has authored their own prompts and pasted their own clipboards, no sanitization needed. Revisited after AUR-162 demonstrated that an embedded bracketed-paste end terminator (`ESC[201~`) escapes the delivery wrapper and lets subsequent bytes execute as raw keystrokes — a real footgun, not a theoretical one. AUR-161 flipped the default so the standard install ships with the dangerous-class denylist active. `off` remains available for users who legitimately need raw passthrough.
 
+Repro that drove the revisit (macOS manual QA, old defaults): `pbcopy < /bin/ls` (pbcopy transcodes the ~170 KB binary into valid UTF-8, so the UTF-8 check passes), then `tprompt paste --target-pane <sink>` reported success while the sink shell executed fragments of the payload as commands (`zsh: command not found: …`). The clipboard is untrusted input and the popup binding is one keystroke with no review, so "informed users will set their own defaults" is not a defensible posture for a tool whose job is writing bytes into a tty. A smaller default size cap (64 KiB) was also proposed but not adopted: `max_paste_bytes` stays a 2 MiB guard against accidental large pastes (§22, `docs/storage/config.md`), and sanitization is the defense against hostile content. Regression coverage for stripping embedded terminators lives in `internal/sanitize/sanitize_test.go`.
+
 ### 25. Search is fuzzy, scope-limited
 
 Search uses fuzzy (fzf-style) matching over `id + title + description + tags`, ranked id-first. Body content is **not** searched.
@@ -510,3 +512,15 @@ files. The contract is locked:
 - **A source path that is itself a symlink is resolved before discovery** so a
   symlinked source directory (the common dotfiles shape) discovers normally.
   Deeper in-walk symlink following stays unsupported.
+
+### 37. `tprompt new` scaffolds delivery fields as empty stubs, never concrete defaults
+
+The scaffold writes `mode:` and `enter:` with no value. Emitting the inherited
+defaults (`mode: paste`, `enter: false`) to "document" them was proposed (AUR-182)
+and rejected: delivery precedence is built-in → config → frontmatter → flags, so a
+literal frontmatter value is an override, not documentation. A user with
+`default_mode = "type"` would silently get paste-mode prompts from every new
+scaffold, breaking the empty-value tolerance contract (an empty field defers to
+config). Any future affordance that surfaces inherited defaults must not write
+values into frontmatter (for example a YAML comment, or a separate command that
+explains resolved defaults).

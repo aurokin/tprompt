@@ -33,10 +33,10 @@ Testscripts in `cmd/tprompt/testdata/script/*.txtar` exec real `tmux`. Confirm w
 
 ## Workflow
 
-- Pick up a Linear issue (project Tprompt, team Aurokin). Branch name is the lowercase issue identifier (e.g., `aur-160`). Do not append the issue title slug.
+- Track work in GitHub issues; deferred product ideas live in [docs/roadmap/future-phases.md](docs/roadmap/future-phases.md).
+- Use a short descriptive branch name (e.g., `fix/paste-size-cap`). When the work has a GitHub issue, reference it in the PR body (`Closes #N`) so merging closes it.
 - One vertical slice per PR; tests accompany code.
-- After merging, mark the Linear issue Done.
-- Planning artifacts (PRDs, issue breakdowns) live in the Linear milestone description, not in the repo.
+- Scope larger work in the GitHub issue (problem, decisions, slices). Settled outcomes belong in `DECISIONS.md`, `EXPECTATIONS.md`, and the subsystem docs, not in planning files. Past milestone PRDs are archived in [docs/archive/](docs/archive/README.md) for history.
 - Durable repo docs are contracts, decisions, architecture, interfaces, and proof surfaces. Keep them progressively disclosed from `README.md` → `docs/README.md` → narrow subsystem docs.
 
 ## Git safety

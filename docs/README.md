@@ -4,10 +4,11 @@ These docs use progressive disclosure. Start from the intent that matches your
 work, read the narrowest contract first, then follow links only when you need
 deeper context.
 
-Execution tracking lives in Linear. This repository documents durable harness
+Work is tracked in GitHub issues. This repository documents durable harness
 engineering material: user-visible contracts, locked decisions, architecture,
-interfaces, failure semantics, and proof surfaces. PRDs and issue breakdowns
-belong in Linear milestones, not in the repo.
+interfaces, failure semantics, and proof surfaces. Scope and issue breakdowns
+for in-flight work belong in the GitHub issue; past milestone PRDs are kept
+for history in [archive/](archive/README.md).
 
 ## Documentation Rules
 
@@ -91,3 +92,4 @@ belong in Linear milestones, not in the repo.
 
 - [Locked decisions](../DECISIONS.md) - durable decisions that should not drift.
 - [Future phases](roadmap/future-phases.md) - intentionally deferred product ideas.
+- [Milestone PRD archive](archive/README.md) - condensed problem statements and locked decisions from past milestones.

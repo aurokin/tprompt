@@ -1,7 +1,7 @@
 # Behavior Contract
 
 This file defines the current product contract for `tprompt`. It is not a work
-tracker; planned work lives in Linear.
+tracker; planned work lives in GitHub issues.
 
 ## Prompt Resolution
 
